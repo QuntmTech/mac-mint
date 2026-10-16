@@ -4,13 +4,16 @@ public actor AppScanner {
   private let fileManager: FileManager
   private let homeDirectory: URL
   private let applicationRoots: [URL]
+  private let usage: any UsageProviding
 
   public init(
     fileManager: FileManager = .default,
     homeDirectory: URL? = nil,
-    applicationRoots: [URL]? = nil
+    applicationRoots: [URL]? = nil,
+    usage: any UsageProviding = SpotlightUsage()
   ) {
     self.fileManager = fileManager
+    self.usage = usage
     let home = homeDirectory ?? fileManager.homeDirectoryForCurrentUser
     self.homeDirectory = home
     self.applicationRoots =
@@ -176,7 +179,8 @@ public actor AppScanner {
       version: version,
       bundleSize: FileSystem.itemSize(at: url, fileManager: fileManager),
       lastModified: modified,
-      identity: FileSystem.fileIdentity(at: url)
+      identity: FileSystem.fileIdentity(at: url),
+      lastUsed: usage.evidence(for: url).lastUsed
     )
   }
 

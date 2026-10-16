@@ -51,7 +51,10 @@ struct MacCleanerDesktopApp: App {
         }
       }
       CommandMenu("Scan") {
-        Button("Smart Scan") { model.runSmartScan() }
+        Button("Smart Care") {
+          model.selectedSection = .dashboard
+          model.runSmartCare()
+        }
           .keyboardShortcut("r", modifiers: [.command])
           .disabled(!account.isUnlocked)
         Button("Map Storage") {

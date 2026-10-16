@@ -19,6 +19,7 @@ struct ApplicationsView: View {
     case name = "Name"
     case size = "Size"
     case recent = "Modified"
+    case lastOpened = "Last opened"
     var id: String { rawValue }
   }
 
@@ -40,6 +41,11 @@ struct ApplicationsView: View {
     case .recent:
       return filtered.sorted {
         ($0.lastModified ?? .distantPast) > ($1.lastModified ?? .distantPast)
+      }
+    case .lastOpened:
+      // Longest unused first; unknown (no Spotlight record) last — unknown is never "unused".
+      return filtered.sorted {
+        ($0.lastUsed ?? .distantFuture) < ($1.lastUsed ?? .distantFuture)
       }
     }
   }
@@ -94,7 +100,13 @@ struct ApplicationsView: View {
           Picker("Sort", selection: $sort) {
             ForEach(AppSort.allCases) { item in Text(item.rawValue).tag(item) }
           }
-          .frame(width: 112)
+          .frame(width: 140)
+          .onAppear {
+            if model.applicationsSortByLastOpened {
+              sort = .lastOpened
+              model.applicationsSortByLastOpened = false
+            }
+          }
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
@@ -125,6 +137,12 @@ struct ApplicationsView: View {
               }
               .font(.caption2)
               .foregroundStyle(.secondary)
+              if let lastUsed = app.lastUsed {
+                let days = Int(Date().timeIntervalSince(lastUsed) / 86_400)
+                Text(days < 1 ? "Opened today" : "Opened \(RelativeAge.describe(days: days)) ago")
+                  .font(.caption2)
+                  .foregroundStyle(days >= 180 ? Color.orange : Color.secondary)
+              }
             }
             Spacer()
           }

@@ -36,12 +36,24 @@ struct DashboardView: View {
 
         trashCard
 
+        if !model.recommendations.isEmpty {
+          SmartCareList()
+        }
+
+        SpaceHistoryCard()
+
         moduleGrid
 
-        cleanupPreview
+        if model.recommendations.isEmpty {
+          cleanupPreview
+        }
       }
       .padding(AppTheme.pagePadding)
-      .onAppear { model.refreshTrashStatus() }
+      .onAppear {
+        model.refreshTrashStatus()
+        model.recordFreeSpace()
+        model.refreshRecommendations()
+      }
     }
   }
 
@@ -68,10 +80,10 @@ struct DashboardView: View {
             }
           }
 
-          Text("Smart Scan")
+          Text("Smart Care")
             .font(.system(size: 34, weight: .bold, design: .rounded))
           Text(
-            "A transparent cleanup pass that shows what is safe, what needs review, and what the app refuses to touch before anything changes."
+            "One pass over caches, apps, developer data, Downloads, and leftovers — ranked by how much space each frees and how sure MacMint is. Nothing changes until you review it."
           )
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -80,9 +92,9 @@ struct DashboardView: View {
 
           HStack(spacing: 10) {
             Button {
-              model.runSmartScan()
+              model.runSmartCare()
             } label: {
-              Label(model.isScanning ? "Scanning…" : "Run Smart Scan", systemImage: "sparkles")
+              Label(model.isScanning ? "Scanning…" : "Run Smart Care", systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -91,6 +103,12 @@ struct DashboardView: View {
             if model.isScanning {
               Button("Cancel") { model.cancelCurrentOperation() }
                 .controlSize(.large)
+            } else if model.safeRecommendationBytes > 0 {
+              Button("Review Safe Items (\(ByteFormatter.string(model.safeRecommendationBytes)))") {
+                model.reviewAllSafe()
+              }
+              .controlSize(.large)
+              .help("Caches, build data, and firmware that rebuild or re-download automatically")
             } else if model.selectedCleanupBytes > 0 {
               Button("Review & Clean \(ByteFormatter.string(model.selectedCleanupBytes))") {
                 model.reviewCleanup()
@@ -167,6 +185,13 @@ struct DashboardView: View {
         value: model.storageScan.map { ByteFormatter.string($0.root.allocatedBytes) + " mapped" }
           ?? "Map my Mac",
         section: .storage)
+      moduleCard(
+        title: "Downloads",
+        detail: "Big downloads you never opened, using Spotlight's record of what you've used.",
+        icon: "arrow.down.circle",
+        value: model.downloadsScanned
+          ? ByteFormatter.string(model.downloadItems.reduce(0) { $0 + $1.bytes }) + " idle" : "Check Downloads",
+        section: .downloads)
       moduleCard(
         title: "Photos",
         detail: "Similar shots, blurry photos, and old screenshots — the best shot is always kept.",

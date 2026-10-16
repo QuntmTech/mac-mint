@@ -34,12 +34,13 @@ extension AppViewModel {
       + queuedDevItems.compactMap(PlanItem.developer)
       + queuedPhotoFileItems.items
       + queuedOrphans.map(PlanItem.orphan)
+      + queuedDownloads.map(PlanItem.download)
   }
 
   var queuedCount: Int {
     queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
       + queuedStorageNodes.count + queuedDevItems.count + queuedPhotoFileItems.items.count
-      + queuedOrphans.count
+      + queuedOrphans.count + queuedDownloads.count
   }
 
   var queuedBytes: Int64 {
@@ -62,6 +63,7 @@ extension AppViewModel {
     selectedDevIDs.remove(path)
     selectedPhotoIDs.remove(path)
     selectedOrphanIDs.remove(path)
+    selectedDownloadIDs.remove(path)
   }
 
   func clearQueue() {
@@ -72,6 +74,7 @@ extension AppViewModel {
     selectedDevIDs = []
     selectedPhotoIDs = []
     selectedOrphanIDs = []
+    selectedDownloadIDs = []
   }
 
   // MARK: Building plans
@@ -109,6 +112,7 @@ extension AppViewModel {
         + model.queuedStorageNodes.map(PlanItem.storage)
         + model.queuedDevItems.compactMap(PlanItem.developer)
         + model.queuedPhotoFileItems.items + model.queuedOrphans.map(PlanItem.orphan)
+        + model.queuedDownloads.map(PlanItem.download)
       return OperationPlanner.plan(
         title: "Review queue", items: items, ignoredPaths: model.ignoredPaths,
         excluded: duplicates.skipped)
@@ -253,6 +257,10 @@ extension AppViewModel {
     removePhotos { !$0.isLibraryAsset && gone($0.url) }
     orphans.removeAll { gone($0.url) }
     selectedOrphanIDs.formIntersection(orphans.map(\.id))
+    downloadItems.removeAll { gone($0.url) }
+    selectedDownloadIDs.formIntersection(downloadItems.map(\.id))
+    refreshRecommendations()
+    recordFreeSpace()
     cleanupTargets.removeAll { gone($0.url) }
     largeFiles.removeAll { gone($0.url) }
     selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))

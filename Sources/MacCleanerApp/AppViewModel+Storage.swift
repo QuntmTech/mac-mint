@@ -44,6 +44,7 @@ extension AppViewModel {
       storageScan = scan
       storagePath = nil
       selectedStoragePaths = []
+      if !scan.coverage.wasCancelled { recordStorageSnapshot(scan.root) }
       scanIssues = scan.coverage.inaccessiblePaths.prefix(200).map {
         ScanIssue(area: "Storage", path: $0, message: "Could not be read; its size is not included.")
       }

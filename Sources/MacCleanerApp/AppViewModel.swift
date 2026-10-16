@@ -11,6 +11,7 @@ final class AppViewModel: ObservableObject {
     case cleaner = "Cleaner"
     case storage = "Storage"
     case developer = "Developer & AI"
+    case downloads = "Downloads"
     case photos = "Photos"
     case removedApps = "Removed Apps"
     case performance = "Performance"
@@ -30,6 +31,7 @@ final class AppViewModel: ObservableObject {
       case .cleaner: return "trash.circle"
       case .storage: return "chart.pie"
       case .developer: return "hammer"
+      case .downloads: return "arrow.down.circle"
       case .photos: return "photo.on.rectangle.angled"
       case .removedApps: return "folder.badge.questionmark"
       case .performance: return "gauge.with.dots.needle.33percent"
@@ -81,6 +83,14 @@ final class AppViewModel: ObservableObject {
   @Published var selectedOrphanIDs: Set<String> = []
   @Published var orphansScanned = false
   @Published var trashStatus: TrashBinService.Status?
+  @Published var recommendations: [Recommendation] = []
+  @Published var smartCareRanAt: Date?
+  @Published var downloadItems: [DownloadItem] = []
+  @Published var selectedDownloadIDs: Set<String> = []
+  @Published var downloadsScanned = false
+  @Published var spaceHistory: [SpaceSample] = []
+  @Published var storageGrowth: [StorageGrowth] = []
+  @Published var applicationsSortByLastOpened = false
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?
