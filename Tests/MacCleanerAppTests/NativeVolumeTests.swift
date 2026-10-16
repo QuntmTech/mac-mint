@@ -54,12 +54,14 @@ final class NativeVolumeTests: XCTestCase {
     XCTAssertFalse(policy.reviewedFileDecision(for: personal).allowed)
     let item = PlanItem(url: mount, displayName: "mounted filesystem", kind: .reviewedFile,
       expectedBytes: 0, reason: "Test", source: "Test", identity: FileSystem.fileIdentity(at: mount))
-    let plan = OperationPlanner.plan(title: "Test", items: [item], safetyPolicy: policy)
-    XCTAssertTrue(plan.items.isEmpty)
+    let plan = OperationPlanner.plan(title: "Test", items: [item])
+    let trash = UnexpectedVolumeTrash()
+    let direct = await OperationExecutor(trashService: trash, safetyPolicy: policy).run(plan)
+    XCTAssertTrue(direct.moved.isEmpty)
+    XCTAssertTrue(direct.problems.first?.message?.contains("mounted volume") == true)
     let ancestor = PlanItem(url: container, displayName: "container", kind: .reviewedFile,
       expectedBytes: 0, reason: "Test", source: "Test", identity: FileSystem.fileIdentity(at: container))
-    let ancestorPlan = OperationPlanner.plan(title: "Test", items: [ancestor], safetyPolicy: policy)
-    let trash = UnexpectedVolumeTrash()
+    let ancestorPlan = OperationPlanner.plan(title: "Test", items: [ancestor])
     let result = await OperationExecutor(trashService: trash, safetyPolicy: policy).run(ancestorPlan)
     XCTAssertEqual(result.moved.count, 0)
     XCTAssertTrue(result.problems.first?.message?.contains("mounted volume") == true)
@@ -69,7 +71,7 @@ final class NativeVolumeTests: XCTestCase {
 
     let staleItem = PlanItem(url: personal, displayName: "allowed.txt", kind: .reviewedFile,
       expectedBytes: 3, reason: "Test", source: "Test", identity: FileSystem.fileIdentity(at: personal))
-    let stalePlan = OperationPlanner.plan(title: "Test", items: [staleItem], safetyPolicy: mountedHome)
+    let stalePlan = OperationPlanner.plan(title: "Test", items: [staleItem])
     XCTAssertEqual(stalePlan.items.count, 1)
     _ = try command(["detach", try XCTUnwrap(attachedDevice)])
     attachedDevice = nil
