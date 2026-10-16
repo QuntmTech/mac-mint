@@ -229,7 +229,7 @@ extension AppViewModel {
     let excluded = ignoredPaths
     let executor = OperationExecutor(
       trashService: MacTrashService(), safetyPolicy: safetyPolicy,
-      journalDirectory: AppPaths.journalDirectory,
+      journalDirectory: operationJournalDirectory,
       isAppRunning: { bundleID in
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
       })
@@ -253,7 +253,7 @@ extension AppViewModel {
     var recoveryIssues: [ScanIssue] = []
     let historySaved = await record(report.historyEntry())
     if historySaved {
-      do { try OperationJournal.acknowledge(report.id, in: AppPaths.journalDirectory) }
+      do { try OperationJournal.acknowledge(report.id, in: operationJournalDirectory) }
       catch { recoveryIssues.append(ScanIssue(area: "Recovery", path: nil, message: "History is saved; the journal will be checked again next launch.")) }
     }
     applyMoved(report)
@@ -317,18 +317,18 @@ extension AppViewModel {
 
   /// Called at launch: operations that never finished are recorded so nothing goes unexplained.
   func recoverInterruptedOperations() async {
-    recoveryWarnings += await RestoreCoordinator.recover(in: AppPaths.restoreJournalDirectory, history: historyStore)
+    recoveryWarnings += await RestoreCoordinator.recover(in: restoreJournalDirectory, history: historyStore)
     history = await historyStore.load()
-    recoveryWarnings += OperationJournal.unreadableJournals(in: AppPaths.journalDirectory).map {
+    recoveryWarnings += OperationJournal.unreadableJournals(in: operationJournalDirectory).map {
       ScanIssue(area: "Recovery", path: $0.path, message: "An operation record could not be read. It has been preserved for diagnosis. Use Finder to inspect the original locations and Trash.")
     }
-    let reports = OperationJournal.recoverInterrupted(in: AppPaths.journalDirectory)
+    let reports = OperationJournal.recoverInterrupted(in: operationJournalDirectory)
     guard !reports.isEmpty else { return }
     var committed = 0
     for report in reports {
       if await record(report.historyEntry()) {
         committed += 1
-        try? OperationJournal.acknowledge(report.id, in: AppPaths.journalDirectory)
+        try? OperationJournal.acknowledge(report.id, in: operationJournalDirectory)
       } else {
         recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
           message: "An operation could not be committed to History. Its journal is retained; check the original locations and Trash."))
@@ -354,7 +354,7 @@ extension AppViewModel {
       guard let self else { return }
       var restored: [String] = []
       var conflicts: [RestoreConflict] = []
-      let recovery = RestoreCoordinator(journalDirectory: AppPaths.restoreJournalDirectory, history: historyStore)
+      let recovery = RestoreCoordinator(journalDirectory: restoreJournalDirectory, history: historyStore)
       for (index, receipt) in receipts.enumerated() {
         if Task.isCancelled { break }
         operationProgress = OperationProgress(completed: index, total: receipts.count,
@@ -397,7 +397,7 @@ extension AppViewModel {
         self.isWorking = true
         self.operationTitle = "Restoring from Trash"
         do {
-          let recovery = RestoreCoordinator(journalDirectory: AppPaths.restoreJournalDirectory, history: self.historyStore)
+          let recovery = RestoreCoordinator(journalDirectory: self.restoreJournalDirectory, history: self.historyStore)
           let destination = try await recovery.restore(conflict.receipt, entryID: conflict.entryID, into: folder)
           self.history = await self.historyStore.load()
           self.skipRestoreConflict(conflict)

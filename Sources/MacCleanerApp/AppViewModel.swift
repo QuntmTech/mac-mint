@@ -169,11 +169,15 @@ final class AppViewModel: ObservableObject {
   let safetyPolicy = SafetyPolicy()
   let duplicateVerifier = DuplicateRemovalVerifier()
   let historyStore: HistoryStore
+  let supportDirectory: URL
+  var operationJournalDirectory: URL { supportDirectory.appendingPathComponent("Operations", isDirectory: true) }
+  var restoreJournalDirectory: URL { supportDirectory.appendingPathComponent("Restores", isDirectory: true) }
   private let ignoreStore: IgnoreStore
   var currentTask: Task<Void, Never>?
 
-  init() {
-    let support = AppPaths.supportDirectory
+  init(supportDirectory: URL? = nil) {
+    let support = supportDirectory ?? AppPaths.supportDirectory
+    self.supportDirectory = support
     historyStore = HistoryStore(url: support.appendingPathComponent("history.json"))
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 

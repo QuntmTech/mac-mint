@@ -180,6 +180,90 @@ final class AccountLifecycleTests: XCTestCase {
     }
     XCTFail("The intended network boundary was not reached")
   }
+
+  func testAcceptedConsentSendsTheExactPreviewedRequestDespiteLaterChatChanges() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let previous = UserDefaults.standard.object(forKey: AppViewModel.aiEnabledKey)
+    defer { UserDefaults.standard.set(previous, forKey: AppViewModel.aiEnabledKey) }
+    UserDefaults.standard.set(false, forKey: AppViewModel.aiEnabledKey)
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    let model = AppViewModel(supportDirectory: folder.appendingPathComponent("Model"))
+    model.ask("What can I inspect?", account: store)
+    XCTAssertTrue(model.aiConsentPending)
+    let preview = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(model.aiPayloadPreview.utf8)) as? NSDictionary)
+    model.assistantTurns = [AITurn(role: .user, text: "A different later chat turn")]
+    model.acceptAIConsent()
+    for _ in 0..<200 {
+      if await fixture.lastAsk != nil, !model.assistantBusy { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let captured = await fixture.lastAsk
+    let payload = try XCTUnwrap(captured)
+    let actual = try XCTUnwrap(try JSONSerialization.jsonObject(with: payload) as? NSDictionary)
+    XCTAssertEqual(preview, actual)
+    XCTAssertEqual(model.assistantTurns.last?.text, "Fixture answer")
+  }
+
+  func testScanInvalidationCancelsThePendingConsentContinuation() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let previous = UserDefaults.standard.object(forKey: AppViewModel.aiEnabledKey)
+    defer { UserDefaults.standard.set(previous, forKey: AppViewModel.aiEnabledKey) }
+    UserDefaults.standard.set(false, forKey: AppViewModel.aiEnabledKey)
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    let model = AppViewModel(supportDirectory: folder.appendingPathComponent("Model"))
+    model.assistantDraft = "Keep this question"
+    model.ask(model.assistantDraft, account: store)
+    XCTAssertTrue(model.aiConsentPending)
+    model.invalidateAIReview()
+    model.acceptAIConsent()
+    await Task.yield()
+    await Task.yield()
+    XCTAssertFalse(model.aiConsentPending)
+    XCTAssertFalse(model.assistantBusy)
+    XCTAssertEqual(model.assistantDraft, "Keep this question")
+    let sent = await fixture.lastAsk
+    XCTAssertNil(sent)
+  }
+
+  func testUnreadableExclusionsBlockNewWorkButAllowControllerRestore() async throws {
+    let fm = FileManager.default
+    let folder = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: folder) }
+    let source = folder.appendingPathComponent(".Trash/item.txt")
+    let original = folder.appendingPathComponent("Documents/item.txt")
+    try fm.createDirectory(at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("recover me".utf8).write(to: source)
+    try Data("damaged exclusions".utf8).write(to: folder.appendingPathComponent("ignored-paths.json"))
+    let receipt = TrashReceipt(originalPath: original.path, trashPath: source.path, bytes: 10,
+      identity: FileSystem.fileIdentity(at: source))
+    let entry = HistoryEntry(action: "Fixture", paths: [original.path], bytes: 10, notes: "Test", receipts: [receipt])
+    try await HistoryStore(url: folder.appendingPathComponent("history.json")).append(entry)
+    let model = AppViewModel(supportDirectory: folder)
+    for _ in 0..<200 {
+      if model.exclusionLoadError != nil, model.history.contains(where: { $0.id == entry.id }) { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertNotNil(model.exclusionLoadError)
+    XCTAssertFalse(model.beginScan(title: "Test", message: "Must not start"))
+    XCTAssertFalse(model.requirePaidAccess())
+    XCTAssertFalse(model.isScanning)
+    XCTAssertTrue(model.canRestore(receipt))
+    model.restore([receipt], entryID: entry.id)
+    for _ in 0..<200 {
+      if !model.isWorking { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertFalse(model.isWorking)
+    XCTAssertEqual(try Data(contentsOf: original), Data("recover me".utf8))
+    XCTAssertTrue(model.history.first?.isRestored(receipt) == true)
+  }
 }
 
 @MainActor
@@ -202,6 +286,7 @@ private actor AccountFixture {
   var removed = false
   var activations = 0
   var authentications = 0
+  var lastAsk: Data?
   private var pauseSuffix: String?
   private var pending: CheckedContinuation<Void, Never>?
   var isPaused: Bool { pending != nil }
@@ -221,6 +306,11 @@ private actor AccountFixture {
     var body: [String: Any] = [:]
     if path.hasSuffix("auth-with-password") || path.hasSuffix("auth-refresh") {
       body = ["token": "fixture-token", "record": ["id": "fixture", "email": "fixture@example.invalid", "verified": true]]
+    } else if path.contains("app_config") {
+      body = ["items": [["value": ["enabled": true]]]]
+    } else if path.hasSuffix("/ask") {
+      lastAsk = request.httpBody
+      body = ["answer": "Fixture answer", "actions": []]
     } else if !path.hasSuffix("deactivate") {
       if path.hasSuffix("activate") { activations += 1; removed = false }
       body = ["user": ["id": "fixture", "email": "fixture@example.invalid", "verified": true],
