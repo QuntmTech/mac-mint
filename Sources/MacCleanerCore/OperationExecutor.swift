@@ -81,7 +81,7 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
 
   public var summary: String {
     var parts = ["\(moved.count) item\(moved.count == 1 ? "" : "s") moved to Trash"]
-    if !problems.isEmpty { parts.append("\(problems.count) skipped") }
+    if !problems.isEmpty { parts.append("\(problems.count) need attention") }
     if wasCancelled { parts.append("stopped early") }
     if wasInterrupted { parts.append("interrupted") }
     if persistenceError != nil { parts.append("recovery record could not be saved; operation stopped") }
@@ -170,12 +170,15 @@ public actor OperationExecutor {
         }
         // Sizing can be expensive. Check identity, policy, activity and keepers again after it.
         let size = FileSystem.itemSize(at: item.url, fileManager: fileManager)
+        let libraryProblem = FileSystem.managedLibraryProblem(in: item.url, fileManager: fileManager)
         if Task.isCancelled {
           report.wasCancelled = true
           report.outcomes[index] = ItemOutcome(item: item, status: .notAttempted)
           break
         }
-        if let rejection = validate(item, plan: plan, movedIDs: movedIDs,
+        if let libraryProblem {
+          outcome = ItemOutcome(item: item, status: .skipped, message: libraryProblem)
+        } else if let rejection = validate(item, plan: plan, movedIDs: movedIDs,
           movedPaths: movedPaths, ignoredPaths: ignoredPaths) {
           outcome = rejection
         } else {
@@ -313,7 +316,7 @@ public actor OperationExecutor {
     guard let url = journalURL(report.id) else { return }
     try fileManager.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try OperationJournal.encoder.encode(report).write(to: url, options: .atomic)
+    try FileSystem.writeDurably(OperationJournal.encoder.encode(report), to: url)
   }
 }
 

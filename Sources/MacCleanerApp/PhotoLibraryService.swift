@@ -83,19 +83,20 @@ enum PhotoLibraryService {
   }
 
   /// Image data rather than NSImage so it can cross actors; build the image on the main actor.
-  static func thumbnailData(assetID: String, side: CGFloat) async -> Data? {
+  static func thumbnailData(assetID: String, side: CGFloat, allowNetwork: Bool = false) async -> Data? {
     guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
     else { return nil }
     let options = PHImageRequestOptions()
     options.deliveryMode = .highQualityFormat
-    options.isNetworkAccessAllowed = false
+    options.isNetworkAccessAllowed = allowNetwork
     options.resizeMode = .fast
     let target = CGSize(width: side * 2, height: side * 2)
     let data: Data? = await withCheckedContinuation { continuation in
       let once = ResultBox<Bool>()
       PHImageManager.default().requestImage(
         for: asset, targetSize: target, contentMode: .aspectFill, options: options
-      ) { image, _ in
+      ) { image, info in
+        if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
         // The handler can fire more than once; resume exactly once.
         guard once.claim() else { return }
         continuation.resume(returning: image?.tiffRepresentation)

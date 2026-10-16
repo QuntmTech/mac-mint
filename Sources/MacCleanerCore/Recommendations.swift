@@ -141,8 +141,8 @@ public enum RecommendationEngine {
     let neverOpened = inputs.downloads.filter { $0.usage.neverOpened }
     let neverItems = take(neverOpened.map(PlanItem.download))
     add(
-      "downloads-never-opened", symbol: "arrow.down.circle", title: "Downloads you never opened",
-      detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago and never opened since.",
+      "downloads-never-opened", symbol: "arrow.down.circle", title: "Downloads with no recorded opens",
+      detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago, with no recorded opens.",
       confidence: .likely, items: neverItems, destination: .downloads)
 
     // 5. Leftovers from deleted apps (only the stronger matches).
@@ -197,7 +197,7 @@ public enum RecommendationEngine {
     if !unused.isEmpty {
       let names = unused.prefix(3).map(\.name).joined(separator: ", ")
       add(
-        "unused-apps", symbol: "app.badge.clock", title: "Apps you haven't opened in \(RelativeAge.describe(days: inputs.unusedAppDays))",
+        "unused-apps", symbol: "app.badge.clock", title: "Apps with no recorded opens in \(RelativeAge.describe(days: inputs.unusedAppDays))",
         detail: names + (unused.count > 3 ? " and \(unused.count - 3) more" : "") + ".",
         confidence: .review, items: [], destination: .applications,
         bytes: unused.reduce(0) { $0 + $1.bundleSize }, count: unused.count)

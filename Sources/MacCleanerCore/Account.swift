@@ -225,12 +225,12 @@ public struct AccountClient: Sendable {
   }
 
   public func activate(_ device: DeviceInfo, token: String) async throws -> AccountSnapshot {
-    try await send(
-      "POST", "/api/macmint/devices/activate", token: token,
-      body: [
-        "device_id": device.deviceId, "name": device.name, "model": device.model,
-        "os_version": device.osVersion, "app_version": device.appVersion,
-      ])
+    let fields: [String: Any] = [
+      "device_id": device.deviceId, "reactivate": true, "name": device.name, "model": device.model,
+      "os_version": device.osVersion, "app_version": device.appVersion,
+    ]
+    return try await send("POST", "/api/macmint/devices/activate", token: token,
+      bodyData: JSONSerialization.data(withJSONObject: fields))
   }
 
   public func deactivate(deviceId: String, token: String) async throws {

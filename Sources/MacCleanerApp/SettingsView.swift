@@ -192,7 +192,11 @@ struct AboutSettingsCard: View {
           Text("Version \(UpdateService.currentVersion)").foregroundStyle(.secondary)
         }
         HStack {
-          switch updates.status {
+          if let error = updates.checkError {
+            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+          } else if updates.lastChecked == nil {
+            Text("Not checked").foregroundStyle(.secondary)
+          } else { switch updates.status {
           case .current:
             Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
           case .available(let release):
@@ -203,6 +207,7 @@ struct AboutSettingsCard: View {
             Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
               .foregroundStyle(.orange)
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
+          }
           }
           Spacer()
           Button(checking ? "Checking…" : "Check Now") {

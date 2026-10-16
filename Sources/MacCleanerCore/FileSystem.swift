@@ -48,6 +48,50 @@ public final class IssueCollector: @unchecked Sendable {
 }
 
 public enum FileSystem {
+  /// Atomically replace a local recovery record and sync the file and directory before
+  /// acknowledging it. A successful JSON encode alone is not a durable History commit.
+  static func writeDurably(_ data: Data, to url: URL) throws {
+    try data.write(to: url, options: .atomic)
+    for path in [url.path, url.deletingLastPathComponent().path] {
+      let descriptor = open(path, O_RDONLY)
+      guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+      let result = fsync(descriptor)
+      let failure = errno
+      _ = close(descriptor)
+      guard result == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(failure)) }
+    }
+  }
+
+  /// Returns a conservative reason to refuse moving a folder that contains managed photo data.
+  static func managedLibraryProblem(in url: URL, fileManager: FileManager) -> String? {
+    guard (try? fresh(url).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+      (try? fresh(url).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+    let failures = IssueCollector()
+    guard let enumerator = fileManager.enumerator(at: url,
+      includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+      options: [.skipsPackageDescendants], errorHandler: { path, _ in
+        failures.append(ScanIssue(area: "Safety", path: path.path, message: "Could not inspect folder contents."))
+        return false
+      }) else { return "Folder contents could not be checked for managed photo libraries." }
+    var found = false
+    walk(enumerator) { child in
+      if Task.isCancelled { return .stop }
+      if PhotoAnalysis.isInsideLibraryPackage(child) { found = true; return .stop }
+      return .continue
+    }
+    if found { return "This folder contains a managed photo library. Choose smaller selections and manage library photos in Photos." }
+    return failures.issues.isEmpty ? nil : "Folder contents could not be fully checked for managed photo libraries."
+  }
+
+  public static func isCloudPlaceholder(_ url: URL) -> Bool {
+    #if canImport(Darwin)
+      var info = stat()
+      return lstat(url.path, &info) == 0 && info.st_flags & 0x40000000 != 0 // SF_DATALESS
+    #else
+      return false
+    #endif
+  }
+
   public static let resourceKeys: Set<URLResourceKey> = [
     .isRegularFileKey,
     .isDirectoryKey,

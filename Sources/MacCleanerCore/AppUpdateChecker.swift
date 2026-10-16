@@ -14,14 +14,23 @@ public enum UpdateSource: Hashable, Sendable {
   case sparkle(feed: URL)
   /// Installed with Homebrew; update with `brew upgrade --cask <token>`.
   case homebrew(token: String)
+  case unsupported
 
   public var label: String {
     switch self {
     case .appStore: return "App Store"
     case .sparkle: return "Developer"
     case .homebrew: return "Homebrew"
+    case .unsupported: return "Unsupported source"
     }
   }
+}
+
+public enum AppUpdateCheckState: String, Sendable {
+  case checked = "Checked"
+  case failed = "Check failed"
+  case unsupported = "Unsupported source"
+  case notChecked = "Not checked"
 }
 
 public struct AppUpdate: Identifiable, Hashable, Sendable {
@@ -34,6 +43,20 @@ public struct AppUpdate: Identifiable, Hashable, Sendable {
   public let availableVersion: String?
   public let source: UpdateSource
   public let minimumSystem: String?
+  public let checkState: AppUpdateCheckState
+
+  public init(id: String, appName: String, appURL: URL, bundleIdentifier: String?, installedVersion: String,
+    availableVersion: String?, source: UpdateSource, minimumSystem: String?, checkState: AppUpdateCheckState? = nil) {
+    self.id = id; self.appName = appName; self.appURL = appURL; self.bundleIdentifier = bundleIdentifier
+    self.installedVersion = installedVersion; self.availableVersion = availableVersion; self.source = source
+    self.minimumSystem = minimumSystem
+    self.checkState = checkState ?? (availableVersion == nil ? .notChecked : .checked)
+  }
+
+  public var statusLabel: String {
+    checkState == .checked ? (hasUpdate ? "Update available" : "Up to date") : checkState.rawValue
+  }
+
 
   public var hasUpdate: Bool {
     guard let availableVersion else { return false }
@@ -91,14 +114,16 @@ public actor AppUpdateChecker {
   private func update(for app: AppRecord, casks: [String: String]) async -> AppUpdate? {
     guard let info = NSDictionary(contentsOf: app.url.appendingPathComponent("Contents/Info.plist"))
       as? [String: Any]
-    else { return nil }
+    else { return AppUpdate(id: app.url.standardizedFileURL.path, appName: app.name, appURL: app.url, bundleIdentifier: app.bundleIdentifier,
+      installedVersion: app.version ?? "Unknown", availableVersion: nil, source: .unsupported, minimumSystem: nil, checkState: .failed) }
     let installed =
       (info["CFBundleShortVersionString"] as? String) ?? (info["CFBundleVersion"] as? String) ?? "0"
     let make: (String?, UpdateSource, String?) -> AppUpdate = { available, source, minOS in
       AppUpdate(
         id: app.url.standardizedFileURL.path, appName: app.name, appURL: app.url,
         bundleIdentifier: app.bundleIdentifier, installedVersion: installed,
-        availableVersion: available, source: source, minimumSystem: minOS)
+        availableVersion: available, source: source, minimumSystem: minOS,
+        checkState: available != nil ? .checked : (source.label == "Homebrew" ? .notChecked : .failed))
     }
 
     if fileManager.fileExists(atPath: app.url.appendingPathComponent("Contents/_MASReceipt/receipt").path),
@@ -116,7 +141,8 @@ public actor AppUpdateChecker {
       let latest = try? await sparkleLatest(feed: feed)
       return make(latest?.version, .sparkle(feed: feed), latest?.minimumSystem)
     }
-    return nil
+    return AppUpdate(id: app.url.standardizedFileURL.path, appName: app.name, appURL: app.url, bundleIdentifier: app.bundleIdentifier,
+      installedVersion: installed, availableVersion: nil, source: .unsupported, minimumSystem: nil, checkState: .unsupported)
   }
 
   // MARK: App Store

@@ -68,6 +68,30 @@ final class AIAssistantTests: XCTestCase {
     XCTAssertEqual(context.disk["freeGB"], 20)
   }
 
+  func testAutomaticPayloadAllowlistRejectsPackagesCustomAppsAndAdversarialNames() throws {
+    let privateName = "Jane Doe jane@example.com Medical Report.pages 删除"
+    var inputs = AIContextBuilder.Inputs(homeDirectory: home)
+    inputs.storageRoot = StorageNode(url: home.appendingPathComponent("Documents"), kind: .folder,
+      allocatedBytes: 10, logicalBytes: 10, itemCount: 1, children: [
+        StorageNode(url: home.appendingPathComponent("Documents/" + privateName), kind: .package,
+          allocatedBytes: 10, logicalBytes: 10, itemCount: 1)])
+    inputs.apps = [AppRecord(url: URL(fileURLWithPath: "/Applications/Private.app"), name: privateName,
+      bundleIdentifier: "com.custom.private", version: "1", bundleSize: 10, lastModified: nil,
+      lastUsed: Date().addingTimeInterval(-300 * 86400))]
+    inputs.recommendations = [Recommendation(id: "caches", symbol: "x", title: privateName,
+      detail: privateName, bytes: 10, count: 1, confidence: .safe, items: [], destination: .cleaner)]
+    inputs.startupLabels = [privateName]
+    let encoder = JSONEncoder()
+    let context = try encoder.encode(AIContextBuilder.build(inputs))
+    let review = try encoder.encode(AIContextBuilder.reviewRequest(recommendations: inputs.recommendations,
+      totalBytes: 10, freeBytes: 1, growth: [], home: home))
+    let explain = try encoder.encode(AIExplainRequest(kind: .libraryItem, identifier: privateName, location: "Caches"))
+    for data in [context, review, explain] {
+      let json = String(decoding: data, as: UTF8.self)
+      for secret in ["Jane", "@example", "Medical", "删除", "coltonwood"] { XCTAssertFalse(json.contains(secret)) }
+    }
+  }
+
   func testReviewRequestMapsConfidenceAndSanitizesGrowth() {
     let rec = Recommendation(
       id: "caches", symbol: "x", title: "Caches", detail: "d", bytes: 5, count: 2, confidence: .likely,

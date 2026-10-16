@@ -195,12 +195,11 @@ extension AccountClient {
   }
 }
 
-// MARK: - Anonymized context
+// MARK: - Category-only automatic context
 
-/// What "Ask MacMint" and the Smart Care review are allowed to see. Built only from sizes,
-/// dates, categories, app names, and home-relative folder paths; never file contents, never
-/// personal file names. Paths outside the home folder are dropped (except /Applications and
-/// /Library), the account name is replaced, and anything email-like is removed.
+/// Automatic context includes fixed category labels, allowlisted identifiers, sizes and dates.
+/// Arbitrary folder names, document packages, app labels and filenames are omitted. Typed
+/// questions and previous chat turns are transmitted separately as the user's own text.
 public struct AIContext: Codable, Hashable, Sendable {
   public struct Folder: Codable, Hashable, Sendable {
     public let path: String

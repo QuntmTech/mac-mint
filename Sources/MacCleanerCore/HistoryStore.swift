@@ -73,7 +73,8 @@ public actor HistoryStore {
 
   /// Records that some of an entry's items were restored from the Trash.
   public func markRestored(entryID: UUID, originalPaths: [String]) throws {
-    let items = load().map { $0.id == entryID ? $0.markingRestored(originalPaths) : $0 }
+    let current = try decoder.decode([HistoryEntry].self, from: Data(contentsOf: url))
+    let items = current.map { $0.id == entryID ? $0.markingRestored(originalPaths) : $0 }
     try persist(items)
   }
 
@@ -83,7 +84,6 @@ public actor HistoryStore {
     let ordered = items.sorted { $0.date > $1.date }
     // Never evict live recovery receipts merely because 200 newer operations exist.
     let retained = ordered.enumerated().filter { $0.offset < 200 || !$0.element.pendingReceipts.isEmpty }.map(\.element)
-    try encoder.encode(retained).write(
-      to: url, options: .atomic)
+    try FileSystem.writeDurably(encoder.encode(retained), to: url)
   }
 }

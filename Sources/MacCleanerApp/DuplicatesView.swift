@@ -5,6 +5,7 @@ import SwiftUI
 struct DuplicatesView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var previewURL: URL?
+  @State private var comparing: DuplicateGroup?
 
   private var totalReclaimable: Int64 {
     model.duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -47,6 +48,7 @@ struct DuplicatesView: View {
                 Text("•")
                 Text(ByteFormatter.string(group.reclaimableBytes) + " reclaimable")
                 Spacer()
+                Button("Compare") { comparing = group }
                 Button("Select copies") { model.selectDuplicateCopies(in: group.id) }
                   .buttonStyle(.link)
         .tint(AppTheme.accentText)
@@ -60,6 +62,7 @@ struct DuplicatesView: View {
         .listStyle(.inset)
       }
     }
+    .sheet(item: $comparing) { group in DuplicateComparisonSheet(group: group) }
     .quickLookPreview($previewURL, in: model.duplicateGroups.flatMap { $0.files.map(\.url) })
   }
 
@@ -192,6 +195,10 @@ struct DuplicatesView: View {
       .help("Quick Look")
       .accessibilityLabel("Quick Look \(file.url.lastPathComponent)")
       Menu {
+        Button("Keep this copy") {
+          model.selectedDuplicateIDs.subtract(group.files.map(\.id))
+          model.selectedDuplicateIDs.formUnion(group.files.filter { $0.id != file.id && (file.identity == nil || $0.identity != file.identity) }.map(\.id))
+        }
         Button("Quick Look") { previewURL = file.url }
         Button("Reveal in Finder") { model.reveal(file.url) }
         Button("Exclude from future scans") { model.ignore(file.url) }

@@ -110,6 +110,28 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(groups.isEmpty)
   }
 
+  func testSelectedAncestorCannotMoveManagedPhotoLibrary() async throws {
+    let home = try temporaryHome()
+    defer { try? fm.removeItem(at: home) }
+    let source = try write(home, "Pictures/My.photoslibrary/originals/unique.jpg")
+    let pictures = home.appendingPathComponent("Pictures")
+    let report = await OperationExecutor(trashService: FixtureTrash(home: home), safetyPolicy: SafetyPolicy(homeDirectory: home))
+      .run(OperationPlan(title: "folder", items: [item(pictures)]))
+    XCTAssertEqual(report.outcomes.first?.status, .skipped)
+    XCTAssertTrue(fm.fileExists(atPath: source.path))
+  }
+
+  func testCorruptHistoryCannotBeOverwrittenByAppendOrRestore() async throws {
+    let home = try temporaryHome()
+    defer { try? fm.removeItem(at: home) }
+    let url = try write(home, "history.json")
+    let before = try Data(contentsOf: url)
+    let store = HistoryStore(url: url)
+    do { try await store.append(HistoryEntry(action: "test", paths: [], bytes: 0, notes: "")); XCTFail("Must preserve corrupt history") } catch {}
+    do { try await store.markRestored(entryID: UUID(), originalPaths: ["x"]); XCTFail("Must preserve corrupt history") } catch {}
+    XCTAssertEqual(try Data(contentsOf: url), before)
+  }
+
   func testExclusionsResolveParentAliasesAndReachStorageAndDeveloper() async throws {
     let home = try temporaryHome()
     defer { try? fm.removeItem(at: home) }

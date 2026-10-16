@@ -161,6 +161,12 @@ public actor AppScanner {
       value: sort(matches), issues: issues, duration: Date().timeIntervalSince(started))
   }
 
+  public func inspect(_ url: URL) -> AppRecord? {
+    guard url.isFileURL, url.pathExtension.lowercased() == "app",
+      fileManager.fileExists(atPath: url.appendingPathComponent("Contents/Info.plist").path) else { return nil }
+    return record(for: url)
+  }
+
   private func record(for url: URL) -> AppRecord {
     let bundle = Bundle(url: url)
     let info = bundle?.infoDictionary

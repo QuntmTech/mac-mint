@@ -105,17 +105,10 @@ struct RootView: View {
     .sheet(item: $model.lastReport) { report in
       OperationReportSheet(report: report)
     }
-    .alert(
-      "Couldn't restore",
-      isPresented: Binding(
-        get: { model.restoreConflict != nil }, set: { if !$0 { model.restoreConflict = nil } }),
-      presenting: model.restoreConflict
-    ) { conflict in
-      Button("Restore to Another Folder…") { model.restoreElsewhere(conflict) }
-      Button("Show in Trash") { model.revealInTrash(conflict.receipt) }
-      Button("Cancel", role: .cancel) {}
-    } message: { conflict in
-      Text(conflict.message)
+    .sheet(isPresented: Binding(
+      get: { !model.restoreConflicts.isEmpty },
+      set: { if !$0 { model.restoreConflicts = [] } })) {
+      RestoreConflictsSheet()
     }
     .sheet(item: $model.explainTarget) { target in
       ExplainSheet(target: target)

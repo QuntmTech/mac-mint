@@ -55,6 +55,9 @@ struct StorageExplorerView: View {
           .lineLimit(1)
           .truncationMode(.middle)
       }
+      if !FileSystem.path(model.storageRoot, isInsideOrEqual: FileManager.default.homeDirectoryForCurrentUser) {
+        StatusPill(title: "Inspection only", icon: "eye", tint: .secondary)
+      }
       Spacer()
       if !model.selectedStoragePaths.isEmpty {
         Button("Deselect") { model.selectedStoragePaths = [] }
@@ -216,7 +219,7 @@ struct StorageExplorerView: View {
     let total = max(node.allocatedBytes, 1)
     return List(node.children) { child in
       HStack(spacing: 10) {
-        if child.isActionable {
+        if model.storageRemovalAllowed(child) {
           Toggle(
             "",
             isOn: Binding(
@@ -273,7 +276,7 @@ struct StorageExplorerView: View {
     if node.kind == .folder && !node.children.isEmpty {
       Button("Open") { model.openStorageNode(node) }
     }
-    if node.isActionable {
+    if model.storageRemovalAllowed(node) {
       Button("Reveal in Finder") { model.reveal(node.url) }
       Button(model.selectedStoragePaths.contains(node.id) ? "Remove from Review" : "Add to Review") {
         model.toggleStorageSelection(node)

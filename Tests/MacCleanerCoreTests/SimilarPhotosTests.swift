@@ -49,6 +49,17 @@ final class SimilarPhotosTests: XCTestCase {
     XCTAssertEqual(PhotoAnalysis.group(photos).first?.keeper.url.lastPathComponent, "large.jpg")
   }
 
+  func testWeakSimilarityChainCannotMergeDissimilarEndpoints() {
+    let photos = [photo("a.jpg", hash: 0, sharpness: 100),
+      photo("b.jpg", hash: 0b111111, sharpness: 100),
+      photo("c.jpg", hash: 0b111111111111, sharpness: 100)]
+    let groups = PhotoAnalysis.group(photos, threshold: 6)
+    XCTAssertEqual(groups.first?.photos.count, 2)
+    for group in groups {
+      XCTAssertTrue(group.photos.allSatisfy { PhotoAnalysis.distance($0.hash, group.keeper.hash) <= 6 })
+    }
+  }
+
   func testHardLinksAreNotSimilarPhotos() {
     let photos = [
       photo("one.jpg", hash: 7, sharpness: 1, identity: "1:42"),

@@ -12,7 +12,7 @@ struct HistoryView: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text("History").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Everything MacMint moved to the Trash — restore any item while it's still there.")
+          Text("Recorded operations and recovery status. Restore verified Trash items here; recover library photos through Photos.")
             .foregroundStyle(.secondary)
         }
         Spacer()
@@ -40,7 +40,7 @@ struct HistoryView: View {
 
   private func entryRow(_ entry: HistoryEntry) -> some View {
     let receipts = entry.receipts ?? []
-    let pending = entry.pendingReceipts.filter { model.canRestore($0) }
+    let pending = entry.pendingReceipts
     return DisclosureGroup(
       isExpanded: Binding(
         get: { expanded.contains(entry.id) },
@@ -141,6 +141,7 @@ struct HistoryView: View {
   private func restoreUnavailableReason(_ receipt: TrashReceipt) -> String {
     guard let trashPath = receipt.trashPath else { return "Not restorable" }
     if !FileManager.default.fileExists(atPath: trashPath) { return "Not in Trash" }
-    return "Location in use"
+    if FileManager.default.fileExists(atPath: receipt.originalPath) { return "Original location occupied" }
+    return "Identity could not be verified"
   }
 }

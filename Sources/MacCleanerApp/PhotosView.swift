@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PhotosView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var comparing: SimilarPhotoGroup?
   @State private var tab: PhotoTab = .similar
 
   private var isLibrary: Bool { model.photoSource == .library }
@@ -30,9 +31,10 @@ struct PhotosView: View {
         EmptyState(
           icon: "photo.on.rectangle.angled", title: "Find similar shots, blurry photos, and old screenshots",
           detail:
-            "Check your Photos library or any folder. Nothing is selected for you, and the best shot in each set is always kept.")
+            "Check your Photos library or any folder. Nothing is selected for you. Compare each set and choose the copy to keep.")
       }
     }
+    .sheet(item: $comparing) { group in PhotoComparisonSheet(group: group) }
   }
 
   // MARK: Header
@@ -141,6 +143,7 @@ struct PhotosView: View {
           Text("• \(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in the others")
             .foregroundStyle(.secondary)
           Spacer()
+          Button("Compare") { comparing = group }
           Button("Select All but Kept") { model.selectAllButKeeper(in: group) }
             .controlSize(.small)
         }
@@ -153,6 +156,7 @@ struct PhotosView: View {
         }
       }
     }
+
   }
 
   @ViewBuilder
@@ -190,7 +194,7 @@ private struct PhotoTile: View {
                 lineWidth: isKeeper || isSelected ? 3 : 1)
           }
         if isKeeper {
-          Label("Kept", systemImage: "star.fill")
+          Label("Suggested keeper", systemImage: "star.fill")
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -234,6 +238,8 @@ private struct PhotoTile: View {
 struct PhotoThumbnail: View {
   let photo: PhotoFingerprint
   let side: CGFloat
+  var allowCloud = false
+  @State private var finished = false
   @State private var image: NSImage?
 
   private static let cache = NSCache<NSString, NSImage>()
@@ -243,25 +249,27 @@ struct PhotoThumbnail: View {
       Rectangle().fill(Color.primary.opacity(0.06))
       if let image {
         Image(nsImage: image).resizable().scaledToFill()
+      } else if finished {
+        Label("Preview unavailable locally", systemImage: "icloud").font(.caption).multilineTextAlignment(.center)
       } else {
         ProgressView().controlSize(.small)
       }
     }
-    .task(id: photo.id) { image = await load() }
+    .task(id: photo.id + String(allowCloud)) { finished = false; image = await load(); finished = true }
   }
 
   private func load() async -> NSImage? {
-    let key = "\(photo.id)#\(Int(side))" as NSString
+    let key = "\(photo.id)#\(Int(side))#\(allowCloud)" as NSString
     if let cached = Self.cache.object(forKey: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
-      loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side)
+      loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side, allowNetwork: allowCloud)
         .flatMap(NSImage.init(data:))
     } else {
       let url = photo.url
       let pixels = side * 2
       let data: Data? = await Task.detached(priority: .utility) {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+        guard !FileSystem.isCloudPlaceholder(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
           let cgImage = CGImageSourceCreateThumbnailAtIndex(
             source, 0,
             [

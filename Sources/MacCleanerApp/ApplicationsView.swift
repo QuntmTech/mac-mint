@@ -1,13 +1,14 @@
 import AppKit
 import MacCleanerCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ApplicationsView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var updates: AppUpdatesStore
-  @State private var search = ""
-  @State private var sort: AppSort = .name
-  @State private var mode: Mode = .uninstall
+  @SceneStorage("apps.search") private var search = ""
+  @SceneStorage("apps.sort") private var sort: AppSort = .name
+  @SceneStorage("apps.mode") private var mode: Mode = .uninstall
 
   enum Mode: String, CaseIterable, Identifiable {
     case uninstall = "Uninstall"
@@ -77,6 +78,14 @@ struct ApplicationsView: View {
       } else {
         uninstaller
       }
+    }
+    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      guard let provider = providers.first else { return false }
+      _ = provider.loadObject(ofClass: URL.self) { url, _ in
+        guard let url else { return }
+        Task { @MainActor in model.inspectDroppedApp(url) }
+      }
+      return true
     }
   }
 
@@ -203,6 +212,8 @@ struct ApplicationsView: View {
               .foregroundStyle(.secondary)
             }
             Spacer()
+            Button("Keep my settings") { model.selectedLeftoverIDs = [] }
+              .help("Uninstall the app while leaving its settings and related data in place")
             StatusPill(
               title: "\(model.selectedLeftoverIDs.count) selected", icon: "checkmark.circle",
               tint: AppTheme.accentText)

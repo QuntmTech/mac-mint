@@ -26,7 +26,7 @@ extension AppViewModel {
     scanCompletedAreas = []
     let ignored = ignoredPaths
     let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-    let previousSelections = Dictionary(uniqueKeysWithValues: cleanupTargets.map { (FileSystem.comparisonPath($0.url), $0.isSelected) })
+    let previousSelections = Dictionary(cleanupTargets.map { (FileSystem.comparisonPath($0.url), $0.isSelected) }, uniquingKeysWith: { $0 || $1 })
     let started = Date()
     currentTask = Task { [weak self] in
       guard let self else { return }

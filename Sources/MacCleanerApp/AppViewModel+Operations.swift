@@ -5,7 +5,7 @@ import MacCleanerCore
 /// Review → execute → recover. Every action that moves files builds an OperationPlan, shows it
 /// in the review sheet, and runs through OperationExecutor so all checks and receipts are shared.
 extension AppViewModel {
-  struct RestoreConflict: Identifiable {
+  struct RestoreConflict: Identifiable, Sendable {
     let id = UUID()
     let entryID: UUID
     let receipt: TrashReceipt
@@ -308,56 +308,78 @@ extension AppViewModel {
   }
 
   func restore(_ receipts: [TrashReceipt], entryID: UUID) {
-    guard !receipts.isEmpty else { return }
-    var restored: [String] = []
-    var failures: [(TrashReceipt, RestoreError)] = []
-    for receipt in receipts {
-      do {
-        try RecoveryService().restore(receipt)
-        restored.append(receipt.originalPath)
-      } catch let error as RestoreError {
-        failures.append((receipt, error))
-      } catch {
-        failures.append((receipt, .failed(error.localizedDescription)))
+    guard !receipts.isEmpty, !isWorking, !isScanning else { return }
+    isWorking = true
+    operationTitle = "Restoring from Trash"
+    currentTask = Task { [weak self] in
+      guard let self else { return }
+      var restored: [String] = []
+      var conflicts: [RestoreConflict] = []
+      for (index, receipt) in receipts.enumerated() {
+        if Task.isCancelled { break }
+        operationProgress = OperationProgress(completed: index, total: receipts.count,
+          currentName: URL(fileURLWithPath: receipt.originalPath).lastPathComponent, bytesMoved: 0)
+        let failure = await Task.detached(priority: .userInitiated) { () -> RestoreError? in
+          do { try RecoveryService().restore(receipt); return nil }
+          catch let error as RestoreError { return error }
+          catch { return .failed(error.localizedDescription) }
+        }.value
+        if let failure {
+          conflicts.append(RestoreConflict(entryID: entryID, receipt: receipt,
+            message: failure.errorDescription ?? "Could not restore this item."))
+        } else { restored.append(receipt.originalPath) }
       }
-    }
-    Task {
+      var historyError: String?
       if !restored.isEmpty {
-        try? await historyStore.markRestored(entryID: entryID, originalPaths: restored)
+        do { try await historyStore.markRestored(entryID: entryID, originalPaths: restored) }
+        catch { historyError = "Files were restored, but History could not be updated: \(error.localizedDescription)" }
         history = await historyStore.load()
       }
+      restoreConflicts.append(contentsOf: conflicts)
+      isWorking = false
+      operationTitle = nil
+      operationProgress = nil
+      currentTask = nil
+      statusMessage = historyError ?? "Restored \(restored.count) of \(receipts.count); \(conflicts.count) need attention"
+      refreshTrashStatus()
     }
-    if case let (receipt, error)? = failures.first {
-      restoreConflict = RestoreConflict(
-        entryID: entryID, receipt: receipt,
-        message: error.errorDescription ?? "Could not restore this item.")
-    }
-    statusMessage =
-      failures.isEmpty
-      ? "Restored \(restored.count) item\(restored.count == 1 ? "" : "s") from the Trash"
-      : "Restored \(restored.count); \(failures.count) could not be restored"
+  }
+
+  func skipRestoreConflict(_ conflict: RestoreConflict) {
+    restoreConflicts.removeAll { $0.id == conflict.id }
   }
 
   func restoreElsewhere(_ conflict: RestoreConflict) {
-    restoreConflict = nil
+    guard !isWorking else { return }
     let panel = NSOpenPanel()
     panel.title = "Choose where to restore “\(URL(fileURLWithPath: conflict.receipt.originalPath).lastPathComponent)”"
     panel.canChooseDirectories = true
     panel.canChooseFiles = false
     panel.canCreateDirectories = true
     panel.prompt = "Restore Here"
-    guard panel.runModal() == .OK, let folder = panel.url else { return }
-    do {
-      let destination = try RecoveryService().restore(conflict.receipt, into: folder)
-      Task {
-        try? await historyStore.markRestored(
-          entryID: conflict.entryID, originalPaths: [conflict.receipt.originalPath])
-        history = await historyStore.load()
+    panel.begin { [weak self] response in
+      guard response == .OK, let folder = panel.url else { return }
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        isWorking = true
+        operationTitle = "Restoring from Trash"
+        do {
+          let destination = try await Task.detached(priority: .userInitiated) {
+            try RecoveryService().restore(conflict.receipt, into: folder)
+          }.value
+          do { try await historyStore.markRestored(entryID: conflict.entryID,
+            originalPaths: [conflict.receipt.originalPath]) }
+          catch { statusMessage = "Restored, but History could not be updated: \(error.localizedDescription)" }
+          history = await historyStore.load()
+          skipRestoreConflict(conflict)
+          reveal(destination)
+        } catch {
+          statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
+        }
+        isWorking = false
+        operationTitle = nil
+        refreshTrashStatus()
       }
-      statusMessage = "Restored to \(destination.path)"
-      reveal(destination)
-    } catch {
-      statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
     }
   }
 

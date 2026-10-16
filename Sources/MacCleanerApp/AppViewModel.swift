@@ -149,7 +149,7 @@ final class AppViewModel: ObservableObject {
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?
   @Published var lastReport: OperationReport?
-  @Published var restoreConflict: RestoreConflict?
+  @Published var restoreConflicts: [RestoreConflict] = []
   @Published var largeFileRoot = FileManager.default.homeDirectoryForCurrentUser
   @Published var duplicateRoot = FileManager.default.homeDirectoryForCurrentUser
   @Published var largeFileMinimum: Int64 = 100 * 1_048_576
@@ -249,6 +249,22 @@ final class AppViewModel: ObservableObject {
 
   func deselectAllCleanup() {
     for index in cleanupTargets.indices { cleanupTargets[index].isSelected = false }
+  }
+
+  func inspectDroppedApp(_ url: URL) {
+    guard url.isFileURL, url.pathExtension.lowercased() == "app" else {
+      statusMessage = "Drop an installed .app bundle to inspect it"; return
+    }
+    selectedSection = .applications
+    if let app = apps.first(where: { FileSystem.comparisonPath($0.url) == FileSystem.comparisonPath(url) }) {
+      loadLeftovers(for: app)
+    } else {
+      Task {
+        guard let app = await appScanner.inspect(url) else { statusMessage = "This is not a readable application bundle"; return }
+        if !apps.contains(where: { $0.url == url }) { apps.append(app) }
+        loadLeftovers(for: app)
+      }
+    }
   }
 
   func loadLeftovers(for app: AppRecord) {
@@ -464,6 +480,12 @@ final class AppViewModel: ObservableObject {
 
   func reveal(_ url: URL) {
     NSWorkspace.shared.activateFileViewerSelecting([url])
+  }
+
+  func openLoginItemsSettings() {
+    if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+      NSWorkspace.shared.open(url)
+    }
   }
 
   func openSystemSettings() {

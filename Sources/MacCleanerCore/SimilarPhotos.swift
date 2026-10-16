@@ -128,50 +128,74 @@ public enum PhotoAnalysis {
 
   // MARK: Grouping
 
-  /// Groups photos whose hashes are within `threshold` bits (single-linkage). Exact duplicates
-  /// (same physical file) are collapsed. Groups are sorted by reclaimable bytes.
+  /// A metric index finds candidate keepers without comparing every pair. Each member is
+  /// within the threshold of its suggested keeper; weak chains do not merge unrelated shots.
+  /// Quality is ordered first, so an attached member never displaces its group's anchor.
   public static func group(_ photos: [PhotoFingerprint], threshold: Int = 6) -> [SimilarPhotoGroup] {
-    var unique: [PhotoFingerprint] = []
-    var seenIdentities: Set<String> = []
-    for photo in photos {
-      if let identity = photo.identity, !seenIdentities.insert(identity).inserted { continue }
-      unique.append(photo)
+    let radius = min(64, max(0, threshold))
+    var seen: Set<String> = []
+    let unique = photos.filter { photo in
+      seen.insert(photo.identity.map { "inode:" + $0 } ?? "id:" + photo.id).inserted
+    }.sorted {
+      // Quantize sharpness to make the comparison transitive, then prefer resolution.
+      let l = Int((log2(max(1, $0.sharpness)) / log2(1.2)).rounded())
+      let r = Int((log2(max(1, $1.sharpness)) / log2(1.2)).rounded())
+      if l != r { return l > r }
+      if $0.pixelCount != $1.pixelCount { return $0.pixelCount > $1.pixelCount }
+      return $0.id < $1.id
     }
     guard unique.count > 1 else { return [] }
-
-    var parent = Array(0..<unique.count)
-    func root(_ i: Int) -> Int {
-      var i = i
-      while parent[i] != i {
-        parent[i] = parent[parent[i]]
-        i = parent[i]
-      }
-      return i
+    struct Node {
+      let hash: UInt64
+      let cluster: Int
+      var children: [Int: Int] = [:]
     }
-    for i in 0..<unique.count {
-      if i % 256 == 0, Task.isCancelled { return [] }
-      for j in (i + 1)..<unique.count where distance(unique[i].hash, unique[j].hash) <= threshold {
-        let (a, b) = (root(i), root(j))
-        if a != b { parent[b] = a }
-      }
-    }
-
-    var clusters: [Int: [PhotoFingerprint]] = [:]
-    for (index, photo) in unique.enumerated() { clusters[root(index), default: []].append(photo) }
-    return clusters.values.filter { $0.count > 1 }.map { members in
-      let sorted = members.sorted { ($0.captured ?? .distantPast, $0.id) < ($1.captured ?? .distantPast, $1.id) }
-      let keeper = sorted.indices.max { lhs, rhs in
-        let l = sorted[lhs]
-        let r = sorted[rhs]
-        // Prefer clearly sharper shots; among comparable ones, prefer more pixels.
-        if abs(l.sharpness - r.sharpness) > 0.15 * max(l.sharpness, r.sharpness) {
-          return l.sharpness < r.sharpness
+    var index: [Node] = []
+    var exact: [UInt64: Int] = [:]
+    var clusters: [[PhotoFingerprint]] = []
+    for (offset, photo) in unique.enumerated() {
+      if offset % 64 == 0, Task.isCancelled { return [] }
+      var match = exact[photo.hash]
+      var bestDistance = radius + 1
+      if match == nil, !index.isEmpty {
+        var stack = [0]
+        while let next = stack.popLast() {
+          let node = index[next]
+          let d = distance(photo.hash, node.hash)
+          if d <= radius && (d < bestDistance || (d == bestDistance && node.cluster < (match ?? Int.max))) {
+            match = node.cluster
+            bestDistance = d
+          }
+          for (edge, child) in node.children where abs(edge - d) <= min(radius, bestDistance) {
+            stack.append(child)
+          }
         }
-        return l.pixelCount < r.pixelCount
-      } ?? 0
-      return SimilarPhotoGroup(id: sorted[0].id, photos: sorted, keeperIndex: keeper)
+      }
+      if let match {
+        clusters[match].append(photo)
+        // Exact repeats of a member also belong to this same verified anchor.
+        exact[photo.hash] = match
+      } else {
+        let cluster = clusters.count
+        clusters.append([photo])
+        exact[photo.hash] = cluster
+        let newIndex = index.count
+        if !index.isEmpty {
+          var cursor = 0
+          while true {
+            let d = distance(photo.hash, index[cursor].hash)
+            if let child = index[cursor].children[d] { cursor = child }
+            else { index[cursor].children[d] = newIndex; break }
+          }
+        }
+        index.append(Node(hash: photo.hash, cluster: cluster))
+      }
     }
-    .sorted { $0.reclaimableBytes > $1.reclaimableBytes }
+    return clusters.filter { $0.count > 1 }.map { members in
+      SimilarPhotoGroup(id: members[0].id, photos: members, keeperIndex: 0)
+    }.sorted {
+      $0.reclaimableBytes == $1.reclaimableBytes ? $0.id < $1.id : $0.reclaimableBytes > $1.reclaimableBytes
+    }
   }
 
   /// Photos that are much blurrier than the folder's typical sharpness (relative, not absolute,
@@ -304,7 +328,7 @@ public actor PhotoScanner {
 
   static func fingerprint(_ url: URL) -> PhotoFingerprint? {
     #if canImport(ImageIO)
-      guard !PhotoAnalysis.isInsideLibraryPackage(url),
+      guard !PhotoAnalysis.isInsideLibraryPackage(url), !FileSystem.isCloudPlaceholder(url),
         let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
       else { return nil }
       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]

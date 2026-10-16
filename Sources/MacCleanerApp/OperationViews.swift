@@ -26,7 +26,8 @@ struct PlanItemRow: View {
             StatusPill(title: "Review", icon: "eye.fill", tint: .orange)
           }
         }
-        Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        Text(item.reason).font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
         Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
           .truncationMode(.middle)
       }
@@ -82,7 +83,10 @@ struct PlanItemRow: View {
 // MARK: - Review sheet (shown before anything moves)
 
 struct PlanReviewSheet: View {
-  let plan: OperationPlan
+  @State private var plan: OperationPlan
+
+  init(plan: OperationPlan) { _plan = State(initialValue: plan) }
+
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var showExcluded = false
@@ -104,7 +108,17 @@ struct PlanReviewSheet: View {
         List {
           ForEach(grouped, id: \.0) { source, items in
             Section {
-              ForEach(items) { PlanItemRow(item: $0) }
+              ForEach(items) { item in
+                PlanItemRow(item: item, onRemove: { remove(item) })
+                  .contextMenu {
+                    Button("Keep this item") { remove(item) }
+                    Button("Exclude from Future Scans") {
+                      model.ignore(item.url)
+                      remove(item)
+                    }
+                    Button("Show Folder Contents in Finder") { model.reveal(item.url) }
+                  }
+              }
             } header: {
               HStack {
                 Text(source)
@@ -127,6 +141,17 @@ struct PlanReviewSheet: View {
     }
     .frame(width: 720)
     .frame(minHeight: 420, maxHeight: 680)
+  }
+
+  private func remove(_ item: PlanItem) {
+    let remaining = (plan.items + plan.covered).filter {
+      !FileSystem.path($0.url, isInsideOrEqual: item.url)
+    }
+    for removed in (plan.items + plan.covered) where FileSystem.path(removed.url, isInsideOrEqual: item.url) {
+      model.dequeue(removed)
+    }
+    plan = OperationPlanner.plan(title: plan.title, items: remaining,
+      ignoredPaths: model.ignoredPaths, excluded: plan.excluded)
   }
 
   private var header: some View {
@@ -221,7 +246,7 @@ struct OperationReportSheet: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
 
-  private var allGood: Bool { report.problems.isEmpty && !report.wasCancelled }
+  private var allGood: Bool { report.problems.isEmpty && !report.wasCancelled && report.persistenceError == nil }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -234,7 +259,7 @@ struct OperationReportSheet: View {
             .font(.title2.bold())
           Text(report.summary + ".")
             .foregroundStyle(.secondary)
-          Text("Space is freed when you empty the Trash.")
+          Text("Moving to Trash may not change free space. Emptying Trash, snapshots, clones, and cloud storage affect the eventual savings.")
             .font(.caption)
             .foregroundStyle(.tertiary)
         }
@@ -246,7 +271,7 @@ struct OperationReportSheet: View {
         Divider()
         List {
           if !report.problems.isEmpty {
-            Section("Skipped") {
+            Section("Items needing attention") {
               ForEach(report.problems) { outcome in
                 VStack(alignment: .leading, spacing: 2) {
                   Text(outcome.item.displayName).fontWeight(.medium)
@@ -353,5 +378,31 @@ struct ReviewQueueView: View {
         .listStyle(.inset)
       }
     }
+  }
+}
+
+
+struct RestoreConflictsSheet: View {
+  @EnvironmentObject private var model: AppViewModel
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Restore needs attention").font(.title2.bold())
+      Text("Choose what to do with each item. Existing files are never overwritten.")
+        .foregroundStyle(.secondary)
+      List(model.restoreConflicts) { conflict in
+        VStack(alignment: .leading, spacing: 6) {
+          Text(conflict.receipt.originalPath).font(.callout.weight(.medium)).textSelection(.enabled)
+          Text(conflict.message).font(.caption).foregroundStyle(.secondary)
+          HStack {
+            Button("Restore Elsewhere…") { model.restoreElsewhere(conflict) }
+            Button("Show in Trash") { model.revealInTrash(conflict.receipt) }
+            Button("Skip") { model.skipRestoreConflict(conflict) }
+          }.disabled(model.isWorking)
+        }.padding(.vertical, 5)
+      }
+      Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+    }.padding(20).frame(width: 680, height: 460)
   }
 }
