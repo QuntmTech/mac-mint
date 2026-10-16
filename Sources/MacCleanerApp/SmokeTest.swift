@@ -51,6 +51,8 @@ enum SmokeTest {
       model.selectedSection = section
       render(section.rawValue, RootView())
     }
+    model.selectedSection = .dashboard
+    render("Dark overview", RootView().environment(\.colorScheme, .dark))
     render("Compact overview", RootView(), width: 980, height: 660)
     render("Help", HelpView())
     render("Account access", AccountAccessSheet())

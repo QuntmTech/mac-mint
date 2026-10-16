@@ -100,11 +100,12 @@ extension AppViewModel {
         let library = await PhotoLibraryService.fingerprints(progress: report)
         let issues = library.total > library.photos.count ? [ScanIssue(area: "Photos", path: nil, severity: .info,
           message: "\(library.total - library.photos.count) library assets could not be analyzed from local thumbnails. Cloud-only, unreadable or unsupported items may be omitted. No cloud downloads were requested.")] : []
-        result = await Task.detached(priority: .userInitiated) {
+        let analysis = Task.detached(priority: .userInitiated) {
           PhotoScanResult(photos: library.photos, similarGroups: PhotoAnalysis.group(library.photos),
             blurry: PhotoAnalysis.blurry(library.photos), screenshots: [], skippedLibraries: [], issues: issues,
             wasCancelled: Task.isCancelled)
-        }.value
+        }
+        result = await withTaskCancellationHandler(operation: { await analysis.value }, onCancel: { analysis.cancel() })
       case .folder(let url):
         result = await PhotoScanner().scan([url], ignoredPaths: ignoredPaths, progress: report)
       }
