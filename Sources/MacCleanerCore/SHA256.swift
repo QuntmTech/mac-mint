@@ -24,14 +24,30 @@ public enum SHA256 {
       if Task.isCancelled { throw CancellationError() }
       let requested = min(chunkSize, remaining ?? chunkSize)
       if requested <= 0 { break }
-      guard let chunk = try handle.read(upToCount: requested), !chunk.isEmpty else { break }
-      hasher.update(chunk)
-      if let left = remaining {
-        remaining = left - chunk.count
+      // FileHandle hands back autoreleased buffers on macOS; without a pool per chunk they pile
+      // up for the whole file (the duplicate benchmark peaked above 1 GB before this).
+      let finished: Bool = try drainingAutoreleasePool {
+        guard let chunk = try handle.read(upToCount: requested), !chunk.isEmpty else { return true }
+        hasher.update(chunk)
+        if let left = remaining {
+          remaining = left - chunk.count
+        }
+        return false
       }
+      if finished { break }
     }
     return hasher.finalizeHex()
   }
+}
+
+/// Runs `body` in an autorelease pool on Apple platforms (a no-op elsewhere).
+@inline(__always)
+func drainingAutoreleasePool<T>(_ body: () throws -> T) rethrows -> T {
+  #if canImport(ObjectiveC)
+    return try autoreleasepool(invoking: body)
+  #else
+    return try body()
+  #endif
 }
 
 #if canImport(CryptoKit)
