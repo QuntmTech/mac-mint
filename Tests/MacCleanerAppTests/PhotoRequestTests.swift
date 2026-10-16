@@ -3,6 +3,13 @@ import XCTest
 @testable import MacCleanerApp
 
 final class PhotoRequestTests: XCTestCase {
+  func testPhotoDeletionRevalidatesAvailableKeepersAndTheCompleteSelection() {
+    XCTAssertNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], available: ["copy", "keeper"]))
+    XCTAssertTrue(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], available: ["copy"])?.contains("chose to keep") == true)
+    XCTAssertTrue(PhotoDeletionPolicy.problem(selected: ["copy", "keeper"], keepers: ["keeper"], available: ["copy", "keeper"])?.contains("selection includes") == true)
+    XCTAssertTrue(PhotoDeletionPolicy.problem(selected: ["copy", "missing"], keepers: ["keeper"], available: ["copy", "keeper"])?.contains("selected photos") == true)
+  }
+
   func testCancelBeforeRegistrationFinishesAndCancelsLateRequestExactlyOnce() async {
     let calls = CancelledRequests()
     let bridge = PhotoThumbnailRequest(cancel: { calls.append($0) })

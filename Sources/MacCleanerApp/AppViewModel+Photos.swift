@@ -181,7 +181,11 @@ extension AppViewModel {
       operationTitle = nil
     }
     do {
-      let deleted = try await PhotoLibraryService.delete(assetIDs: assets.compactMap(\.assetID))
+      let selectedIDs = Set(assets.map(\.id))
+      let keepers = (photoScan?.similarGroups ?? []).filter { group in
+        group.photos.contains { selectedIDs.contains($0.id) }
+      }.compactMap { keeper(of: $0).assetID }
+      let deleted = try await PhotoLibraryService.delete(assetIDs: assets.compactMap(\.assetID), protecting: keepers)
       guard deleted else {
         statusMessage = "Nothing was deleted"
         return

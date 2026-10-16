@@ -72,17 +72,27 @@ enum PhotoLibraryService {
 
   /// Asks Photos to delete the assets. Photos shows its own confirmation; deleted items stay
   /// in Recently Deleted. Returns false when the user cancels in that dialog.
-  static func delete(assetIDs: [String]) async throws -> Bool {
+  static func delete(assetIDs: [String], protecting keeperIDs: [String] = []) async throws -> Bool {
     let unique = Set(assetIDs)
+    let keepers = Set(keeperIDs)
     guard !unique.isEmpty else { return false }
-    let assets = PHAsset.fetchAssets(withLocalIdentifiers: Array(unique), options: nil)
-    guard assets.count == unique.count else {
+    if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
+      available: availableIDs(unique.union(keepers))) {
       throw NSError(domain: "MacMintPhotos", code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Some selected photos are no longer available. Rescan the library before deleting."])
+        userInfo: [NSLocalizedDescriptionKey: problem])
     }
+    let validation = ResultBox<String>()
     do {
       try await PHPhotoLibrary.shared().performChanges {
-        PHAssetChangeRequest.deleteAssets(assets)
+        if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
+          available: availableIDs(unique.union(keepers))) {
+          validation.set(problem)
+          return
+        }
+        PHAssetChangeRequest.deleteAssets(PHAsset.fetchAssets(withLocalIdentifiers: Array(unique), options: nil))
+      }
+      if let problem = validation.value {
+        throw NSError(domain: "MacMintPhotos", code: 1, userInfo: [NSLocalizedDescriptionKey: problem])
       }
       return true
     } catch let error as NSError where error.domain == "PHPhotosErrorDomain" && error.code == 3072 {
@@ -118,6 +128,26 @@ enum PhotoLibraryService {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Photos.app"))
   }
 
+  private static func availableIDs(_ identifiers: Set<String>) -> Set<String> {
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: Array(identifiers), options: nil)
+    return Set((0..<assets.count).map { assets.object(at: $0).localIdentifier })
+  }
+
+}
+
+enum PhotoDeletionPolicy {
+  static func problem(selected: Set<String>, keepers: Set<String>, available: Set<String>) -> String? {
+    guard selected.isDisjoint(with: keepers) else {
+      return "The selection includes a photo you are keeping. Review the comparison before deleting."
+    }
+    guard keepers.isSubset(of: available) else {
+      return "A photo you chose to keep is no longer available. Rescan the library before deleting other copies."
+    }
+    guard selected.isSubset(of: available) else {
+      return "Some selected photos are no longer available. Rescan the library before deleting."
+    }
+    return nil
+  }
 }
 
 /// Handles cancellation before request registration, synchronous callbacks, and repeated
