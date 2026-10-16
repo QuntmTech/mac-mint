@@ -12,3 +12,228 @@
 @media(max-width:600px){
 .app-sidebar nav button{font-size:9px;min-height:40px;padding:0 10px}.window-titlebar{font-size:9px;height:31px}.window-demo{font-size:5px}.demo-view{min-height:540px}.micro-eyebrow{font-size:6px}.demo-heading>.badge{font-size:8px}.scan-panel-copy h4{font-size:13px}.scan-panel-copy p{font-size:9px;line-height:1.6}.scan-panel-copy p br{display:none}.scan-buttons .mini-button{font-size:9px;min-height:38px;padding:6px 10px}.scan-buttons .plain-button{font-size:9px;min-height:38px}.scan-metrics>button>span:nth-child(2)>span{font-size:8px;line-height:1.4}.scan-metrics>button{min-height:100px}.scan-metrics strong{font-size:22px}.cleanup-title strong{font-size:11px}.cleanup-title small{font-size:7px;max-width:170px;line-height:1.6}.cleanup-title button{font-size:8px;min-height:35px}.cleanup-row{min-height:47px}.cleanup-name strong{font-size:9px;line-height:1.4}.cleanup-row .badge{font-size:7px}.cleanup-row>b{font-size:9px;width:38px}.cleanup-total>span{font-size:7px;max-width:130px}.cleanup-total .mini-button{font-size:8px;min-height:38px}.app-status{font-size:7px;min-height:35px}.product-caption{font-size:8px;line-height:1.6}.product-caption>span:last-child{font-size:7px}.demo-label,.explorer-demo>.demo-label{font-size:8px}.app-choices button{font-size:8px;line-height:1.4;min-height:44px}.uninstall-heading strong{font-size:14px}.uninstall-heading>div>span{font-size:9px;line-height:1.5}.uninstall-heading>.badge{font-size:6px}.related-caption{font-size:7px;letter-spacing:.5px}.leftover-row{gap:6px;min-height:47px;padding:12px 10px}.leftover-row>span{font-size:9px;line-height:1.4}.leftover-row small{font-size:5px}.leftover-row>strong{font-size:8px}.leftover-row>svg{display:none}.uninstall-total>span{font-size:8px}.uninstall-total .mini-button{font-size:8px;min-height:39px}.demo-footnote{font-size:7px;line-height:1.7}.duplicate-file>strong{font-size:7px;overflow-wrap:anywhere}.duplicate-file>small{font-size:7px}.duplicate-size,.keep-tag{font-size:8px}.duplicate-top>span:first-child{font-size:11px}.duplicate-top>.badge{font-size:8px}.verification-path{font-size:8px;gap:6px}.duplicate-actions .mini-button{font-size:8px;min-height:40px}.demo-bottom,.demo-bottom button{font-size:8px}.demo-bottom button{min-height:34px}.file-name strong{font-size:10px}.file-name small{font-size:8px}.file-size{font-size:10px}.mini-toolbar>span{font-size:9px}.mini-toolbar select{font-size:9px;min-height:38px}.file-row .icon-button{min-height:40px}.terminal-top .demo-label{font-size:5px}.developer-row>div>strong{font-size:10px}.developer-row code{font-size:6px}.developer-row>strong{font-size:10px}.dev-risk{font-size:6px}.developer-total>span{font-size:6px}.dev-caption{font-size:7px}.demo-description{font-size:11px}.startup-row summary strong{font-size:10px}.startup-row .badge{font-size:7px}.history-row{font-size:10px}.demo-confirm p{font-size:11px}.demo-confirm .mini-button{font-size:9px;min-height:42px}.cleaner-tools input{font-size:10px}.cleaner-tools select{font-size:9px}.cleaner-tools .plain-button{font-size:9px}.inline-confirm{font-size:10px}.inline-confirm>span{font-size:9px}.inline-confirm .mini-button{min-height:40px;font-size:8px}
 }
+
+/* Focused refinement: preserve the existing composition, improve legibility and action clarity. */
+:root{--muted:#5e6c64;--touch:44px}
+.hero-copy>.release-note,.final-cta>.release-note{font-size:12px;line-height:1.5;color:#647168;margin:12px 0 0}
+.final-actions{display:flex;align-items:center;justify-content:center;gap:24px;flex-wrap:wrap}
+.final-actions>.text-link{min-height:44px;font-size:13px}
+.desktop-nav a{display:inline-flex;align-items:center;min-height:44px}
+.hero-reassurance{color:#5f7065}
+.product-caption{color:#5d6e61;line-height:1.6}
+.product-window{scroll-margin-top:100px}
+.demo-module-picker{display:none}
+.demo-main,.feature-copy,.developer-copy,.developer-row>div{min-width:0}
+.hero-copy>p{max-width:580px;margin-left:auto;margin-right:auto}
+.feature-copy>p,.safety-point p,.utility-card p,.faq-list details>p{color:var(--muted)}
+.eyebrow{color:#0d754c}
+.explorer-demo>.demo-label,.demo-footnote{color:#5d6e59}
+.modal-demo-link{margin-top:12px}
+.workflow-visual:focus-visible{outline:3px solid var(--green);outline-offset:5px}
+@media(min-width:1101px){
+ .hero{padding-top:42px}
+ .hero-product{margin-top:32px}
+ .hero-copy>p{font-size:17px}
+ .section-top>p,.feature-copy>p,.developer-copy>p,.comparison-section p{font-size:15px;line-height:1.75}
+ .check-list li,.utility-card p{font-size:13px;line-height:1.65}
+ .feature-tabs button{font-size:14px;min-height:52px}
+ .faq-list summary{font-size:15px}
+ .faq-list details>p{font-size:14px}
+ .safety-point p{font-size:14px}
+ .trust-strip>div{font-size:12px}
+ .footer-main>div>a:not(:first-child),.footer-main>div>button{font-size:12px;min-height:32px}
+}
+@media(min-width:601px) and (max-width:1100px){
+ .hero-copy>p{font-size:16px;max-width:540px}
+ .hero-reassurance{font-size:11px}
+ .desktop-nav{font-size:12px;gap:20px}
+ .section-top>p,.feature-copy>p,.developer-copy>p,.safety-copy>p,.safety-point p,.utility-card p,.comparison-section p,.faq-list details>p{font-size:14px;line-height:1.75}
+ .feature-tabs button,.check-list li,.faq-list summary,.privacy-proof,.workflow-results{font-size:12px}
+ .privacy-content>p,.workflow-visual p{font-size:14px}
+ .developer-copy>small{font-size:11px}
+ .text-link{font-size:12px;min-height:40px}
+ .dev-tags>span{font-size:10px}
+ .product-caption{font-size:10px}
+}
+@media(max-width:600px){
+ html{scroll-padding-top:82px}
+ .site-header{height:70px}
+ .nav-inner{padding:0 16px;gap:8px}
+ .nav-actions{gap:5px}
+ .nav-cta{font-size:12px;min-height:44px;padding:0 12px}
+ .menu-toggle{width:44px;min-width:44px;height:44px}
+ .mobile-nav{top:69px}
+ .mobile-nav a{min-height:52px}
+ .hero{padding-top:27px}
+ .hero-eyebrow{font-size:11px;line-height:1.5;padding:6px 11px}
+ .hero h1{font-size:clamp(42px,11.8vw,56px);letter-spacing:-2.6px;line-height:1.06;margin:20px 0}
+ .hero-copy>p{font-size:15px;line-height:1.65;max-width:335px;margin:24px auto 20px}
+ .hero-actions{gap:8px}
+ .hero-actions .button{min-height:48px;font-size:12px;padding:0 14px;gap:7px}
+ .hero-copy>.release-note,.final-cta>.release-note{font-size:11px;margin-top:12px}
+ .hero-reassurance{font-size:10px;gap:7px;flex-wrap:wrap;margin-top:13px}
+ .hero-reassurance svg{width:12px;height:12px}
+ .hero-product{margin-top:25px}
+ .product-stage{padding:12px 5px 0;border-radius:15px}
+ .window-titlebar{height:34px;font-size:10px}
+ .window-demo{font-size:6px;letter-spacing:.6px}
+ .demo-module-picker{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid #dce3db;background:#f1f5ec}
+ .demo-module-picker>span{font-size:11px;font-weight:600;color:#4c6251}
+ .demo-module-picker select{min-height:44px;min-width:0;max-width:64%;padding:0 10px;border:1px solid #b9cdbb;border-radius:7px;background:white;color:#215a3a;font-size:12px;font-weight:600}
+ .app-sidebar{display:none}
+ .demo-view{padding:17px 12px 14px;min-height:590px}
+ .micro-eyebrow{font-size:8px;letter-spacing:.7px;color:#5f6d5b}
+ .demo-heading h3{font-size:23px}
+ .demo-heading>.badge{font-size:9px}
+ .scan-panel{padding:16px 12px;gap:14px}
+ .storage-ring{height:84px;width:84px}
+ .storage-ring>div{height:71px;width:71px}
+ .storage-ring strong{font-size:22px}
+ .storage-ring span{font-size:8px;color:#586c50}
+ .scan-panel-copy h4{font-size:14px;line-height:1.4}
+ .scan-panel-copy p{font-size:11px;line-height:1.55}
+ .scan-buttons{gap:7px;flex-wrap:wrap}
+ .scan-buttons .mini-button,.scan-buttons .plain-button{font-size:11px;min-height:44px}
+ .scan-buttons>span{font-size:9px;color:#4f6549}
+ .scan-metrics{gap:6px}
+ .scan-metrics>button{min-height:107px;padding:10px 7px}
+ .scan-metrics>button>span:nth-child(2)>span{font-size:10px;line-height:1.4;color:#53664c}
+ .scan-metrics>button>svg{display:none}
+ .cleanup-title{padding:11px 9px}
+ .cleanup-title strong{font-size:12px}
+ .cleanup-title small{font-size:9px;max-width:165px;color:#596b51}
+ .cleanup-title button{font-size:10px;min-height:44px}
+ .cleanup-row{min-height:56px;gap:7px;padding:10px 9px}
+ .cleanup-row .row-icon{display:none}
+ .cleanup-row input,.leftover-row input,.developer-row input{height:17px;width:17px}
+ .cleanup-name strong{font-size:12px;line-height:1.4}
+ .cleanup-row .badge{font-size:8px;padding:4px}
+ .cleanup-row>b{font-size:11px;width:42px}
+ .cleanup-total{gap:8px;padding:10px 9px}
+ .cleanup-total>span{font-size:9px;max-width:118px;color:#596b51}
+ .cleanup-total .mini-button{min-height:44px;font-size:10px}
+ .app-status{font-size:9px;min-height:42px;line-height:1.5;color:#53664c;padding:8px 10px}
+ .product-caption{font-size:10px;gap:5px;padding:14px 3px 21px}
+ .product-caption>span:last-child{font-size:9px}
+ .trust-strip{gap:18px 8px;padding:24px 16px}
+ .trust-strip>div{font-size:11px;gap:7px}
+ .eyebrow{font-size:10px;letter-spacing:1.4px}
+ .section-top>p,.problem-section p,.feature-copy>p,.safety-copy>p,.developer-copy>p,.utility-card p,.comparison-section p,.privacy-content>p,.faq-list details>p{font-size:15px;line-height:1.7}
+ .section-top>p{max-width:310px}
+ .problem-section p{max-width:330px}
+ .clutter-line>span{font-size:11px;padding:10px 12px}
+ .text-link{font-size:13px;min-height:44px}
+ .feature-tabs{gap:5px}
+ .feature-tabs button{font-size:11px;min-height:48px;padding:12px 2px;gap:5px}
+ .feature-copy .eyebrow{font-size:9px}
+ .check-list li{font-size:12px;line-height:1.6;align-items:flex-start}
+ .check-list li svg{margin-top:3px}
+ .explorer-demo{padding:12px}
+ .app-choices button{font-size:10px;min-height:48px;flex-wrap:wrap;justify-content:center}
+ .uninstall-heading strong{font-size:16px}
+ .uninstall-heading>div>span{font-size:11px}
+ .related-caption{font-size:9px}
+ .leftover-row{min-height:54px;padding:12px 9px}
+ .leftover-row>span{font-size:11px;overflow-wrap:anywhere}
+ .leftover-row small{font-size:7px}
+ .leftover-row>strong{font-size:10px;width:38px;flex-shrink:0}
+ .uninstall-total{gap:8px;flex-wrap:wrap}
+ .uninstall-total>span{font-size:11px}
+ .uninstall-total .mini-button{font-size:10px;min-height:44px}
+ .demo-footnote{font-size:10px;line-height:1.6}
+ .mini-toolbar{flex-wrap:wrap;gap:8px}
+ .mini-toolbar>span{font-size:11px}
+ .mini-toolbar select{font-size:11px;min-height:44px}
+ .file-row{gap:7px;padding:12px 8px}
+ .file-name{min-width:0}
+ .file-name strong{font-size:12px;overflow-wrap:anywhere}
+ .file-name small{font-size:10px}
+ .file-size{font-size:11px;white-space:nowrap}
+ .file-row .icon-button{width:44px;min-width:44px;min-height:44px}
+ .duplicate-file>strong{font-size:10px;line-height:1.5}
+ .duplicate-file>small,.duplicate-size,.keep-tag{font-size:9px}
+ .verification-path{font-size:9px;flex-wrap:wrap;justify-content:center}
+ .duplicate-actions{flex-wrap:wrap}
+ .duplicate-actions .mini-button{min-height:44px;font-size:11px}
+ .demo-bottom,.demo-bottom button{font-size:10px;line-height:1.5}
+ .demo-bottom{gap:8px;flex-wrap:wrap}
+ .demo-bottom button{min-height:44px}
+ .section-center p,.workflow-visual p,.safety-point p{font-size:14px;line-height:1.7}
+ .workflow-results{font-size:11px;line-height:1.6}
+ .workflow-steps>button{min-height:78px}
+ .safety-point h3{font-size:15px;line-height:1.5}
+ .safety-controls button{font-size:11px;min-height:44px;padding:9px 11px}
+ .protected-chips>span{font-size:10px}
+ .safety-file strong{font-size:12px}
+ .safety-file small,.safety-art-caption{font-size:10px;line-height:1.6}
+ .safety-art{min-height:485px}
+ .dev-tags>span{font-size:10px}
+ .developer-copy>small{font-size:12px;line-height:1.7}
+ .developer-demo{padding:14px}
+ .terminal-top>span:first-child{font-size:11px}
+ .terminal-top .demo-label{font-size:7px}
+ .developer-row{gap:7px}
+ .developer-row .dev-tool{display:none}
+ .developer-row>div>strong{font-size:12px}
+ .developer-row code{font-size:9px;line-height:1.6;overflow-wrap:anywhere;white-space:normal;display:block}
+ .developer-row>strong{font-size:11px;white-space:nowrap}
+ .dev-risk{font-size:8px}
+ .developer-total{gap:12px;flex-wrap:wrap}
+ .developer-total>span{font-size:10px;line-height:1.5}
+ .dev-caption{font-size:9px}
+ .utility-card h3{font-size:20px}
+ .utility-card .text-link{font-size:12px}
+ .privacy-content .eyebrow{font-size:9px}
+ .privacy-proof{font-size:12px;gap:14px}
+ .privacy-content .text-link{font-size:12px}
+ .comparison-row{font-size:12px;grid-template-columns:1.5fr .65fr .8fr;gap:7px}
+ .comparison-row>span:last-child,.comparison-head>strong{font-size:11px}
+ .comparison-table>small{font-size:10px;line-height:1.6}
+ .faq-layout>div:first-child>p{font-size:14px}
+ .faq-list summary{font-size:15px;min-height:65px;line-height:1.5}
+ .faq-list details>p{font-size:14px}
+ .final-cta>p{font-size:15px;line-height:1.7}
+ .final-actions{flex-direction:column;gap:9px}
+ .final-actions>.button{min-width:210px;min-height:48px;font-size:14px}
+ .final-cta .hero-reassurance{font-size:11px}
+ .footer-main p{font-size:12px}
+ .footer-main>div>span{font-size:10px;line-height:1.6}
+ .footer-main>div>a:not(:first-child),.footer-main>div>button{font-size:13px;min-height:36px}
+ .footer-bottom{font-size:10px;line-height:1.6}
+ .footer-bottom button{font-size:11px;min-height:44px}
+ .modal p{font-size:15px}
+ .modal .eyebrow{font-size:10px}
+ .modal .text-link{font-size:12px;min-height:44px}
+ .availability strong{font-size:13px}
+ .availability span{font-size:12px;line-height:1.6}
+ .modal .quiet{font-size:11px;line-height:1.6}
+ .cleaner-tools>label{min-height:44px;flex:1 1 100%}
+ .cleaner-tools input,.cleaner-tools select{font-size:12px}
+ .cleaner-tools select,.cleaner-tools .plain-button{min-height:44px;font-size:11px}
+ .demo-confirm{inset:20px 10px auto;padding:22px 17px}
+ .demo-confirm p{font-size:13px;line-height:1.6}
+ .demo-confirm .mini-button,.inline-confirm .mini-button{font-size:10px;min-height:44px}
+ .inline-confirm{font-size:12px;padding:15px;line-height:1.6}
+ .inline-confirm>span{font-size:11px}
+ .demo-description,.protected-list p{font-size:13px;line-height:1.6}
+ .startup-row summary strong{font-size:12px;overflow-wrap:anywhere}
+ .startup-row .badge{font-size:9px}
+ .history-row{font-size:12px;flex-wrap:wrap;gap:9px}
+ .history-row>small{font-size:10px}
+ .history-row button{min-height:44px;font-size:12px}
+ .demo-view>.mini-button{min-height:44px;font-size:12px}
+}
+@media(max-width:374px){
+ .brand{font-size:20px}
+ .hero-actions .button{font-size:11px;padding:0 12px}
+ .hero-reassurance{font-size:9px}
+ .feature-tabs button{font-size:10px}
+ .scan-panel{gap:10px;padding:14px 9px}
+ .storage-ring{height:74px;width:74px}
+ .storage-ring>div{height:64px;width:64px}
+ .scan-panel-copy h4{font-size:13px}
+ .scan-panel-copy p{font-size:10px}
+ .scan-buttons .mini-button{padding:6px 8px;font-size:10px}
+ .cleanup-name strong{font-size:11px}
+ .cleanup-row>b{font-size:10px;width:39px}
+}

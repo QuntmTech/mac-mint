@@ -1,4 +1,5 @@
 export const faqs = [
+  ["Can I download MacMint today?", "MacMint is in development. A ready-to-install consumer download, pricing and release date have not been announced. You can explore the interactive demos here, or find the current source and local build instructions on GitHub. The demos use example data and cannot access your files."],
   ["Is MacMint safe for my Mac?", "MacMint uses a conservative cleanup policy: disposable caches can be preselected, review items require your choice, and restricted items cannot be selected. Paths are checked again before cleanup. Selected files move to macOS Trash."],
   ["Will it delete my photos or documents?", "Automatic cleanup is blocked from targeting Desktop, Documents, Pictures, Movies and Music. Large Files and Duplicates are separate review tools: you explicitly choose any personal files to remove."],
   ["Does MacMint permanently delete files?", "No. Cleanup moves selected items to the normal macOS Trash. You can restore items while they remain there. Emptying Trash is a separate action; storage is generally reclaimed when Trash is emptied."],
