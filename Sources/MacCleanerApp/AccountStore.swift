@@ -50,13 +50,13 @@ final class AccountStore: ObservableObject {
   private var recheckTask: Task<Void, Never>?
 
   init(supportDirectory: URL, client: AccountClient = AccountClient(),
-    deviceInfo: DeviceInfo? = nil, tokenStorage: AccountTokenStorage = .keychain,
+    deviceInfo: DeviceInfo? = nil, tokenStorage: AccountTokenStorage? = nil,
     now: @escaping @Sendable () -> Date = { Date() }) {
     self.now = now
     self.client = client
     self.cacheURL = supportDirectory.appendingPathComponent("account.json")
     self.deviceInfo = deviceInfo ?? Self.currentDevice()
-    self.tokenStorage = tokenStorage
+    self.tokenStorage = tokenStorage ?? .keychain
   }
 
   var isUnlocked: Bool {
