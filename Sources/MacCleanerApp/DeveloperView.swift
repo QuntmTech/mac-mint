@@ -67,9 +67,14 @@ struct DeveloperView: View {
         .buttonStyle(.borderedProminent)
         .disabled(model.isWorking || model.isScanning || selectedBytes == 0)
       }
-      Button(model.devItems.isEmpty ? "Scan" : "Rescan") { model.scanDeveloper() }
-        .buttonStyle(model.devItems.isEmpty ? .borderedProminent : .bordered)
-        .disabled(model.isScanning || model.isWorking)
+      if model.devItems.isEmpty {
+        Button("Scan") { model.scanDeveloper() }
+          .buttonStyle(.borderedProminent)
+          .disabled(model.isScanning || model.isWorking)
+      } else {
+        Button("Rescan") { model.scanDeveloper() }
+          .disabled(model.isScanning || model.isWorking)
+      }
     }
     .padding(AppTheme.pagePadding)
   }
