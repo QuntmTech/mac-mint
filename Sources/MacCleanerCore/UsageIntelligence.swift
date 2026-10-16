@@ -55,7 +55,8 @@ public struct SpotlightUsage: UsageProviding {
       let contentType = MDItemCopyAttribute(item, kMDItemContentType) as? String
       let lastUsed = MDItemCopyAttribute(item, kMDItemLastUsedDate) as? Date
       let added = MDItemCopyAttribute(item, kMDItemDateAdded) as? Date
-      let useCount = (MDItemCopyAttribute(item, kMDItemUseCount) as? NSNumber)?.intValue
+      // The use-count attribute has no exported constant; Spotlight still accepts its name.
+      let useCount = (MDItemCopyAttribute(item, "kMDItemUseCount" as CFString) as? NSNumber)?.intValue
       let source = (MDItemCopyAttribute(item, kMDItemWhereFroms) as? [String])?.first
       return UsageEvidence(
         lastUsed: lastUsed, added: added, useCount: useCount,
