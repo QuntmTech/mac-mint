@@ -10,6 +10,7 @@ cd "$ROOT"
 
 printf '▶ Building site...\n'
 npm run build
+"$ROOT/scripts/build-home2.sh"
 
 printf '▶ Publishing to %s...\n' "$DOCROOT"
 DOCROOT_MODE="$(stat -c '%a' "$DOCROOT")"
@@ -28,6 +29,7 @@ block = r'''# BEGIN MacMint SPA
   RewriteCond %{HTTPS} off
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   RewriteCond %{REQUEST_URI} !^/\.well-known/
+  RewriteCond %{REQUEST_URI} !^/home2(/|$)
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule ^ /index.html [L]
@@ -36,7 +38,7 @@ block = r'''# BEGIN MacMint SPA
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "SAMEORIGIN"
-  <If "%{REQUEST_URI} =~ m#^/assets/#">
+  <If "%{REQUEST_URI} =~ m#^/(assets|home2/_next/static)/#">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </If>
   <Else>

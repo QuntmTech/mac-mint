@@ -24,6 +24,8 @@ export type AccountSnapshot = {
   entitlement: Entitlement
   devices: Device[]
   server_time: string
+  redeemed?: boolean
+  already_redeemed?: boolean
 }
 
 export type Release = {

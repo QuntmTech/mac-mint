@@ -15,6 +15,7 @@ import {
   type Release,
 } from '../lib/account'
 import { errorMessage, pb } from '../lib/pb'
+import { track } from '../lib/track'
 
 const Card = ({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -82,6 +83,7 @@ const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
     try {
       const result = await redeemCode(code.trim())
       onRedeemed(result)
+      if (!result.already_redeemed) track('redeem')
       setSuccess('Code redeemed — MacMint Pro is unlocked. Sign in on your Mac to start cleaning.')
       setCode('')
     } catch (err) {
