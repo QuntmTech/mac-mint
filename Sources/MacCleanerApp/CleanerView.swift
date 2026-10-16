@@ -81,7 +81,7 @@ struct CleanerView: View {
         Text("Cleaner")
           .font(.system(size: 30, weight: .bold, design: .rounded))
         Text(
-          "Safe cleanup is preselected. Anything with possible long-term value requires an explicit opt-in."
+          "Rebuildable caches are suggested. Anything with possible long-term value requires an explicit opt-in."
         )
         .foregroundStyle(.secondary)
       }

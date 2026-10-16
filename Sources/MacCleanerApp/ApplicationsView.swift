@@ -160,10 +160,10 @@ struct ApplicationsView: View {
         }
         .listStyle(.inset)
       }
-      .frame(minWidth: 340, idealWidth: 380)
+      .frame(minWidth: 300, idealWidth: 340)
 
       detail
-        .frame(minWidth: 520)
+        .frame(minWidth: 380)
     }
   }
 

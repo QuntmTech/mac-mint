@@ -25,7 +25,7 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(updates)
         .environmentObject(appUpdates)
         .tint(AppTheme.accent)
-        .frame(minWidth: 1040, minHeight: 700)
+        .frame(minWidth: 980, minHeight: 620)
         .task {
           care.start()
           updates.start()

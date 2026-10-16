@@ -361,24 +361,24 @@ extension AppViewModel {
       guard response == .OK, let folder = panel.url else { return }
       Task { @MainActor [weak self] in
         guard let self else { return }
-        isWorking = true
-        operationTitle = "Restoring from Trash"
+        self.isWorking = true
+        self.operationTitle = "Restoring from Trash"
         do {
           let destination = try await Task.detached(priority: .userInitiated) {
             try RecoveryService().restore(conflict.receipt, into: folder)
           }.value
-          do { try await historyStore.markRestored(entryID: conflict.entryID,
+          do { try await self.historyStore.markRestored(entryID: conflict.entryID,
             originalPaths: [conflict.receipt.originalPath]) }
-          catch { statusMessage = "Restored, but History could not be updated: \(error.localizedDescription)" }
-          history = await historyStore.load()
-          skipRestoreConflict(conflict)
-          reveal(destination)
+          catch { self.statusMessage = "Restored, but History could not be updated: \(error.localizedDescription)" }
+          self.history = await self.historyStore.load()
+          self.skipRestoreConflict(conflict)
+          self.reveal(destination)
         } catch {
-          statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
+          self.statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
         }
-        isWorking = false
-        operationTitle = nil
-        refreshTrashStatus()
+        self.isWorking = false
+        self.operationTitle = nil
+        self.refreshTrashStatus()
       }
     }
   }
