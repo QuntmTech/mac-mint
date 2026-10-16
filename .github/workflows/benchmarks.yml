@@ -23,7 +23,6 @@ jobs:
     timeout-minutes: 60
     env:
       ITEMS: ${{ github.event.inputs.items || '100000' }}
-      FIXTURE: ${{ runner.temp }}/macmint-fixture
       RSS_LIMIT_MB: "250"
       CANCEL_LIMIT_MS: "1000"
     steps:
@@ -35,7 +34,9 @@ jobs:
       - name: Build fixture
         run: |
           BIN="$(swift build -c release --show-bin-path)/macmint-bench"
+          FIXTURE="$RUNNER_TEMP/macmint-fixture"
           echo "BIN=$BIN" >> "$GITHUB_ENV"
+          echo "FIXTURE=$FIXTURE" >> "$GITHUB_ENV"
           /usr/bin/time -p "$BIN" fixture "$FIXTURE" --items "$ITEMS" | tee fixture.json
 
       - name: Scanners — time and peak memory
