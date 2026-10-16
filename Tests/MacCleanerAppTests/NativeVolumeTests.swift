@@ -91,13 +91,20 @@ final class NativeVolumeTests: XCTestCase {
     let filler = owner.appendingPathComponent("bounded-full-disk-fixture")
     XCTAssertTrue(fm.createFile(atPath: filler.path, contents: nil))
     let handle = try FileHandle(forWritingTo: filler)
+    defer { try? handle.close() }
     let chunk = Data(repeating: 0x56, count: 1_048_576)
     var fullError: NSError?
     for _ in 0..<192 {
       do { try handle.write(contentsOf: chunk) }
       catch { fullError = error as NSError; break }
     }
-    try handle.close()
+    // A failed 1 MB allocation can leave room for a small journal. Consume remaining
+    // allocation blocks, and keep the handle open so closing cannot release preallocation.
+    let block = Data(repeating: 0x57, count: 4096)
+    for _ in 0..<2048 {
+      do { try handle.write(contentsOf: block) }
+      catch { fullError = error as NSError; break }
+    }
     XCTAssertNotNil(fullError, "The disposable image did not reach its bounded capacity")
     let underlying = fullError?.userInfo[NSUnderlyingErrorKey] as? NSError
     XCTAssertTrue([fullError, underlying].compactMap { $0 }.contains {
@@ -111,6 +118,7 @@ final class NativeVolumeTests: XCTestCase {
     XCTAssertTrue(fm.fileExists(atPath: personal.path))
     let callsAfterFullDisk = await trash.calls
     XCTAssertEqual(callsAfterFullDisk, 0)
+    try handle.close()
     try fm.removeItem(at: filler)
 
     _ = try command(["detach", try XCTUnwrap(attachedDevice)])

@@ -3,6 +3,13 @@ import XCTest
 @testable import MacCleanerCore
 
 final class TrustRegressionTests: XCTestCase {
+  func testEquivalentVersionsBehaveConsistentlyInSetsAndDictionaries() {
+    XCTAssertEqual(Set([AppVersion("1"), AppVersion("1.0"), AppVersion("1.0.0")]).count, 1)
+    let versions = [AppVersion("0"): "zero", AppVersion("1.0"): "one"]
+    XCTAssertEqual(versions[AppVersion("")], "zero")
+    XCTAssertEqual(versions[AppVersion("1.0.0")], "one")
+    XCTAssertEqual(AppVersion("1.0.0").description, "1.0.0")
+  }
   func testCaseSensitiveHomeBoundaryCannotAdoptADifferentlyCasedSibling() throws {
     let parent = try temporaryHome()
     defer { try? fm.removeItem(at: parent) }

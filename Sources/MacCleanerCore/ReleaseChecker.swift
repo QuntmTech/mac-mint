@@ -53,6 +53,14 @@ public struct AppVersion: Comparable, Hashable, Sendable, CustomStringConvertibl
   }
 
   public static func == (lhs: AppVersion, rhs: AppVersion) -> Bool { !(lhs < rhs) && !(rhs < lhs) }
+
+  public func hash(into hasher: inout Hasher) {
+    // Equality ignores trailing zero components, so hashing must ignore them too.
+    var count = parts.count
+    while count > 0, parts[count - 1] == 0 { count -= 1 }
+    hasher.combine(count)
+    for part in parts.prefix(count) { hasher.combine(part) }
+  }
 }
 
 /// Reads the newest published stable release and the minimum supported version from the
