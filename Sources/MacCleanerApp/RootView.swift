@@ -39,6 +39,7 @@ struct RootView: View {
         case .dashboard: DashboardView()
         case .review: ReviewQueueView()
         case .cleaner: CleanerView()
+        case .storage: StorageExplorerView()
         case .applications: ApplicationsView()
         case .largeFiles: LargeFilesView()
         case .duplicates: DuplicatesView()

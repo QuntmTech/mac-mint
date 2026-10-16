@@ -9,6 +9,7 @@ final class AppViewModel: ObservableObject {
     case dashboard = "Overview"
     case review = "Review"
     case cleaner = "Cleaner"
+    case storage = "Storage"
     case applications = "Applications"
     case largeFiles = "Large Files"
     case duplicates = "Duplicates"
@@ -23,6 +24,7 @@ final class AppViewModel: ObservableObject {
       case .dashboard: return "sparkles"
       case .review: return "checklist"
       case .cleaner: return "trash.circle"
+      case .storage: return "chart.pie"
       case .applications: return "app.dashed"
       case .largeFiles: return "externaldrive"
       case .duplicates: return "square.on.square"
@@ -53,6 +55,11 @@ final class AppViewModel: ObservableObject {
   @Published var lastScanDate: Date?
   @Published var lastScanDuration: TimeInterval?
   @Published var selectedLargeFileIDs: Set<UUID> = []
+  @Published var storageRoot = FileManager.default.homeDirectoryForCurrentUser
+  @Published var storageScan: StorageScan?
+  @Published var storagePath: String?
+  @Published var storageScannedCount = 0
+  @Published var selectedStoragePaths: Set<String> = []
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?
@@ -411,28 +418,28 @@ final class AppViewModel: ObservableObject {
     ]
   }
 
-  private func beginScan(title: String, message: String) {
+  func beginScan(title: String, message: String) {
     isScanning = true
     operationTitle = title
     statusMessage = message
     scanIssues = []
   }
 
-  private func finishScan(message: String) {
+  func finishScan(message: String) {
     isScanning = false
     operationTitle = nil
     currentTask = nil
     statusMessage = message
   }
 
-  private func finishCancelledOperation() {
+  func finishCancelledOperation() {
     isScanning = false
     operationTitle = nil
     currentTask = nil
     statusMessage = "Scan cancelled"
   }
 
-  private func chooseFolder(prompt: String) -> URL? {
+  func chooseFolder(prompt: String) -> URL? {
     let panel = NSOpenPanel()
     panel.title = prompt
     panel.canChooseDirectories = true

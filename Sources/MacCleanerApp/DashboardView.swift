@@ -117,6 +117,13 @@ struct DashboardView: View {
       columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14
     ) {
       moduleCard(
+        title: "Storage",
+        detail: "A visual map of what's using your disk — click to dive into any folder.",
+        icon: "chart.pie",
+        value: model.storageScan.map { ByteFormatter.string($0.root.allocatedBytes) + " mapped" }
+          ?? "Map my Mac",
+        section: .storage)
+      moduleCard(
         title: "Applications",
         detail: "Inspect app bundles and related Library data before uninstalling.",
         icon: "app.dashed", value: "\(model.apps.count) apps", section: .applications)

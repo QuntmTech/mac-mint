@@ -301,7 +301,7 @@ struct ReviewQueueView: View {
       HStack(alignment: .center, spacing: 14) {
         VStack(alignment: .leading, spacing: 4) {
           Text("Review").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Everything you've selected across Cleaner, Duplicates, and Large Files — in one place.")
+          Text("Everything you've selected across Cleaner, Storage, Duplicates, and Large Files — in one place.")
             .foregroundStyle(.secondary)
         }
         Spacer()
@@ -326,7 +326,7 @@ struct ReviewQueueView: View {
       if model.queuedCount == 0 {
         EmptyState(
           icon: "checklist", title: "Nothing selected yet",
-          detail: "Select items in Cleaner, Duplicates, or Large Files and they'll gather here for one final review.")
+          detail: "Select items in Cleaner, Storage, Duplicates, or Large Files and they'll gather here for one final review.")
       } else {
         List {
           ForEach(grouped, id: \.0) { source, items in
