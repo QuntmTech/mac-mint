@@ -58,7 +58,7 @@ struct PhotosView: View {
         } label: {
           Label(
             isLibrary
-              ? "Delete \(model.selectedPhotoIDs.count) in Photos (\(ByteFormatter.string(model.selectedPhotoBytes)))"
+              ? "Delete \(model.selectedPhotoIDs.count) in Photos"
               : "Review \(model.selectedPhotoIDs.count) (\(ByteFormatter.string(model.selectedPhotoBytes)))",
             systemImage: "trash")
         }
@@ -140,7 +140,7 @@ struct PhotosView: View {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
           Text("\(group.photos.count) similar photos").font(.headline)
-          Text("• \(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in the others")
+          Text(kept.isLibraryAsset ? "• Size unavailable" : "• \(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in the others")
             .foregroundStyle(.secondary)
           Spacer()
           Button("Compare") { comparing = group }
@@ -214,7 +214,7 @@ private struct PhotoTile: View {
         .font(.caption.weight(.medium))
         .lineLimit(1)
         .frame(width: 150, alignment: .leading)
-      Text("\(ByteFormatter.string(photo.bytes)) • \(photo.pixelWidth)×\(photo.pixelHeight)")
+      Text("\(photo.isLibraryAsset ? "Size unavailable" : ByteFormatter.string(photo.bytes)) • \(photo.pixelWidth)×\(photo.pixelHeight)")
         .font(.caption2)
         .foregroundStyle(.secondary)
     }

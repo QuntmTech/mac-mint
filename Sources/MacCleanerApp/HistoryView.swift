@@ -104,7 +104,7 @@ struct HistoryView: View {
           Button("Restore All") { model.restore(pending, entryID: entry.id) }
             .controlSize(.small)
         }
-        Text(ByteFormatter.string(entry.bytes))
+        Text(entry.restoresThroughPhotos && entry.bytes == 0 ? "Size unavailable" : ByteFormatter.string(entry.bytes))
           .font(.callout.monospacedDigit())
           .frame(width: 92, alignment: .trailing)
       }
