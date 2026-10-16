@@ -48,6 +48,7 @@ extension AppViewModel {
   }
 
   func dequeue(_ item: PlanItem) {
+    setFileSelection(item.url, selected: false)
     let path = FileSystem.comparisonPath(item.url)
     for index in cleanupTargets.indices where FileSystem.comparisonPath(cleanupTargets[index].url) == path {
       cleanupTargets[index].isSelected = false
@@ -67,6 +68,7 @@ extension AppViewModel {
   }
 
   func clearQueue() {
+    keepQueuedFiles(queuedItems.map(\.url))
     deselectAllCleanup()
     selectedDuplicateIDs = []
     selectedLargeFileIDs = []

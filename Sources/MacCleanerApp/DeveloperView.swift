@@ -58,7 +58,7 @@ struct DeveloperView: View {
       }
       Spacer()
       if !model.selectedDevIDs.isEmpty {
-        Button("Deselect") { model.selectedDevIDs = [] }
+        Button("Deselect") { model.keepQueuedFiles(model.queuedDevItems.compactMap(\.url)) }
         Button {
           model.reviewDeveloper()
         } label: {
@@ -144,7 +144,7 @@ struct DeveloperView: View {
           isOn: Binding(
             get: { model.selectedDevIDs.contains(item.id) },
             set: { isOn in
-              if isOn { model.selectedDevIDs.insert(item.id) } else { model.selectedDevIDs.remove(item.id) }
+              if let url = item.url { model.setFileSelection(url, selected: isOn) }
             })
         )
         .labelsHidden()

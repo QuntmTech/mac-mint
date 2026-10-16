@@ -77,11 +77,7 @@ extension AppViewModel {
     guard storageRemovalAllowed(node) else {
       statusMessage = "This location can be inspected. Generic removal is limited to eligible items in your home folder."; return
     }
-    if selectedStoragePaths.contains(node.id) {
-      selectedStoragePaths.remove(node.id)
-    } else {
-      selectedStoragePaths.insert(node.id)
-    }
+    setFileSelection(node.url, selected: !selectedStoragePaths.contains(node.id))
   }
 
   func reviewStorageSelection() {

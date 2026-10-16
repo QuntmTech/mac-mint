@@ -9,12 +9,7 @@ struct LargeFilesView: View {
   private func selection(_ file: LargeFile) -> Binding<Bool> {
     Binding(
       get: { model.selectedLargeFileIDs.contains(file.id) },
-      set: { isOn in
-        if isOn {
-          model.selectedLargeFileIDs.insert(file.id)
-        } else {
-          model.selectedLargeFileIDs.remove(file.id)
-        }
+      set: { model.setFileSelection(file.url, selected: $0) }
       })
   }
 
@@ -95,7 +90,7 @@ struct LargeFilesView: View {
         if model.selectedLargeFileIDs.isEmpty {
           Button("Select All") { model.selectedLargeFileIDs = Set(model.largeFiles.map(\.id)) }
         } else {
-          Button("Deselect All") { model.selectedLargeFileIDs = [] }
+          Button("Deselect All") { model.keepQueuedFiles(model.queuedLargeFiles.map(\.url)) }
           Button {
             model.reviewLargeFiles()
           } label: {

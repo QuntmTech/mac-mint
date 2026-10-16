@@ -60,7 +60,7 @@ struct StorageExplorerView: View {
       }
       Spacer()
       if !model.selectedStoragePaths.isEmpty {
-        Button("Deselect") { model.selectedStoragePaths = [] }
+        Button("Deselect") { model.keepQueuedFiles(model.queuedStorageNodes.map(\.url)) }
         Button {
           model.reviewStorageSelection()
         } label: {

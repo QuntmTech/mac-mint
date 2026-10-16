@@ -90,6 +90,7 @@ extension AppViewModel {
   }
 
   func refreshRecommendations() {
+    if aiReview != nil || aiReviewBusy || assistantBusy { invalidateAIReview() }
     var inputs = RecommendationEngine.Inputs()
     inputs.runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     inputs.cleanupTargets = cleanupTargets

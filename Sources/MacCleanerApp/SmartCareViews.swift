@@ -203,7 +203,7 @@ struct DownloadsView: View {
         }
         Spacer()
         if !model.selectedDownloadIDs.isEmpty {
-          Button("Deselect") { model.selectedDownloadIDs = [] }
+          Button("Deselect") { model.keepQueuedFiles(model.queuedDownloads.map(\.url)) }
           Button {
             model.reviewDownloads()
           } label: {
@@ -239,7 +239,7 @@ struct DownloadsView: View {
           }
           Spacer()
           Button("Select Never Opened") {
-            model.selectedDownloadIDs.formUnion(visible.filter(\.usage.neverOpened).map(\.id))
+            for item in visible.filter(\.usage.neverOpened) { model.setFileSelection(item.url, selected: true) }
           }
           .disabled(!visible.contains { $0.usage.neverOpened })
         }
@@ -267,7 +267,7 @@ struct DownloadsView: View {
         isOn: Binding(
           get: { model.selectedDownloadIDs.contains(item.id) },
           set: { isOn in
-            if isOn { model.selectedDownloadIDs.insert(item.id) } else { model.selectedDownloadIDs.remove(item.id) }
+            model.setFileSelection(item.url, selected: isOn)
           })
       )
       .labelsHidden()

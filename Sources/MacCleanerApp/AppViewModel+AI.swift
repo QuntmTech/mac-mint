@@ -162,7 +162,7 @@ extension AppViewModel {
   // MARK: Smart Care AI review (advisory: ordering + notes only)
 
   func runAIReview(account: AccountStore) {
-    guard !recommendations.isEmpty, !aiReviewBusy else { return }
+    guard !recommendations.isEmpty, !aiReviewBusy, !isScanning, !isWorking else { return }
     aiPayloadPreview = previewPayload(AIContextBuilder.reviewRequest(recommendations: recommendations, totalBytes: volumeStats.total, freeBytes: volumeStats.free, growth: storageGrowth, home: FileManager.default.homeDirectoryForCurrentUser))
     withAIConsent { [self] in
       aiReviewBusy = true
@@ -215,7 +215,7 @@ extension AppViewModel {
 
   func ask(_ question: String, account: AccountStore) {
     let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, !assistantBusy else { return }
+    guard !trimmed.isEmpty, !assistantBusy, !isScanning, !isWorking else { return }
     aiPayloadPreview = previewPayload(AIAskRequest(question: trimmed, history: assistantTurns, context: aiContext))
     withAIConsent { [self] in
       let generation = aiGeneration

@@ -199,7 +199,7 @@ struct AIReviewPanel: View {
               Label(model.aiReview == nil ? "Review with AI" : "Review Again", systemImage: "sparkles")
             }
           }
-          .disabled(model.aiReviewBusy)
+          .disabled(model.aiReviewBusy || model.isScanning || model.isWorking)
         }
         if let review = model.aiReview {
           ForEach(review.cautions, id: \.self) { caution in
@@ -390,7 +390,7 @@ struct AssistantView: View {
       }
       .buttonStyle(.plain)
       .foregroundStyle(AppTheme.accentText)
-      .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy)
+      .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy || model.isScanning || model.isWorking)
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)

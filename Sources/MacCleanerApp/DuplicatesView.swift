@@ -196,8 +196,7 @@ struct DuplicatesView: View {
       .accessibilityLabel("Quick Look \(file.url.lastPathComponent)")
       Menu {
         Button("Keep this copy") {
-          model.selectedDuplicateIDs.subtract(group.files.map(\.id))
-          model.selectedDuplicateIDs.formUnion(group.files.filter { $0.id != file.id && (file.identity == nil || $0.identity != file.identity) }.map(\.id))
+          model.keepDuplicate(file, in: group)
         }
         Button("Quick Look") { previewURL = file.url }
         Button("Reveal in Finder") { model.reveal(file.url) }

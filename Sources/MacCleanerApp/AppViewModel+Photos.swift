@@ -129,6 +129,7 @@ extension AppViewModel {
   // MARK: Selection
 
   func togglePhoto(_ photo: PhotoFingerprint) {
+    if !photo.isLibraryAsset { setFileSelection(photo.url, selected: !selectedPhotoIDs.contains(photo.id)); return }
     if selectedPhotoIDs.contains(photo.id) {
       selectedPhotoIDs.remove(photo.id)
       return
@@ -144,13 +145,15 @@ extension AppViewModel {
   func keepInstead(_ photo: PhotoFingerprint) {
     guard let group = group(containing: photo) else { return }
     photoKeeperOverrides[group.id] = photo.id
-    selectedPhotoIDs.remove(photo.id)
+    if photo.isLibraryAsset { selectedPhotoIDs.remove(photo.id) } else { setFileSelection(photo.url, selected: false) }
   }
 
   /// Selects every shot except the kept one — only when the user asks.
   func selectAllButKeeper(in group: SimilarPhotoGroup) {
     let kept = keeper(of: group).id
-    for photo in group.photos where photo.id != kept { selectedPhotoIDs.insert(photo.id) }
+    for photo in group.photos where photo.id != kept {
+      if photo.isLibraryAsset { selectedPhotoIDs.insert(photo.id) } else { setFileSelection(photo.url, selected: true) }
+    }
   }
 
   // MARK: Removing

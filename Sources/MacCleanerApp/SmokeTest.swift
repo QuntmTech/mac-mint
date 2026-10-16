@@ -26,6 +26,24 @@ enum SmokeTest {
 
     var failures: [String] = []
     var rendered = 0
+    // Exercise real app selection coordination without moving or reading user files.
+    let a = LargeFile(url: support.appendingPathComponent("keep.bin"), size: 4096, modifiedAt: nil, accessedAt: nil)
+    let b = LargeFile(url: support.appendingPathComponent("copy.bin"), size: 4096, modifiedAt: nil, accessedAt: nil)
+    let download = DownloadItem(url: b.url, kind: .document, bytes: 4096, usage: .unknown,
+      modified: nil, logicalSize: nil, identity: nil, idleDays: 100)
+    model.largeFiles = [b]; model.downloadItems = [download]
+    model.setFileSelection(b.url, selected: true)
+    if !model.selectedLargeFileIDs.contains(b.id) || !model.selectedDownloadIDs.contains(download.id) {
+      failures.append("Cross-module queue selection")
+    }
+    model.setFileSelection(b.url, selected: false)
+    if !model.selectedLargeFileIDs.isEmpty || !model.selectedDownloadIDs.isEmpty { failures.append("Cross-module keep") }
+    model.duplicateGroups = [DuplicateGroup(fingerprint: "fixture", files: [a, b])]
+    model.setFileSelection(b.url, selected: true)
+    model.setFileSelection(a.url, selected: true)
+    if model.selectedDuplicateIDs != [b.id] { failures.append("Cross-module last-copy protection") }
+    model.clearQueue(); model.largeFiles = []; model.downloadItems = []; model.duplicateGroups = []
+
     func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1200, height: CGFloat = 800) {
       rendered += 1
       let content = view

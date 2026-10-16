@@ -28,7 +28,7 @@ struct RemovedAppsView: View {
         }
         Spacer()
         if !model.selectedOrphanIDs.isEmpty {
-          Button("Deselect") { model.selectedOrphanIDs = [] }
+          Button("Deselect") { model.keepQueuedFiles(model.queuedOrphans.map(\.url)) }
           Button {
             model.reviewOrphans()
           } label: {
@@ -87,7 +87,7 @@ struct RemovedAppsView: View {
         isOn: Binding(
           get: { model.selectedOrphanIDs.contains(item.id) },
           set: { isOn in
-            if isOn { model.selectedOrphanIDs.insert(item.id) } else { model.selectedOrphanIDs.remove(item.id) }
+            model.setFileSelection(item.url, selected: isOn)
           })
       )
       .labelsHidden()

@@ -52,7 +52,7 @@ struct PhotosView: View {
       }
       Spacer()
       if !model.selectedPhotoIDs.isEmpty {
-        Button("Deselect") { model.selectedPhotoIDs = [] }
+        Button("Deselect") { model.keepQueuedFiles(model.selectedPhotos.filter { !$0.isLibraryAsset }.map(\.url)); model.selectedPhotoIDs = [] }
         Button {
           model.reviewPhotos()
         } label: {

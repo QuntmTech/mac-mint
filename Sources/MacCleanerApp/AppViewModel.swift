@@ -96,6 +96,7 @@ final class AppViewModel: ObservableObject {
   @Published var showingScanIssues = false
   @Published var recoveryWarnings: [ScanIssue] = []
   @Published var ignoredPaths: Set<String> = []
+  var keptQueuePaths: Set<String> = []
   @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
   @Published var isWorking = false
@@ -240,17 +241,17 @@ final class AppViewModel: ObservableObject {
   func toggleCleanup(_ id: UUID, selected: Bool) {
     guard let index = cleanupTargets.firstIndex(where: { $0.id == id }) else { return }
     guard cleanupTargets[index].risk != .restricted else { return }
-    cleanupTargets[index].isSelected = selected
+    setFileSelection(cleanupTargets[index].url, selected: selected)
   }
 
   func selectSafeCleanupOnly() {
     for index in cleanupTargets.indices {
-      cleanupTargets[index].isSelected = cleanupTargets[index].risk == .safe
+      setFileSelection(cleanupTargets[index].url, selected: cleanupTargets[index].risk == .safe)
     }
   }
 
   func deselectAllCleanup() {
-    for index in cleanupTargets.indices { cleanupTargets[index].isSelected = false }
+    keepQueuedFiles(cleanupTargets.map(\.url))
   }
 
   func inspectDroppedApp(_ url: URL) {
@@ -377,19 +378,23 @@ final class AppViewModel: ObservableObject {
   func selectDuplicateCopies(in groupID: UUID) {
     guard let group = duplicateGroups.first(where: { $0.id == groupID }), group.files.count > 1
     else { return }
-    let groupIDs = Set(group.files.map(\.id))
-    selectedDuplicateIDs.subtract(groupIDs)
-    for file in group.files.dropFirst() { selectedDuplicateIDs.insert(file.id) }
+    let chosen = Set(group.files.dropFirst().map(\.id))
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(group.files.map(\.id)).union(chosen))
+  }
+
+  func applyDuplicateSelection(_ ids: Set<UUID>) {
+    selectedDuplicateIDs = ids
+    for file in duplicateGroups.flatMap(\.files) { setFileSelection(file.url, selected: ids.contains(file.id)) }
+  }
+
+  func keepDuplicate(_ file: LargeFile, in group: DuplicateGroup) {
+    let copies = Set(group.files.filter { $0.id != file.id && (file.identity == nil || $0.identity != file.identity) }.map(\.id))
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(group.files.map(\.id)).union(copies))
   }
 
   func clearDuplicateSelection(in groupID: UUID? = nil) {
-    guard let groupID else {
-      selectedDuplicateIDs = []
-      return
-    }
-    guard let group = duplicateGroups.first(where: { $0.id == groupID }) else { return }
-    let groupIDs = Set(group.files.map(\.id))
-    selectedDuplicateIDs.subtract(groupIDs)
+    let removals = duplicateGroups.filter { groupID == nil || $0.id == groupID }.flatMap(\.files).map(\.id)
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(removals))
   }
 
   func toggleDuplicate(_ fileID: UUID, in groupID: UUID, selected: Bool) {
@@ -397,7 +402,7 @@ final class AppViewModel: ObservableObject {
       group.files.contains(where: { $0.id == fileID })
     else { return }
     if !selected {
-      selectedDuplicateIDs.remove(fileID)
+      if let file = group.files.first(where: { $0.id == fileID }) { setFileSelection(file.url, selected: false) }
       return
     }
 
@@ -406,7 +411,7 @@ final class AppViewModel: ObservableObject {
       statusMessage = "At least one copy must remain in each duplicate group"
       return
     }
-    selectedDuplicateIDs.insert(fileID)
+    if let file = group.files.first(where: { $0.id == fileID }) { setFileSelection(file.url, selected: true) }
   }
 
   func ignore(_ url: URL) {
@@ -538,6 +543,7 @@ final class AppViewModel: ObservableObject {
   }
 
   func finishScan(message: String) {
+    synchronizeQueueSelections()
     isScanning = false
     operationTitle = nil
     currentTask = nil

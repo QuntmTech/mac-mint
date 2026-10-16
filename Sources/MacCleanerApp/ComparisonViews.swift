@@ -23,10 +23,7 @@ struct DuplicateComparisonSheet: View {
               Text(file.modifiedAt.map { "Last changed: " + $0.formatted() } ?? "Last change unknown").font(.caption)
               Text(model.selectedDuplicateIDs.contains(file.id) ? "Selected for removal" : "Kept: not selected").font(.callout.weight(.medium))
               Button("Keep this copy") {
-                model.selectedDuplicateIDs.subtract(group.files.map(\.id))
-                model.selectedDuplicateIDs.formUnion(group.files.filter {
-                  $0.id != file.id && (file.identity == nil || $0.identity != file.identity)
-                }.map(\.id))
+                model.keepDuplicate(file, in: group)
               }
               Button("Preview (Space)") { preview = file.url }
               Button("Reveal in Finder") { model.reveal(file.url) }
