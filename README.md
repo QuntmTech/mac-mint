@@ -14,6 +14,14 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ## What works now
 
+### Smart Care
+- One pass (⌘R) over caches, apps, startup items, developer data, Removed Apps leftovers, Downloads, and the Trash, run in parallel.
+- Findings become **ranked recommendations** — estimated bytes × confidence (Safe / Likely unneeded / Worth a look) — each with a plain-English reason. "Review" always opens the normal review sheet; "Review Safe Items" bundles everything that rebuilds or re-downloads itself. No opaque health score.
+- **Usage intelligence** from Spotlight: last opened, date added, use count, and download source (host only). Unknown is never treated as unused, and file access times are never used.
+- **Downloads**: big items not opened in 3+ months ("Downloaded 8 months ago from example.com and never opened").
+- **Unused apps**: Applications can sort by *Last opened*; Smart Care lists apps not opened in 6 months (each uninstall is still reviewed individually).
+- **Free-space history** (one sample a day, 90 days) with a weekly trend, and **storage growth**: each Storage map is compared with the previous one and points at the most specific folder that grew.
+
 ### Smart Scan
 - Runs cleanup, installed-app, and startup-item scans concurrently.
 - Reports safe reclaimable bytes separately from review-only bytes.

@@ -178,12 +178,15 @@ public struct AppRecord: Identifiable, Codable, Hashable, Sendable {
   public let bundleSize: Int64
   public let lastModified: Date?
   public let identity: String?
+  /// Spotlight's last-opened date (nil = unknown, never "unused").
+  public let lastUsed: Date?
 
   public init(
     id: UUID = UUID(), url: URL, name: String, bundleIdentifier: String?, version: String?,
-    bundleSize: Int64, lastModified: Date?, identity: String? = nil
+    bundleSize: Int64, lastModified: Date?, identity: String? = nil, lastUsed: Date? = nil
   ) {
     self.identity = identity
+    self.lastUsed = lastUsed
     self.id = id
     self.url = url
     self.name = name

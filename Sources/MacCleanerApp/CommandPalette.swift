@@ -19,10 +19,27 @@ struct CommandPalette: View {
 
   private var entries: [Entry] {
     var list: [Entry] = []
-    list.append(Entry(id: "action:scan", title: "Run Smart Scan", subtitle: "Action", icon: "sparkles") {
+    list.append(Entry(id: "action:care", title: "Run Smart Care", subtitle: "Action", icon: "sparkles") {
+      $0.selectedSection = .dashboard
+      $0.runSmartCare()
+    })
+    list.append(Entry(id: "action:scan", title: "Run Smart Scan (caches only)", subtitle: "Action", icon: "sparkle") {
       $0.selectedSection = .dashboard
       $0.runSmartScan()
     })
+    list += model.recommendations.map { recommendation in
+      Entry(
+        id: "rec:\(recommendation.id)", title: recommendation.title,
+        subtitle: "Recommendation • ≈ \(ByteFormatter.string(recommendation.bytes))",
+        icon: recommendation.symbol
+      ) { $0.review(recommendation) }
+    }
+    list += model.downloadItems.prefix(200).map { item in
+      Entry(
+        id: "download:\(item.id)", title: item.url.lastPathComponent,
+        subtitle: "Downloads • \(ByteFormatter.string(item.bytes))", icon: "arrow.down.circle"
+      ) { $0.selectedSection = .downloads }
+    }
     list.append(Entry(id: "action:storage", title: "Map Storage", subtitle: "Action", icon: "chart.pie") {
       $0.selectedSection = .storage
       $0.scanStorage()
