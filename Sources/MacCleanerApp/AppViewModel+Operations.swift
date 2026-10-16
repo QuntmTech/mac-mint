@@ -31,11 +31,12 @@ extension AppViewModel {
       + queuedDuplicateFiles.map { PlanItem.duplicate($0.file, keeper: $0.keeper) }
       + queuedLargeFiles.map(PlanItem.largeFile)
       + queuedStorageNodes.map(PlanItem.storage)
+      + queuedDevItems.compactMap(PlanItem.developer)
   }
 
   var queuedCount: Int {
     queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
-      + queuedStorageNodes.count
+      + queuedStorageNodes.count + queuedDevItems.count
   }
 
   var queuedBytes: Int64 {
@@ -55,6 +56,7 @@ extension AppViewModel {
     selectedDuplicateIDs.subtract(ids)
     selectedLargeFileIDs.subtract(ids)
     selectedStoragePaths.remove(path)
+    selectedDevIDs.remove(path)
   }
 
   func clearQueue() {
@@ -62,6 +64,7 @@ extension AppViewModel {
     selectedDuplicateIDs = []
     selectedLargeFileIDs = []
     selectedStoragePaths = []
+    selectedDevIDs = []
   }
 
   // MARK: Building plans
@@ -97,6 +100,7 @@ extension AppViewModel {
         model.queuedCleanupTargets.map { PlanItem.cleanup($0) } + duplicates.items
         + model.queuedLargeFiles.map(PlanItem.largeFile)
         + model.queuedStorageNodes.map(PlanItem.storage)
+        + model.queuedDevItems.compactMap(PlanItem.developer)
       return OperationPlanner.plan(
         title: "Review queue", items: items, ignoredPaths: model.ignoredPaths,
         excluded: duplicates.skipped)
@@ -218,7 +222,7 @@ extension AppViewModel {
     let touchesSmartScan = report.moved.contains {
       switch $0.item.kind {
       case .cleanupTarget, .appBundle, .appLeftover: return true
-      case .duplicateCopy, .reviewedFile: return false
+      case .duplicateCopy, .reviewedFile, .developerArtifact: return false
       }
     }
     if touchesSmartScan { runSmartScan() }
@@ -233,6 +237,8 @@ extension AppViewModel {
       return movedPaths.contains { path == $0 || path.hasPrefix($0 + "/") }
     }
     pruneStorage(movedPaths)
+    devItems.removeAll { $0.url.map(gone) == true }
+    selectedDevIDs.formIntersection(devItems.map(\.id))
     cleanupTargets.removeAll { gone($0.url) }
     largeFiles.removeAll { gone($0.url) }
     selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))

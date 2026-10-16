@@ -27,6 +27,18 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Never crosses onto other drives, never opens or downloads cloud-only files (they're counted separately), and lists unreadable folders instead of hiding them.
 - Select files or folders to send them through the same review → Trash → restore pipeline.
 
+### Developer & AI
+- **Xcode:** build data per project, archives (flagged — needed for symbolication), device support (latest kept).
+- **Simulator caches;** simulator devices are removed with `xcrun simctl delete unavailable`, not by deleting files.
+- **Package caches:** npm, pnpm, Yarn, Bun, Homebrew, pip, CocoaPods, SwiftPM, Gradle, Maven, Cargo. Go's read-only module cache is cleared with `go clean -modcache`.
+- **Project build folders** under folders you add: `node_modules`, `.build`, `target`, `.next`, `Pods`… Each one is offered only when its tool's marker file is next to it (e.g. `node_modules` needs `package.json`).
+- **AI models:**
+  - Ollama models are sized from their manifests and removed with `ollama rm`, never by deleting blob files.
+  - LM Studio models are listed per model.
+  - Hugging Face caches are listed as whole repositories (all revisions), honoring `HF_HOME` / `HF_HUB_CACHE`.
+- **Docker Desktop's disk image** is shown with `docker system prune` as the way to reclaim it.
+- Each item says whether it rebuilds, re-downloads, or needs review. Anything touched in the last 3 days is marked "In use" and never preselected.
+
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.
 - Safe-by-default selection; review items are opt-in; restricted items cannot be selected.

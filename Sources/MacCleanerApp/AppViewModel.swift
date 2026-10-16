@@ -10,6 +10,7 @@ final class AppViewModel: ObservableObject {
     case review = "Review"
     case cleaner = "Cleaner"
     case storage = "Storage"
+    case developer = "Developer & AI"
     case applications = "Applications"
     case largeFiles = "Large Files"
     case duplicates = "Duplicates"
@@ -25,6 +26,7 @@ final class AppViewModel: ObservableObject {
       case .review: return "checklist"
       case .cleaner: return "trash.circle"
       case .storage: return "chart.pie"
+      case .developer: return "hammer"
       case .applications: return "app.dashed"
       case .largeFiles: return "externaldrive"
       case .duplicates: return "square.on.square"
@@ -60,6 +62,8 @@ final class AppViewModel: ObservableObject {
   @Published var storagePath: String?
   @Published var storageScannedCount = 0
   @Published var selectedStoragePaths: Set<String> = []
+  @Published var devItems: [DevStorageItem] = []
+  @Published var selectedDevIDs: Set<String> = []
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?

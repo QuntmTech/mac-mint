@@ -7,6 +7,7 @@ public enum PlanItemKind: Codable, Hashable, Sendable {
   case appLeftover
   case duplicateCopy
   case reviewedFile
+  case developerArtifact
 
   public var label: String {
     switch self {
@@ -15,6 +16,7 @@ public enum PlanItemKind: Codable, Hashable, Sendable {
     case .appLeftover: return "App data"
     case .duplicateCopy: return "Duplicate copy"
     case .reviewedFile: return "Large file"
+    case .developerArtifact: return "Developer data"
     }
   }
 }
@@ -70,6 +72,15 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
         ?? "Exact duplicate; another copy is kept.",
       source: "Duplicates", needsAttention: true,
       identity: file.identity ?? FileSystem.fileIdentity(at: file.url))
+  }
+
+  public static func developer(_ item: DevStorageItem) -> PlanItem? {
+    guard let url = item.url, item.canTrash else { return nil }
+    return PlanItem(
+      url: url, displayName: "\(item.tool): \(item.title)", kind: .developerArtifact,
+      expectedBytes: item.bytes, reason: item.rebuild.explanation, source: item.group.rawValue,
+      needsAttention: item.rebuild == .review || item.isActive,
+      identity: FileSystem.fileIdentity(at: url))
   }
 
   public static func largeFile(_ file: LargeFile) -> PlanItem {
