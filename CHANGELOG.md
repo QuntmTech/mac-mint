@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 — 2026-10-16
+- **Smart Care:** ranked, plain-English recommendations across caches, developer data, removed-app leftovers, Downloads, unused apps, screenshots, firmware, and Mail attachments. Every recommendation opens the normal review. ⌘R runs it.
+- **Usage intelligence:** Spotlight "last opened" and "date added". An app or file with no record is never called unused.
+- **Downloads review:** files not opened in months, grouped by kind.
+- **Storage growth:** "grew since last scan" and a daily free-space history chart.
+- **App names and icons** on Cleaner and Developer rows.
+- **Instant large files** via Spotlight (verified on disk), with **Full Scan**.
+- **Disk insights:** drive health, purgeable space, and local Time Machine snapshots (read-only).
+- **⌘K command palette;** VoiceOver, keyboard, and contrast improvements.
+- **Faster duplicate scans:** memory went from 1.2 GB to 33 MB on a 100k-file folder. A weekly benchmark workflow and a launch smoke test of every screen now run in CI.
+
 ## 0.7.0 — 2026-10-16
 - **Photos:** similar and blurry shots, and screenshots, from folders or the Photos library. Library removals go through Photos, so they land in Recently Deleted.
 - **Removed-app leftovers:** Library data whose bundle identifier no installed app (or helper) claims. Review-only.
