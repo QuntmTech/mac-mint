@@ -7,7 +7,6 @@ struct RootView: View {
   @EnvironmentObject private var account: AccountStore
   @EnvironmentObject private var updates: UpdateService
   @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
-  @State private var showingIssues = false
   @State private var showingOnboarding = false
 
   var body: some View {
@@ -96,7 +95,7 @@ struct RootView: View {
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       Task { await account.refreshAIStatus() }
     }
-    .sheet(isPresented: $showingIssues) {
+    .sheet(isPresented: $model.showingScanIssues) {
       ScanIssueSheet(issues: model.scanIssues)
     }
     .sheet(item: $model.pendingPlan) { plan in
@@ -247,7 +246,7 @@ struct RootView: View {
 
       if !model.scanIssues.isEmpty {
         Button {
-          showingIssues = true
+          model.showingScanIssues = true
         } label: {
           Label(
             "\(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")",

@@ -184,6 +184,26 @@ func runScanner(_ name: String, home: URL) async -> ScanResult {
   let bytes: Int64
   let cancelled: Bool
   switch name {
+  case "photos":
+    var rng = SplitMix64(state: 42)
+    var photos: [PhotoFingerprint] = []
+    for i in 0..<100000 {
+      if i % 256 == 0, Task.isCancelled { break }
+      let hash = i % 2 == 0 ? rng.next() : (photos.last?.hash ?? 0) ^ 0b111
+      photos.append(PhotoFingerprint(url: home.appendingPathComponent("photo\(i).jpg"), bytes: 1000000,
+        hash: hash, sharpness: Double(i % 1000), pixelWidth: 3000, pixelHeight: 2000))
+    }
+    let groups = PhotoAnalysis.group(photos)
+    (results, bytes, cancelled) = (groups.count, groups.reduce(0) { $0 + $1.reclaimableBytes }, Task.isCancelled)
+  case "developer":
+    let report = await DeveloperStorageScanner(homeDirectory: home).scan(projectRoots: [home.appendingPathComponent("Documents/Projects")])
+    (results, bytes, cancelled) = (report.value.count, report.value.reduce(0) { $0 + $1.bytes }, report.wasCancelled)
+  case "combined":
+    async let cleanup = runScanner("cleanup", home: home)
+    async let developer = runScanner("developer", home: home)
+    async let large = runScanner("large", home: home)
+    let all = await [cleanup, developer, large]
+    (results, bytes, cancelled) = (all.reduce(0) { $0 + $1.results }, all.reduce(0) { $0 + $1.bytes }, all.contains { $0.cancelled })
   case "cleanup":
     let report = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scanReport()
     (results, bytes, cancelled) = (
@@ -208,7 +228,7 @@ func runScanner(_ name: String, home: URL) async -> ScanResult {
       report.wasCancelled
     )
   default:
-    fail("unknown scanner \(name) — use cleanup, storage, large, duplicates")
+    fail("unknown scanner \(name) — use cleanup, storage, large, duplicates, photos, developer, combined")
   }
   let elapsed = clock.now - start
   return ScanResult(

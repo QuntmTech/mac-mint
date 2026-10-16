@@ -160,6 +160,7 @@ public enum PhotoAnalysis {
       if match == nil, !index.isEmpty {
         var stack = [0]
         while let next = stack.popLast() {
+          if Task.isCancelled { return [] }
           let node = index[next]
           let d = distance(photo.hash, node.hash)
           if d <= radius && (d < bestDistance || (d == bestDistance && node.cluster < (match ?? Int.max))) {

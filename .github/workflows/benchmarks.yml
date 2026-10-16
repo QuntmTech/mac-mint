@@ -41,7 +41,7 @@ jobs:
 
       - name: Scanners — time and peak memory
         run: |
-          for scanner in cleanup storage large duplicates; do
+          for scanner in cleanup storage large duplicates photos developer combined; do
             /usr/bin/time -l "$BIN" run "$FIXTURE" "$scanner" > "run-$scanner.json" 2> "time-$scanner.txt"
             rss=$(awk '/maximum resident set size/ {print $1}' "time-$scanner.txt")
             echo "{\"scanner\":\"$scanner\",\"rssBytes\":$rss}" > "rss-$scanner.json"
@@ -50,7 +50,7 @@ jobs:
 
       - name: Cancellation latency
         run: |
-          for scanner in cleanup storage large duplicates; do
+          for scanner in cleanup storage large duplicates photos developer combined; do
             "$BIN" cancel "$FIXTURE" "$scanner" --after 0.3 > "cancel-$scanner.json"
             echo "$scanner: $(cat cancel-$scanner.json)"
           done
@@ -85,7 +85,7 @@ jobs:
               "|---|---:|---:|---:|:-:|---:|:-:|",
           ]
           failures = []
-          for scanner in ["cleanup", "storage", "large", "duplicates"]:
+          for scanner in ["cleanup", "storage", "large", "duplicates", "photos", "developer", "combined"]:
               run = json.load(open(f"run-{scanner}.json"))
               rss = json.load(open(f"rss-{scanner}.json"))["rssBytes"]
               cancel = json.load(open(f"cancel-{scanner}.json"))

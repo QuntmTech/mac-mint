@@ -93,6 +93,7 @@ final class AppViewModel: ObservableObject {
   @Published var selectedLeftoverIDs: Set<UUID> = []
   @Published var history: [HistoryEntry] = []
   @Published var scanIssues: [ScanIssue] = []
+  @Published var showingScanIssues = false
   @Published var ignoredPaths: Set<String> = []
   @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false

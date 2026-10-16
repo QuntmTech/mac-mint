@@ -245,6 +245,22 @@ public actor OperationExecutor {
     if FileSystem.containsIgnoredDescendant(item.url, ignoredPaths: ignoredPaths) {
       return skip("Folder contains an excluded item. Rescan to clean around it.")
     }
+    // Normalization may cover a more conservative child. Its ownership, identity and
+    // recorded file metadata still constrain the ancestor that would move it.
+    for child in plan.covered where FileSystem.path(child.url, isInsideOrEqual: item.url) {
+      if let owner = child.ownerBundleID, isAppRunning(owner) {
+        return skip("This folder includes data owned by an app that is open. Quit the app and review again.")
+      }
+      if let identity = child.identity, FileSystem.fileIdentity(at: child.url) != identity {
+        return skip("A selected item inside this folder changed identity. Rescan before removing the folder.")
+      }
+      if let snapshot = child.snapshot {
+        guard let current = FileSnapshot.current(child.url), snapshot.matches(current) else {
+          return skip("A selected file inside this folder changed. Rescan before removing the folder.")
+        }
+      }
+      if !decision(for: child).allowed { return skip("This folder covers an item that is protected by its removal policy.") }
+    }
     let decision = decision(for: item)
     return decision.allowed ? nil : skip(decision.reason)
   }

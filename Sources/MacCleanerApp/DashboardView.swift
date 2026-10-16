@@ -9,6 +9,17 @@ struct DashboardView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 22) {
         hero
+        SurfaceCard {
+          VStack(alignment: .leading, spacing: 7) {
+            Label("Scan coverage", systemImage: "checklist").font(.headline)
+            Text(model.scanCompletedAreas.isEmpty ? "Quick Scan checks known cache, app, developer, Downloads and home Trash locations. Storage maps, duplicate hashing, Photos and project searches run separately." : "Completed: " + model.scanCompletedAreas.joined(separator: "; "))
+              .font(.callout).foregroundStyle(.secondary)
+            Text("\(model.ignoredPaths.count) exclusions · \(model.scanIssues.count) access or scan issues")
+              .font(.caption).foregroundStyle(model.scanIssues.isEmpty ? Color.secondary : Color.orange)
+            if let date = model.lastScanDate { Text("Quick Scan updated " + date.formatted()).font(.caption).foregroundStyle(.secondary) }
+            if !model.scanIssues.isEmpty { Button("Review coverage issues") { model.showingScanIssues = true } }
+          }
+        }
 
         HStack(spacing: 14) {
           MetricCard(
