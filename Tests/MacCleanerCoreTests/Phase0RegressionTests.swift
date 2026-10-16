@@ -223,8 +223,12 @@ final class Phase0RegressionTests: XCTestCase {
     }
 
     let report = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scanReport()
+    // macOS reports /var temp paths as /private/var; compare resolved locations.
+    let expected = locked.resolvingSymlinksInPath().path
     XCTAssertTrue(
-      report.issues.contains { $0.path == locked.path },
+      report.issues.contains {
+        $0.path.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } == expected
+      },
       "Expected an access issue for \(locked.path), got \(report.issues)")
   }
 
