@@ -25,6 +25,7 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN" "$CONTENTS/MacOS/MacMint"
 cp "$ROOT/Resources/Info.plist" "$CONTENTS/Info.plist"
+iconutil -c icns "$ROOT/Resources/AppIcon.iconset" -o "$CONTENTS/Resources/AppIcon.icns"
 chmod 755 "$CONTENTS/MacOS/MacMint"
 
 printf '▶ Ad-hoc signing local test bundle...\n'

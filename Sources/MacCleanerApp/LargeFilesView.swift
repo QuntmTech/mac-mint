@@ -3,7 +3,20 @@ import SwiftUI
 
 struct LargeFilesView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var pendingDelete: LargeFile?
+
+  private var selectedBytes: Int64 { model.queuedLargeFiles.reduce(0) { $0 + $1.size } }
+
+  private func selection(_ file: LargeFile) -> Binding<Bool> {
+    Binding(
+      get: { model.selectedLargeFileIDs.contains(file.id) },
+      set: { isOn in
+        if isOn {
+          model.selectedLargeFileIDs.insert(file.id)
+        } else {
+          model.selectedLargeFileIDs.remove(file.id)
+        }
+      })
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -27,6 +40,9 @@ struct LargeFilesView: View {
       } else {
         List(model.largeFiles) { file in
           HStack(spacing: 12) {
+            Toggle("", isOn: selection(file))
+              .labelsHidden()
+              .accessibilityLabel("Select \(file.url.lastPathComponent)")
             Image(systemName: "doc.fill")
               .foregroundStyle(AppTheme.accent)
               .frame(width: 24)
@@ -50,7 +66,7 @@ struct LargeFilesView: View {
               Button("Reveal in Finder") { model.reveal(file.url) }
               Button("Exclude from future scans") { model.ignore(file.url) }
               Divider()
-              Button("Move to Trash", role: .destructive) { pendingDelete = file }
+              Button("Move to Trash…", role: .destructive) { model.reviewLargeFiles([file]) }
             } label: {
               Image(systemName: "ellipsis.circle")
             }
@@ -61,20 +77,6 @@ struct LargeFilesView: View {
         }
         .listStyle(.inset)
       }
-    }
-    .alert(
-      "Move this file to Trash?",
-      isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } })
-    ) {
-      Button("Cancel", role: .cancel) { pendingDelete = nil }
-      Button("Move to Trash", role: .destructive) {
-        if let file = pendingDelete {
-          model.trashReviewedFile(file.url, bytes: file.size, action: "Remove large file")
-        }
-        pendingDelete = nil
-      }
-    } message: {
-      Text(pendingDelete.map { "\($0.url.path)\n\nSize: \(ByteFormatter.string($0.size))" } ?? "")
     }
   }
 
@@ -89,6 +91,18 @@ struct LargeFilesView: View {
       if !model.largeFiles.isEmpty {
         StatusPill(
           title: "\(model.largeFiles.count) found", icon: "doc.on.doc", tint: AppTheme.accent)
+        if model.selectedLargeFileIDs.isEmpty {
+          Button("Select All") { model.selectedLargeFileIDs = Set(model.largeFiles.map(\.id)) }
+        } else {
+          Button("Deselect All") { model.selectedLargeFileIDs = [] }
+          Button {
+            model.reviewLargeFiles()
+          } label: {
+            Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "trash")
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(model.isWorking || model.isScanning)
+        }
       }
     }
     .padding(AppTheme.pagePadding)

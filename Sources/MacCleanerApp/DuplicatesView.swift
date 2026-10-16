@@ -3,7 +3,6 @@ import SwiftUI
 
 struct DuplicatesView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var confirmBulkDelete = false
 
   private var totalReclaimable: Int64 {
     model.duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -57,14 +56,6 @@ struct DuplicatesView: View {
         .listStyle(.inset)
       }
     }
-    .alert("Move selected duplicate copies to Trash?", isPresented: $confirmBulkDelete) {
-      Button("Cancel", role: .cancel) {}
-      Button("Move to Trash", role: .destructive) { model.trashSelectedDuplicates() }
-    } message: {
-      Text(
-        "\(ByteFormatter.string(model.duplicateSelectedBytes)) is selected. The app guarantees at least one copy remains in each group when selecting through this screen."
-      )
-    }
   }
 
   private var header: some View {
@@ -82,12 +73,17 @@ struct DuplicatesView: View {
       }
       if model.duplicateSelectedBytes > 0 {
         Button {
-          confirmBulkDelete = true
+          model.reviewDuplicates()
         } label: {
-          Label("Trash \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "trash")
+          if model.isPreparingPlan {
+            ProgressView().controlSize(.small)
+          } else {
+            Label("Review \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "trash")
+          }
         }
         .buttonStyle(.borderedProminent)
-        .disabled(model.isWorking || model.isScanning)
+        .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
+        .help("Each kept copy is re-verified before anything moves")
       }
     }
     .padding(AppTheme.pagePadding)

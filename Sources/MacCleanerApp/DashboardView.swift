@@ -3,7 +3,6 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var confirmClean = false
 
   var body: some View {
     ScrollView {
@@ -40,14 +39,6 @@ struct DashboardView: View {
       }
       .padding(AppTheme.pagePadding)
     }
-    .alert("Move selected cleanup items to Trash?", isPresented: $confirmClean) {
-      Button("Cancel", role: .cancel) {}
-      Button("Move to Trash") { model.cleanSelected() }
-    } message: {
-      Text(
-        "\(ByteFormatter.string(model.selectedCleanupBytes)) will be moved to the macOS Trash. Nothing is permanently erased by this action."
-      )
-    }
   }
 
   private var hero: some View {
@@ -63,7 +54,7 @@ struct DashboardView: View {
 
         VStack(alignment: .leading, spacing: 12) {
           HStack(spacing: 8) {
-            StatusPill(title: "Trash-first", icon: "trash", tint: .green)
+            StatusPill(title: "Trash-first • Restorable", icon: "arrow.uturn.backward.circle", tint: .green)
             StatusPill(title: "No telemetry", icon: "lock.shield", tint: .blue)
             if !model.scanIssues.isEmpty {
               StatusPill(
@@ -97,8 +88,8 @@ struct DashboardView: View {
               Button("Cancel") { model.cancelCurrentOperation() }
                 .controlSize(.large)
             } else if model.selectedCleanupBytes > 0 {
-              Button("Clean \(ByteFormatter.string(model.selectedCleanupBytes))") {
-                confirmClean = true
+              Button("Review & Clean \(ByteFormatter.string(model.selectedCleanupBytes))") {
+                model.reviewCleanup()
               }
               .controlSize(.large)
             }

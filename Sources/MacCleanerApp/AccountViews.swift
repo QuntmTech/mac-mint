@@ -1,3 +1,4 @@
+import AppKit
 import MacCleanerCore
 import SwiftUI
 
@@ -36,7 +37,24 @@ struct AccountGateView: View {
 struct BrandMark: View {
   var size: CGFloat = 38
 
+  /// The bundled app icon, when running as MacMint.app (not via `swift run`).
+  @MainActor private static let appIcon: NSImage? =
+    Bundle.main.bundleURL.pathExtension == "app" ? NSApp.applicationIconImage : nil
+
   var body: some View {
+    if let icon = Self.appIcon {
+      Image(nsImage: icon)
+        .resizable()
+        .interpolation(.high)
+        .frame(width: size * 1.24, height: size * 1.24)
+        .padding(-size * 0.12)
+        .accessibilityHidden(true)
+    } else {
+      drawnMark
+    }
+  }
+
+  private var drawnMark: some View {
     ZStack {
       RoundedRectangle(cornerRadius: size * 0.29, style: .continuous)
         .fill(

@@ -18,4 +18,7 @@ enum AppPaths {
     }
     return current
   }()
+
+  /// In-progress operation journals; anything left here after a crash is recovered at launch.
+  static var journalDirectory: URL { supportDirectory.appendingPathComponent("Operations", isDirectory: true) }
 }

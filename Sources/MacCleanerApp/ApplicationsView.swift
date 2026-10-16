@@ -5,7 +5,6 @@ import SwiftUI
 struct ApplicationsView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var search = ""
-  @State private var confirmUninstall = false
   @State private var sort: AppSort = .name
 
   enum AppSort: String, CaseIterable, Identifiable {
@@ -106,15 +105,6 @@ struct ApplicationsView: View {
 
       detail
         .frame(minWidth: 520)
-    }
-    .alert("Uninstall \(model.selectedApp?.name ?? "app")?", isPresented: $confirmUninstall) {
-      Button("Cancel", role: .cancel) {}
-      Button("Move to Trash", role: .destructive) { model.uninstallSelectedApp() }
-    } message: {
-      let appBytes = model.selectedApp?.bundleSize ?? 0
-      Text(
-        "The app plus \(ByteFormatter.string(selectedLeftoverBytes)) of selected related data will be moved to Trash. Total selected: \(ByteFormatter.string(appBytes + selectedLeftoverBytes))."
-      )
     }
   }
 
@@ -252,9 +242,9 @@ struct ApplicationsView: View {
             .disabled(model.isWorking || model.isScanning)
           } else {
             Button {
-              confirmUninstall = true
+              model.reviewUninstall()
             } label: {
-              Label("Move App + Selected Data to Trash", systemImage: "trash")
+              Label("Review Uninstall…", systemImage: "trash")
             }
             .buttonStyle(.borderedProminent)
             .disabled(model.isWorking || model.isScanning)

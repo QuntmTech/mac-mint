@@ -38,13 +38,19 @@ public struct SafetyPolicy: Sendable {
   /// Stronger policy used by CleanupEngine. A target must pass the baseline policy AND
   /// belong to an allowlisted location appropriate for its cleanup category.
   public func cleanupTargetDecision(for target: CleanupTarget) -> (allowed: Bool, reason: String) {
-    let baseline = deletionDecision(for: target.url)
+    cleanupDecision(for: target.url, category: target.category)
+  }
+
+  public func cleanupDecision(for url: URL, category: CleanupCategory) -> (
+    allowed: Bool, reason: String
+  ) {
+    let baseline = deletionDecision(for: url)
     guard baseline.allowed else { return baseline }
 
-    let candidate = target.url.standardizedFileURL
+    let candidate = url.standardizedFileURL
     let allowed: Bool
 
-    switch target.category {
+    switch category {
     case .userCaches:
       allowed = isInside(candidate, roots: [homeDirectory.appendingPathComponent("Library/Caches")])
 
@@ -93,8 +99,23 @@ public struct SafetyPolicy: Sendable {
     }
 
     return allowed
-      ? (true, "Target is inside an allowlisted location for \(target.category.rawValue).")
-      : (false, "Target is outside the allowlisted location for \(target.category.rawValue).")
+      ? (true, "Target is inside an allowlisted location for \(category.rawValue).")
+      : (false, "Target is outside the allowlisted location for \(category.rawValue).")
+  }
+
+  /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
+  public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    let candidate = url.standardizedFileURL
+    let path = candidate.path
+    let homeApps = homeDirectory.appendingPathComponent("Applications").standardizedFileURL.path
+    guard candidate.pathExtension.lowercased() == "app" else {
+      return (false, "Only application bundles can be uninstalled.")
+    }
+    guard path.hasPrefix("/Applications/") || path.hasPrefix(homeApps + "/") else {
+      return (false, "This application path is not eligible for uninstall.")
+    }
+    if isSymlink(candidate) { return (false, "Symbolic links are not uninstalled.") }
+    return (true, "Application bundle is in an Applications folder.")
   }
 
   /// Explicit-review policy used by Large Files and Duplicates. It permits personal files,

@@ -28,6 +28,14 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Search, risk filtering, safe-only selection, deselect-all, Finder reveal, and per-path exclusion.
 - Selected review bytes are explicitly called out in the destructive confirmation.
 
+### Review, undo, and restore
+- Every action that moves files (Cleaner, Uninstall, Duplicates, Large Files) builds one **plan** and opens the same review sheet: what will move, why, from which screen, and which items need a closer look.
+- Overlapping selections are counted once (a selected folder covers its children); excluded items are listed as "won't be moved".
+- A shared executor re-checks each item right before moving it: same file as planned (device/inode), not excluded, allowed for its kind, and dependencies met (app data only moves if its app did).
+- Progress with Stop; a result sheet with **Undo**; per-item **Restore** in History (never overwrites — offers another folder instead).
+- A journal is written during each operation, so an operation interrupted by a crash or quit is recovered into History on next launch.
+- The **Review** screen collects selections from every screen into one final pass.
+
 ### Trash-first cleanup
 - Uses macOS Trash rather than permanent deletion.
 - Rechecks item existence and safety immediately before acting.

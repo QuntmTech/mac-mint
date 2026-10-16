@@ -24,6 +24,7 @@ struct RootView: View {
           Label(section.rawValue, systemImage: section.icon)
             .font(.callout.weight(.medium))
             .padding(.vertical, 4)
+            .badge(section == .review ? model.queuedCount : 0)
             .tag(section)
         }
         .listStyle(.sidebar)
@@ -36,6 +37,7 @@ struct RootView: View {
       Group {
         switch model.selectedSection {
         case .dashboard: DashboardView()
+        case .review: ReviewQueueView()
         case .cleaner: CleanerView()
         case .applications: ApplicationsView()
         case .largeFiles: LargeFilesView()
@@ -52,6 +54,24 @@ struct RootView: View {
     }
     .sheet(isPresented: $showingIssues) {
       ScanIssueSheet(issues: model.scanIssues)
+    }
+    .sheet(item: $model.pendingPlan) { plan in
+      PlanReviewSheet(plan: plan)
+    }
+    .sheet(item: $model.lastReport) { report in
+      OperationReportSheet(report: report)
+    }
+    .alert(
+      "Couldn't restore",
+      isPresented: Binding(
+        get: { model.restoreConflict != nil }, set: { if !$0 { model.restoreConflict = nil } }),
+      presenting: model.restoreConflict
+    ) { conflict in
+      Button("Restore to Another Folder…") { model.restoreElsewhere(conflict) }
+      Button("Show in Trash") { model.revealInTrash(conflict.receipt) }
+      Button("Cancel", role: .cancel) {}
+    } message: { conflict in
+      Text(conflict.message)
     }
     .onAppear {
       if model.cleanupTargets.isEmpty { model.runSmartScan() }
@@ -97,7 +117,11 @@ struct RootView: View {
 
   private var operationBar: some View {
     HStack(spacing: 10) {
-      if model.isScanning || model.isWorking {
+      if model.isWorking, let progress = model.operationProgress {
+        ProgressView(value: progress.fraction)
+          .progressViewStyle(.circular)
+          .controlSize(.small)
+      } else if model.isScanning || model.isWorking || model.isPreparingPlan {
         ProgressView().controlSize(.small)
       } else {
         Image(
@@ -119,8 +143,16 @@ struct RootView: View {
 
       Spacer()
 
-      if model.isScanning {
-        Button("Cancel") { model.cancelCurrentOperation() }
+      if model.isWorking, let progress = model.operationProgress {
+        Text("\(progress.completed) of \(progress.total)")
+          .font(.caption.monospacedDigit())
+          .foregroundStyle(.secondary)
+        ProgressView(value: progress.fraction)
+          .frame(width: 140)
+      }
+
+      if model.isScanning || model.isWorking {
+        Button(model.isWorking ? "Stop" : "Cancel") { model.cancelCurrentOperation() }
           .controlSize(.small)
       }
 
