@@ -182,7 +182,7 @@ final class AppViewModel: ObservableObject {
   }
 
   var selectedCleanupBytes: Int64 {
-    cleanupTargets.filter(\.isSelected).reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Selected cleanup", items: cleanupTargets.filter(\.isSelected).map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var selectedReviewBytes: Int64 {
@@ -194,7 +194,7 @@ final class AppViewModel: ObservableObject {
   }
 
   var reviewableBytes: Int64 {
-    cleanupTargets.filter { $0.risk == .review }.reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Review estimate", items: cleanupTargets.filter { $0.risk == .review }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var volumeName: String {
@@ -482,6 +482,10 @@ final class AppViewModel: ObservableObject {
 
   func reveal(_ url: URL) {
     NSWorkspace.shared.activateFileViewerSelecting([url])
+  }
+
+  func openActivityMonitor() {
+    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
   }
 
   func openLoginItemsSettings() {

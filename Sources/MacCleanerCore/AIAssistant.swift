@@ -23,7 +23,7 @@ public struct AIExplainRequest: Codable, Hashable, Sendable, Identifiable {
   public init(kind: AIExplainKind, identifier: String, location: String) {
     self.kind = kind
     self.identifier = AIContextBuilder.safeIdentifier(identifier, kind: kind)
-    self.location = location
+    self.location = AIContextBuilder.safeLocation(location)
   }
 }
 
@@ -135,16 +135,20 @@ public struct AIAnswer: Codable, Sendable {
   public let model: String?
 }
 
-struct AIAskRequest: Codable, Sendable {
-  let question: String
-  let history: [AITurn]
-  let context: AIContext
+public struct AIAskRequest: Codable, Sendable {
+  public let question: String
+  public let history: [AITurn]
+  public let context: AIContext
+  public init(question: String, history: [AITurn], context: AIContext) {
+    self.question = String(question.prefix(600)); self.history = Array(history.suffix(6)); self.context = context
+  }
 }
 
 public struct AIStatus: Sendable {
   public let enabled: Bool
   public let features: [String: Bool]
-  public init(enabled: Bool, features: [String: Bool] = [:]) { self.enabled = enabled; self.features = features }
+  public let reachable: Bool
+  public init(enabled: Bool, features: [String: Bool] = [:], reachable: Bool = true) { self.enabled = enabled; self.features = features; self.reachable = reachable }
   public func allows(_ feature: String) -> Bool { enabled && features[feature] != false }
 }
 
@@ -181,16 +185,16 @@ extension AccountClient {
       url: baseURL.appendingPathComponent("/api/collections/app_config/records"),
       resolvingAgainstBaseURL: false)
     components?.queryItems = [URLQueryItem(name: "filter", value: "key='ai'")]
-    guard let url = components?.url else { return AIStatus(enabled: false) }
+    guard let url = components?.url else { return AIStatus(enabled: false, reachable: false) }
     var request = URLRequest(url: url)
     request.timeoutInterval = 15
     do {
       let (data, response) = try await transport(request)
-      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return AIStatus(enabled: false) }
+      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return AIStatus(enabled: false, reachable: false) }
       let page = try JSONDecoder().decode(Page.self, from: data)
       return AIStatus(enabled: page.items.first?.value?.enabled == true, features: page.items.first?.value?.features ?? [:])
     } catch {
-      return AIStatus(enabled: false)
+      return AIStatus(enabled: false, reachable: false)
     }
   }
 }
@@ -264,6 +268,11 @@ public enum AIContextBuilder {
     "com.operasoftware.Opera": "Opera", "com.microsoft.VSCode": "Visual Studio Code",
   ]
   public static let knownTools: Set<String> = ["Xcode", "Simulator", "npm", "pnpm", "Yarn", "Bun", "Homebrew", "pip", "CocoaPods", "SwiftPM", "Gradle", "Maven", "Cargo", "Go", "Ollama", "LM Studio", "Hugging Face", "Docker"]
+
+  public static func safeLocation(_ location: String) -> String {
+    let allowed: Set<String> = ["Caches", "Preferences", "Application Support", "Containers", "Group Containers", "Logs", "Saved Application State", "WebKit", "HTTP Storage", "Cookies", "Application Scripts", "LaunchAgents", "LaunchDaemons", "Developer", "Startup", "Other"]
+    return allowed.contains(location) ? location : "Other"
+  }
 
   public static func safeIdentifier(_ identifier: String, kind: AIExplainKind) -> String {
     if kind == .developerTool { return knownTools.contains(identifier) ? identifier : "Unrecognized developer cache" }

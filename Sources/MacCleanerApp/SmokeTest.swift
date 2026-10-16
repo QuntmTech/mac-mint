@@ -25,7 +25,9 @@ enum SmokeTest {
     monitor.sample()
 
     var failures: [String] = []
-    func render<V: View>(_ name: String, _ view: V) {
+    var rendered = 0
+    func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1200, height: CGFloat = 800) {
+      rendered += 1
       let content = view
         .environmentObject(model)
         .environmentObject(account)
@@ -34,7 +36,7 @@ enum SmokeTest {
         .environmentObject(updates)
         .environmentObject(appUpdates)
         .tint(AppTheme.accent)
-        .frame(width: 1200, height: 800)
+        .frame(width: width, height: height)
       let renderer = ImageRenderer(content: content)
       if renderer.nsImage == nil {
         failures.append(name)
@@ -49,6 +51,10 @@ enum SmokeTest {
       model.selectedSection = section
       render(section.rawValue, RootView())
     }
+    render("Compact overview", RootView(), width: 980, height: 660)
+    render("Help", HelpView())
+    render("Account access", AccountAccessSheet())
+    render("Empty final review", PlanReviewSheet(plan: OperationPlan(title: "Review", items: [])))
     render("Menu bar", MenuBarView())
     render("Onboarding", OnboardingView())
     render("Command palette", CommandPalette())
@@ -56,7 +62,7 @@ enum SmokeTest {
     let seconds = Date().timeIntervalSince(started)
     print(
       failures.isEmpty
-        ? "Smoke test passed: \(AppViewModel.Section.allCases.count + 4) screens in \(String(format: "%.1f", seconds))s"
+        ? "Smoke test passed: \(rendered) screens in \(String(format: "%.1f", seconds))s"
         : "Smoke test FAILED: \(failures.joined(separator: ", "))")
     try? FileManager.default.removeItem(at: support)
     exit(failures.isEmpty ? 0 : 1)

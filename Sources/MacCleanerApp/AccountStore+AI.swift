@@ -5,9 +5,12 @@ import MacCleanerCore
 /// plan, limits, and the kill switch.
 extension AccountStore {
   private func requireToken(feature: String) throws -> String {
-    guard UserDefaults.standard.bool(forKey: AppViewModel.aiEnabledKey), aiStatus.allows(feature), isUnlocked else {
-      throw AccountAPIError(status: 403, code: "ai_unavailable", message: "AI needs your consent, an active plan and an available feature.")
+    guard UserDefaults.standard.bool(forKey: AppViewModel.aiEnabledKey) else {
+      throw AccountAPIError(status: 403, code: "ai_consent", message: "Enable optional AI in Settings before sending a request.")
     }
+    guard isUnlocked else { throw AccountAPIError(status: 402, code: "plan_required", message: "AI requests require an active MacMint plan. Local inspection and recovery remain available.") }
+    guard aiStatus.reachable else { throw AccountAPIError(status: 503, code: "ai_offline", message: "MacMint could not reach the AI service. Check your connection and try again.") }
+    guard aiStatus.allows(feature) else { throw AccountAPIError(status: 503, code: "ai_disabled", message: "This AI feature is currently turned off by the service.") }
     guard let token else {
       throw AccountAPIError(status: 401, code: "unauthorized", message: "Sign in to use AI features.")
     }

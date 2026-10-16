@@ -360,7 +360,7 @@ public actor DeveloperStorageScanner {
         id: "ollama:\(name)", group: .aiModels, tool: "Ollama", title: name,
         subtitle: "Stored in \(root.path.replacingOccurrences(of: home.path, with: "~")) — layers shared between models are freed only when unused",
         url: manifest, bytes: size, lastUsed: modified(manifest), rebuild: .redownload,
-        removal: .command("ollama rm \(ShellArgument.quote(name))"))
+        removal: ShellArgument.isToolIdentifier(name) ? .command("ollama rm -- \(ShellArgument.quote(name))") : .none("This model name needs review in Ollama; no shell command was generated."))
     }
   }
 
@@ -449,6 +449,11 @@ public actor DeveloperStorageScanner {
 
 /// POSIX shell escaping for commands explicitly copied by the user; never executed by MacMint.
 public enum ShellArgument {
+  public static func isToolIdentifier(_ value: String) -> Bool {
+    guard let first = value.first, first.isASCII && (first.isLetter || first.isNumber), value.count <= 300 else { return false }
+    return value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "/:._-".contains($0)) }
+  }
+
   public static func quote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
   }

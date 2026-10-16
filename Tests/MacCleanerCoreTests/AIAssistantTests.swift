@@ -85,7 +85,7 @@ final class AIAssistantTests: XCTestCase {
     let context = try encoder.encode(AIContextBuilder.build(inputs))
     let review = try encoder.encode(AIContextBuilder.reviewRequest(recommendations: inputs.recommendations,
       totalBytes: 10, freeBytes: 1, growth: [], home: home))
-    let explain = try encoder.encode(AIExplainRequest(kind: .libraryItem, identifier: privateName, location: "Caches"))
+    let explain = try encoder.encode(AIExplainRequest(kind: .libraryItem, identifier: privateName, location: privateName))
     for data in [context, review, explain] {
       let json = String(decoding: data, as: UTF8.self)
       for secret in ["Jane", "@example", "Medical", "删除", "coltonwood"] { XCTAssertFalse(json.contains(secret)) }
@@ -160,5 +160,6 @@ final class AIAssistantTests: XCTestCase {
     let offline = AccountClient(baseURL: URL(string: "https://example.test")!) { _ in throw URLError(.notConnectedToInternet) }
     let offlineStatus = await offline.aiStatus()
     XCTAssertFalse(offlineStatus.enabled)
+    XCTAssertFalse(offlineStatus.reachable)
   }
 }

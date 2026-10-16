@@ -216,7 +216,7 @@ extension AppViewModel {
   func ask(_ question: String, account: AccountStore) {
     let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !assistantBusy else { return }
-    aiPayloadPreview = previewPayload(aiContext)
+    aiPayloadPreview = previewPayload(AIAskRequest(question: trimmed, history: assistantTurns, context: aiContext))
     withAIConsent { [self] in
       let generation = aiGeneration
       let history = assistantTurns

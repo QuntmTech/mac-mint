@@ -1,4 +1,5 @@
 import AppKit
+import MacCleanerCore
 @preconcurrency import QuickLookThumbnailing
 import SwiftUI
 
@@ -31,6 +32,7 @@ final class ThumbnailCache {
   private let cache = NSCache<NSString, NSImage>()
 
   func thumbnail(for url: URL, size: CGFloat) async -> NSImage? {
+    guard !FileSystem.isCloudPlaceholder(url) else { return nil }
     let key = "\(url.path)#\(Int(size))" as NSString
     if let cached = cache.object(forKey: key) { return cached }
     let scale = NSScreen.main?.backingScaleFactor ?? 2

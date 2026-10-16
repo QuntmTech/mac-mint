@@ -116,7 +116,7 @@ struct ExplainSheet: View {
 
   private func verdictPill(_ verdict: AIExplanation.Verdict) -> some View {
     switch verdict {
-    case .safe: return StatusPill(title: "Usually safe", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
+    case .safe: return StatusPill(title: "Rebuildable cache", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
     case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: .orange)
     case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: .red)
     case .unknown: return StatusPill(title: "Not sure", icon: "questionmark.circle", tint: .gray)
@@ -423,8 +423,8 @@ struct AISettingsCard: View {
         }
         Text(
           account.aiAvailable
-            ? "Explain unfamiliar items, get a second opinion on Smart Care, and ask questions about your storage. AI only advises — it can't select or remove anything, and MacMint's safety rules always win."
-            : "MacMint AI is currently unavailable. Everything else works as usual."
+            ? "Explain unfamiliar items, get a second opinion on Quick Scan, and ask questions about your storage. AI only advises — it can't select or remove anything, and MacMint's safety rules always win."
+            : (account.aiStatus.reachable ? "MacMint AI is turned off by the service. Local tools remain available." : "The AI service could not be reached. You can still withdraw consent here and use local tools.")
         )
         .font(.callout)
         .foregroundStyle(.secondary)

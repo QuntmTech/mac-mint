@@ -56,7 +56,7 @@ final class SmartCareTests: XCTestCase {
     let byName = Dictionary(uniqueKeysWithValues: report.value.map { ($0.url.lastPathComponent, $0) })
     XCTAssertEqual(Set(byName.keys), ["Installer.dmg", "Old.mov"])
     XCTAssertEqual(byName["Installer.dmg"]?.kind, .installer)
-    XCTAssertEqual(byName["Installer.dmg"]?.evidence, "Downloaded 7 months ago from example.com and never opened")
+    XCTAssertEqual(byName["Installer.dmg"]?.evidence, "Downloaded 7 months ago from example.com with no recorded opens")
     XCTAssertFalse(byName["Old.mov"]!.usage.neverOpened, "no Spotlight record is not 'never opened'")
     XCTAssertTrue(byName["Old.mov"]!.evidence.hasPrefix("Not changed in"))
   }

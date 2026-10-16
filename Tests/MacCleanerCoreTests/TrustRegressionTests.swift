@@ -137,7 +137,7 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(recovered.receipts.isEmpty)
     XCTAssertTrue(fm.fileExists(atPath: journal.path))
     XCTAssertTrue(fm.fileExists(atPath: corrupt.path))
-    XCTAssertEqual(OperationJournal.unreadableJournals(in: home), [corrupt])
+    XCTAssertEqual(OperationJournal.unreadableJournals(in: home).map(FileSystem.comparisonPath), [FileSystem.comparisonPath(corrupt)])
   }
 
   func testManagedLibraryRootsAndContentsAreNeverGenericTargets() async throws {

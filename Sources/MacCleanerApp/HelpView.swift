@@ -14,6 +14,7 @@ struct HelpView: View {
     Scan completed: \(model.lastScanDate?.formatted() ?? "Not run")
     Completed categories: \(model.scanCompletedAreas.count)
     Scan issues: \(model.scanIssues.count)
+    Recovery warnings: \(model.recoveryWarnings.count)
     Exclusions: \(model.ignoredPaths.count)
     History operations: \(model.history.count)
     Access: \(account.isUnlocked ? "Pro" : "Local inspection")

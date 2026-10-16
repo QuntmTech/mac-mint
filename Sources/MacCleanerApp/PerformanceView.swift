@@ -33,6 +33,17 @@ struct PerformanceView: View {
         }
 
         diskInsightsCard
+        SurfaceCard {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("When to take action").font(.headline)
+            Text("Short CPU spikes during builds or photo analysis are normal. If CPU stays high while the Mac is slow, inspect Activity Monitor. If free space stays below 10%, review storage. Quit unused apps when memory pressure remains elevated.")
+              .font(.callout).foregroundStyle(.secondary)
+            HStack {
+              Button("Review Storage") { model.selectedSection = .storage }
+              Button("Open Activity Monitor") { model.openActivityMonitor() }
+            }
+          }
+        }
 
         SurfaceCard {
           VStack(alignment: .leading, spacing: 10) {

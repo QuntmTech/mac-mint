@@ -224,6 +224,11 @@ function settle(app, id, usage, knownNoCharge) {
       tx.save(u)
       r.set("actual_tokens", metered.tokens); r.set("actual_micro_usd", metered.cost)
     }
+    if (!metered && knownNoCharge) {
+      const u = tx.findFirstRecordByFilter("ai_usage", "user = {:u} && day = {:d}", { u: r.get("user"), d: r.get("day") })
+      const feature = String(r.get("feature"))
+      u.set(feature, Math.max(0, Number(u.get(feature) || 0) - 1)); tx.save(u)
+    }
     r.set("state", metered ? "settled" : "released")
     tx.save(budget); tx.save(r)
   })
