@@ -232,6 +232,10 @@ MacCleanerHybridBase V2
     └── macOS Trash adapter
 ```
 
+## Changelog
+
+See [`CHANGELOG.md`](CHANGELOG.md).
+
 ## V1 → V2 upgrade record
 
 See [`docs/V2_UPGRADE.md`](docs/V2_UPGRADE.md) for exactly what was preserved and what changed. The original V1 folder remains separate and untouched.
