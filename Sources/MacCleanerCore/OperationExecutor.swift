@@ -31,6 +31,13 @@ public struct OperationProgress: Sendable, Hashable {
   public let currentName: String?
   public let bytesMoved: Int64
 
+  public init(completed: Int, total: Int, currentName: String?, bytesMoved: Int64) {
+    self.completed = completed
+    self.total = total
+    self.currentName = currentName
+    self.bytesMoved = bytesMoved
+  }
+
   public var fraction: Double { total > 0 ? Double(completed) / Double(total) : 0 }
 }
 
