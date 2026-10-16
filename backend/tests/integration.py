@@ -40,6 +40,8 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
     client.write_text(client.read_text().replace('https://api.stripe.com/v1/', f'http://127.0.0.1:{fixture.server_port}/v1/'))
     (folder / 'migrations/1792108700_existing_ids_fixture.js').write_text('''migrate(app=>{
       app.save(new Collection({id:"legacy_licenses",name:"licenses",type:"base"}))
+      const users=app.findCollectionByNameOrId("users");users.verificationTemplate={subject:"Operator verification",body:"Custom verification {TOKEN}"};
+      users.passwordResetToken.duration=3600;app.save(users)
     },()=>{})''')
     (folder / 'migrations/1792109100_test_seed.js').write_text('''migrate(app=>{
       const u=new Record(app.findCollectionByNameOrId("users"));u.set("email","fixture@example.invalid");u.setPassword("fixture-test-password-123");u.set("verified",true);app.save(u)
@@ -53,6 +55,10 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
       const ai=require(`${__hooks}/macmint_ai_lib.js`),user=e.app.findFirstRecordByFilter("users","email='fixture@example.invalid'")
       try{return e.json(200,{id:ai.reserve(e.app,user.id,"review","claude-opus-5-5",100,100)})}
       catch(err){return e.json(err.status||500,{error:err.code||String(err)})}
+    })
+    routerAdd("GET","/__test/auth-config",e=>{
+      const users=e.app.findCollectionByNameOrId("users")
+      return e.json(200,{subject:users.verificationTemplate.subject,resetSeconds:users.passwordResetToken.duration})
     })''')
     base = [str(pocketbase), '--dir', str(folder / 'data'), '--hooksDir', str(folder / 'hooks'), '--migrationsDir', str(folder / 'migrations')]
     for _ in range(2):
@@ -80,6 +86,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             status, auth = call('/api/collections/users/auth-with-password', dict(identity='fixture@example.invalid', password='fixture-test-password-123'))
             assert status == 200, (status, auth)
             token = auth['token']
+            assert call('/__test/auth-config')[1] == dict(subject='Operator verification',resetSeconds=3600)
             with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
                 results = list(pool.map(lambda _: call('/__test/reserve', {}), range(16)))
             assert sum(status == 200 for status, _ in results) == 8, results

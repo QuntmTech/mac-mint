@@ -21,6 +21,8 @@ jobs:
           chmod +x .build/pocketbase-bin/pocketbase
       - name: Transaction, migration and webhook integration checks
         run: python3 backend/tests/integration.py
+      - name: Authenticated AI and SMTP recovery integration checks
+        run: python3 backend/tests/service_integration.py
   website:
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +36,16 @@ jobs:
         working-directory: web
       - run: npm run build && npm run lint
         working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npx playwright test
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: website-browser-traces-${{ github.run_id }}-${{ github.event_name }}
+          path: web/test-results
+          retention-days: 7
   homepage-demo:
     runs-on: ubuntu-latest
     defaults:

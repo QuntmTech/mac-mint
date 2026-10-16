@@ -67,6 +67,36 @@ const PlanCard = ({ account }: { account: AccountSnapshot }) => {
   )
 }
 
+const VerificationCard = ({ email, onRefresh }: { email: string; onRefresh: () => void }) => {
+  const [busy, setBusy] = useState(false)
+  const [requested, setRequested] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const resend = async () => {
+    setBusy(true)
+    setError(null)
+    setRequested(false)
+    try {
+      await pb.collection('users').requestVerification(email)
+      setRequested(true)
+    } catch (err) {
+      setError(errorMessage(err, 'We could not request a verification email. Please try again later.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return <Card title="Verify your email">
+    <div className="space-y-3">
+      <p>Verify {email} before purchasing. Local scanning and recovery remain available.</p>
+      {requested && <Alert tone="info">Verification email requested. Check your inbox and spam folder, then open the link.</Alert>}
+      {error && <Alert>{error}</Alert>}
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={resend} busy={busy}>Send verification email</Button>
+        <Button variant="secondary" onClick={onRefresh}>Refresh verification status</Button>
+      </div>
+    </div>
+  </Card>
+}
+
 const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
   initialCode: string
   onRedeemed: (snapshot: AccountSnapshot) => void
@@ -328,6 +358,7 @@ export const Account = () => {
         <div className="space-y-6">
           {params.get('checkout') === 'processing' && <Alert tone="success">Payment confirmation is processing. Your plan is granted by the server after Stripe confirms payment. <button className="underline" onClick={load}>Refresh account</button></Alert>}
           {params.get('checkout') === 'cancelled' && <Alert>Checkout was closed. No access is granted until a payment is confirmed.</Alert>}
+          {!account.user.verified && <VerificationCard email={account.user.email} onRefresh={load} />}
           <PlanCard account={account} />
           <RedeemCard initialCode={params.get('code') ?? ''} hasPlan={account.entitlement.active} onRedeemed={setAccount} />
           <DownloadCard release={release} />

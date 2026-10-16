@@ -7,7 +7,7 @@
 // POST /api/macmint/ai/review   (user, active plan)  { recommendations[], disk, growth[] }
 //   Smart Care review: suggested order, a note per recommendation, cautions. Opus 5.5.
 // POST /api/macmint/ai/ask      (user, active plan)  { question, history[], context }
-//   "Ask MacMint" assistant over an anonymized summary of the Mac. Opus 5.5.
+//   "Ask MacMint" assistant over restricted category summaries. Opus 5.5.
 // POST /api/macmint/admin/ai-cache/purge (superuser) { kind? }
 //
 // Kill switch: app_config key "ai" → { "enabled": false } (optionally per feature).
@@ -152,7 +152,7 @@ routerAdd("POST", "/api/macmint/admin/ai-cache/purge", (e) => {
 }, $apis.requireSuperuserAuth())
 
 // Operator reconciliation for timed-out requests. Supply verified provider usage; a release
-// without charge requires explicit confirmation. Counts as an attempt either way.
+// without charge requires explicit confirmation; uncharged attempts release allowance.
 routerAdd("POST", "/api/macmint/admin/ai-reconcile", (e) => {
   const ai = require(`${__hooks}/macmint_ai_lib.js`)
   const data = ai.body(e)

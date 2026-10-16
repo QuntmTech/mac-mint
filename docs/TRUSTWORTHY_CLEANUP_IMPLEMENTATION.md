@@ -64,6 +64,8 @@ Before enabling checkout:
 
 SMTP credentials, sender-domain configuration and delivery were not available in this session. Configure the project's sender and secure credentials, then prove verification and password-reset delivery, expired-link behavior and rate limits in staging. The implementation does not claim that email delivery is complete.
 
+Fresh installations now receive website verification/reset templates through a versioned migration; existing customized templates are preserved. The account page offers verification resend, delivery errors and a status refresh before checkout. Invalid reset links provide a direct route to request another link. `python3 backend/tests/service_integration.py` runs the actual PocketBase mailer against a loopback SMTP server and checks verification, reset, changed-password login, replay, tampering, expiry, and unknown-email privacy. This proves local mail generation and token handling, not external inbox delivery.
+
 The main homepage exposes validated public downloads without account gating. The static `/home2` package intentionally has no consumer link yet; update its `productConfig.downloadUrl` and rebuild it only after the consumer artifact passes validation.
 
 Consumer signing needs all six GitHub secrets listed in [RELEASING.md](RELEASING.md). The workflow distinguishes an ad-hoc prerelease from a complete Developer ID/notarized build, smoke-tests the package, validates stapling and Gatekeeper on consumer builds, and never automatically publishes an unvalidated feed entry. A published feed record requires `validated=true`, `notarized=true`, a SHA-256 and an HTTPS download URL. Set these attestations only after testing the actual downloaded artifact.
@@ -76,6 +78,12 @@ Automated evidence is recorded in the PR's checks: the portable core suite, nati
 
 Local validation completed with 146 portable core tests, 14 backend unit tests, the real PocketBase integration suite, 35 demo interaction checks, website build/lint with no warnings, and production builds of both web packages. Both npm dependency audits reported zero known vulnerabilities. The macOS workflow also renders 25 screen states and checks shared selection, queue deduplication, keeper protection, inert AI links and navigation authority.
 
+The [additional native validation](https://github.com/QuntmTech/mac-mint/actions/runs/38933989228) passed all 152 tests: 146 core tests plus six app integration tests. These exercise the actual macOS Trash adapter, verified receipt/history round trips, same-name collisions, occupied and symlink restore destinations, foreground expiry after fourteen days, and explicit reactivation of removed devices. Test token storage is isolated from Keychain; foreground verification also refreshes actual access in the application. Map Storage is available before sign-in through the menu as well as the main screen.
+
+Authenticated AI staging checks now run through real PocketBase route/auth/transaction handling against a loopback provider fixture. They inspect serialized outbound payloads, account for cache tokens, enforce navigation bounds and effective model configuration, and cover feature/global kill switches, a zero currency budget, known uncharged failures, malformed output, missing accounting and timeouts. They do not contact Anthropic.
+
+Four committed Playwright browser journeys cover signed-out routing, mobile password-reset privacy, verification delivery errors/resend/status refresh, checkout gating and redirect validation, stable checkout retry identity, untrusted success-return URLs, and recovery from expired reset links. Remote APIs are intercepted and unexpected external requests fail the checks. Account pages use system fonts and make no third-party font requests. The homepage demo's typecheck, 35 interaction checks and production build are also required CI jobs.
+
 The benchmark workflow includes a 100,000-file fixture with actual developer dependency trees, 100,000 synthetic photo fingerprints, the combined scan workload, memory gates, cancellation gates and hashing comparisons. Consult the latest run for timings; hardware, image decoding, filesystem layout and existing data affect real performance.
 
 The [validated macOS benchmark run](https://github.com/QuntmTech/mac-mint/actions/runs/38868907091) measured photo grouping at 5.01 seconds / 191 MB, developer scanning across 50 dependency trees at 2.51 seconds / 55 MB, and the combined workload at 13.79 seconds / 220 MB. Their cancellation latencies were 65 ms, 3 ms and 9 ms respectively; all benchmark gates passed. These are synthetic fixture measurements on the CI runner.
@@ -83,7 +91,7 @@ The [validated macOS benchmark run](https://github.com/QuntmTech/mac-mint/action
 The connected Mac was offline when checked. CI rendering is not interactive journey testing. These gates remain outstanding:
 
 - A downloaded Developer ID/notarized/stapled consumer installation and update failure/required-update behavior.
-- Disposable-Mac cleanup/restore, nearly full real volume, connected-volume disconnects, real Trash locations and restore conflicts.
+- Interactive disposable-Mac cleanup/restore, a nearly full real volume and connected-volume disconnects. Automated native receipt and restore-conflict tests now pass on the CI Mac; manual journeys remain outstanding.
 - PhotoKit permissions, limited access, cloud-only assets, explicit cloud previews, synced deletion and Photos recovery.
 - VoiceOver, full keyboard access, high contrast, reduced motion, dark mode, smaller windows and navigation scroll retention.
 - Real Stripe sandbox, SMTP delivery, authenticated staged Anthropic requests, and a bounded live canary after those pass.

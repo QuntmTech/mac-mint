@@ -23,5 +23,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: MacMint-${{ github.sha }}
-          path: dist/MacMint.zip
+          path: |
+            dist/MacMint.zip
+            dist/MacMint.zip.sha256
           retention-days: 14
+
+  downloaded-package:
+    needs: build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: MacMint-${{ github.sha }}
+          path: candidate
+      - name: Verify downloaded archive and extracted signature
+        run: |
+          EXPECTED=$(cat candidate/MacMint.zip.sha256)
+          ACTUAL=$(shasum -a 256 candidate/MacMint.zip | awk '{print $1}')
+          [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]]
+          ditto -x -k candidate/MacMint.zip candidate/extracted
+          codesign --verify --strict --verbose=2 candidate/extracted/MacMint.app
+          ./scripts/smoke_test.sh candidate/extracted/MacMint.app
