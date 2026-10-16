@@ -301,7 +301,7 @@ public actor OrganizationStore {
       #endif
     } }
     guard result == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
-    guard fsync(fromFD) == 0, fsync(toFD) == 0 else {
+    guard matches(file, at: to.appendingPathComponent(toName)), fsync(fromFD) == 0, fsync(toFD) == 0 else {
       // The move occurred but durability is uncertain: leave the moving/undoing intent intact.
       throw OrganizationMoveUncertain()
     }

@@ -217,7 +217,12 @@ struct OrganizerView: View {
       } catch { if !Task.isCancelled, generation == token { self.error = error.localizedDescription } }
     }
   }
-  private func cancelRequest() { generation = UUID(); requestTask?.cancel(); requestTask = nil; consentPayload = nil; consentSheet = false; busy = false }
+  private func cancelRequest() {
+    let hadRequest = requestTask != nil
+    generation = UUID(); requestTask?.cancel(); requestTask = nil; consentPayload = nil; consentSheet = false
+    // Sign-out must not unlock this UI while an already-started local operation is finishing.
+    if hadRequest { busy = false }
+  }
   private func apply() {
     guard let inventory, !busy, !model.isWorking, !model.isScanning, model.exclusionsReady else { return }
     guard model.authorizeRemoval() else { showingActivation = true; return }

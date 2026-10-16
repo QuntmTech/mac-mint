@@ -84,6 +84,31 @@ final class OrganizationTests: XCTestCase {
     let partial = try await restarted.historyReport()
     XCTAssertEqual(partial.records.count, 1); XCTAssertEqual(partial.warnings.count, 1)
   }
+  func testLastMomentCollisionAndSourceChangeCannotBypassFinalChecks() async throws {
+    for race in ["collision", "replacement"] {
+      let (home, root) = try fixture(); defer { try? fm.removeItem(at: home) }
+      let destination = root.appendingPathComponent("Documents/invoice.pdf")
+      let store = OrganizationStore(directory: home.appendingPathComponent("receipts"), home: home, writer: { data, url in
+        try FileSystem.writeDurably(data, to: url)
+        let record = try JSONDecoder().decode(OrganizationRecord.self, from: data)
+        if record.items.first?.state == .moving {
+          if race == "collision" { try Data("must not overwrite".utf8).write(to: destination) }
+          else {
+            let source = root.appendingPathComponent("invoice.pdf")
+            try FileManager.default.removeItem(at: source)
+            try Data("replacement after preparation".utf8).write(to: source)
+          }
+        }
+      })
+      let inventory = try await store.inspect(root), suggestions = await store.localSuggestions(inventory)
+      let result = try await store.apply(inventory, proposals: suggestions)
+      XCTAssertEqual(result.items[0].state, .failed)
+      XCTAssertTrue(fm.fileExists(atPath: root.appendingPathComponent("invoice.pdf").path))
+      if race == "collision" { XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "must not overwrite") }
+      else { XCTAssertFalse(fm.fileExists(atPath: destination.path)) }
+    }
+  }
+
   func testInspectionIsShallowAndLimitedAndSkipsManagedPackagesAndRepositories() async throws {
     let (home, root) = try fixture(); defer { try? fm.removeItem(at: home) }
     try fm.createDirectory(at: root.appendingPathComponent("Project/.git"), withIntermediateDirectories: true)
