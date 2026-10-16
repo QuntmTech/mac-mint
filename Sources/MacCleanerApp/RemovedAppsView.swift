@@ -69,6 +69,7 @@ struct RemovedAppsView: View {
                   model.selectedOrphanIDs.formUnion(items.map(\.id))
                 }
                 .buttonStyle(.link)
+        .tint(AppTheme.accentText)
                 Text(ByteFormatter.string(items.reduce(0) { $0 + $1.bytes })).monospacedDigit()
               }
             }
@@ -113,6 +114,7 @@ struct RemovedAppsView: View {
         Button("Exclude from Future Scans") { model.ignore(item.url) }
       } label: {
         Image(systemName: "ellipsis.circle")
+          .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
       .frame(width: 28)

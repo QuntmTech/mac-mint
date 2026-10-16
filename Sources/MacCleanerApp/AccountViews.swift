@@ -5,6 +5,7 @@ import SwiftUI
 /// Shows the main app only when the account is unlocked; otherwise the matching account step.
 struct AccountGateView: View {
   @EnvironmentObject private var account: AccountStore
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     Group {
@@ -30,7 +31,7 @@ struct AccountGateView: View {
         GateScaffold { FailurePanel(message: message) }
       }
     }
-    .animation(.easeInOut(duration: 0.2), value: account.phase)
+    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: account.phase)
   }
 }
 
@@ -59,7 +60,7 @@ struct BrandMark: View {
       RoundedRectangle(cornerRadius: size * 0.29, style: .continuous)
         .fill(
           LinearGradient(
-            colors: [AppTheme.accent, AppTheme.accent.opacity(0.6)],
+            colors: [AppTheme.brand, AppTheme.accent],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
           )
@@ -180,6 +181,7 @@ private struct AuthForm: View {
         }
       }
       .buttonStyle(.link)
+        .tint(AppTheme.accentText)
       .font(.callout)
     }
     .textFieldStyle(.roundedBorder)
@@ -235,6 +237,7 @@ private struct RedeemForm: View {
         Button("Sign Out") { Task { await account.signOut() } }
       }
       .buttonStyle(.link)
+        .tint(AppTheme.accentText)
       .font(.callout)
     }
   }
@@ -258,7 +261,7 @@ private struct DeviceLimitPanel: View {
       VStack(spacing: 0) {
         ForEach(devices) { device in
           HStack(spacing: 10) {
-            Image(systemName: "laptopcomputer").foregroundStyle(AppTheme.accent)
+            Image(systemName: "laptopcomputer").foregroundStyle(AppTheme.accentText)
             VStack(alignment: .leading, spacing: 2) {
               Text(device.name).fontWeight(.medium)
               Text(detail(for: device)).font(.caption).foregroundStyle(.secondary)
@@ -277,6 +280,7 @@ private struct DeviceLimitPanel: View {
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
           .buttonStyle(.link)
+        .tint(AppTheme.accentText)
       }
     }
   }
@@ -307,6 +311,7 @@ private struct FailurePanel: View {
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
           .buttonStyle(.link)
+        .tint(AppTheme.accentText)
       }
     }
   }

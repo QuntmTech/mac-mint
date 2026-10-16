@@ -158,7 +158,7 @@ struct ApplicationsView: View {
             HStack(spacing: 8) {
               StatusPill(
                 title: ByteFormatter.string(app.bundleSize), icon: "externaldrive",
-                tint: AppTheme.accent)
+                tint: AppTheme.accentText)
               if let version = app.version {
                 StatusPill(title: "Version \(version)", icon: "number")
               }
@@ -187,7 +187,7 @@ struct ApplicationsView: View {
             Spacer()
             StatusPill(
               title: "\(model.selectedLeftoverIDs.count) selected", icon: "checkmark.circle",
-              tint: AppTheme.accent)
+              tint: AppTheme.accentText)
           }
 
           if model.isScanning && model.operationTitle?.contains(app.name) == true {
@@ -217,6 +217,7 @@ struct ApplicationsView: View {
                   )
                 )
                 .labelsHidden()
+                .accessibilityLabel("Remove \(leftover.url.lastPathComponent) with the app")
 
                 VStack(alignment: .leading, spacing: 3) {
                   Text(leftover.url.lastPathComponent).fontWeight(.medium)
@@ -240,6 +241,7 @@ struct ApplicationsView: View {
                   Button("Exclude from future scans") { model.ignore(leftover.url) }
                 } label: {
                   Image(systemName: "ellipsis.circle")
+                    .accessibilityLabel("More actions")
                 }
                 .menuStyle(.borderlessButton)
                 .frame(width: 28)

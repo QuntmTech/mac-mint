@@ -6,8 +6,18 @@ struct AppTheme {
   static let cardPadding: CGFloat = 18
   static let pagePadding: CGFloat = 26
 
-  /// MacMint brand green (#10B981).
-  static let accent = Color(red: 0.063, green: 0.725, blue: 0.506)
+  /// Fills, tints, and selection (#047857). White text on it is 5.5:1 (WCAG AA).
+  static let accent = Color(red: 0.016, green: 0.471, blue: 0.341)
+  /// Mint for text and icons on window backgrounds: #047857 in light mode (4.6:1),
+  /// #34D399 in dark mode (6.7:1+).
+  static let accentText = Color(
+    nsColor: NSColor(name: "MacMintAccentText") { appearance in
+      appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        ? NSColor(srgbRed: 0.204, green: 0.827, blue: 0.600, alpha: 1)
+        : NSColor(srgbRed: 0.016, green: 0.471, blue: 0.341, alpha: 1)
+    })
+  /// Brand mint (#10B981) for gradients and illustration only — never for text.
+  static let brand = Color(red: 0.063, green: 0.725, blue: 0.506)
   static var panel: Color { Color(nsColor: .controlBackgroundColor).opacity(0.72) }
   static var elevated: Color { Color(nsColor: .windowBackgroundColor).opacity(0.88) }
   static var border: Color { Color.primary.opacity(0.08) }
@@ -51,7 +61,7 @@ struct MetricCard: View {
               .frame(width: 38, height: 38)
             Image(systemName: icon)
               .font(.system(size: 17, weight: .semibold))
-              .foregroundStyle(AppTheme.accent)
+              .foregroundStyle(AppTheme.accentText)
           }
           Spacer()
           if action != nil {
@@ -63,15 +73,21 @@ struct MetricCard: View {
         Text(value)
           .font(.system(size: 28, weight: .bold, design: .rounded))
           .monospacedDigit()
+          .lineLimit(1)
+          .minimumScaleFactor(0.6)
         Text(title).font(.headline)
         Text(subtitle)
           .font(.caption)
           .foregroundStyle(.secondary)
-          .lineLimit(2)
+          .lineLimit(3)
+          .fixedSize(horizontal: false, vertical: true)
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .contentShape(Rectangle())
       .onTapGesture { action?() }
+      .accessibilityElement(children: .combine)
+      .accessibilityAddTraits(action == nil ? [] : .isButton)
+      .accessibilityAction { action?() }
     }
   }
 }
@@ -130,6 +146,7 @@ struct StorageRing: View {
   let total: Int64
   let centerValue: String
   let centerLabel: String
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private var fraction: Double {
     guard total > 0 else { return 0 }
@@ -144,7 +161,7 @@ struct StorageRing: View {
         .trim(from: 0, to: fraction)
         .stroke(AppTheme.accent, style: StrokeStyle(lineWidth: 14, lineCap: .round))
         .rotationEffect(.degrees(-90))
-        .animation(.easeInOut(duration: 0.35), value: fraction)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: fraction)
       VStack(spacing: 2) {
         Text(centerValue)
           .font(.system(size: 22, weight: .bold, design: .rounded))
@@ -178,6 +195,7 @@ struct StatusPill: View {
 
 struct ScanIssueSheet: View {
   let issues: [ScanIssue]
+  @Environment(\.dismiss) private var dismiss
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -189,6 +207,8 @@ struct ScanIssueSheet: View {
             .foregroundStyle(.secondary)
         }
         Spacer()
+        Button("Done") { dismiss() }
+          .keyboardShortcut(.defaultAction)
       }
       .padding(22)
       Divider()
@@ -215,6 +235,7 @@ struct ScanIssueSheet: View {
       }
     }
     .frame(minWidth: 620, minHeight: 420)
+    .onExitCommand { dismiss() }
   }
 
   private func issueIcon(_ severity: ScanIssueSeverity) -> String {

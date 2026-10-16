@@ -28,7 +28,7 @@ struct StartupItemsView: View {
         Spacer()
         StatusPill(
           title: "\(model.startupItems.count) items", icon: "bolt.horizontal.circle",
-          tint: AppTheme.accent)
+          tint: AppTheme.accentText)
         Button("Open System Settings") { model.openSystemSettings() }
         Button("Refresh") { model.runSmartScan() }
           .disabled(model.isScanning || model.isWorking)
@@ -64,7 +64,7 @@ struct StartupItemsView: View {
                 .fill((item.disabled ? Color.secondary : AppTheme.accent).opacity(0.10))
                 .frame(width: 36, height: 36)
               Image(systemName: item.disabled ? "pause.fill" : "bolt.fill")
-                .foregroundStyle(item.disabled ? .secondary : AppTheme.accent)
+                .foregroundStyle(item.disabled ? .secondary : AppTheme.accentText)
             }
             VStack(alignment: .leading, spacing: 3) {
               Text(item.label).fontWeight(.medium)
@@ -87,6 +87,7 @@ struct StartupItemsView: View {
               model.reveal(item.url)
             } label: {
               Image(systemName: "folder")
+                .accessibilityLabel("Reveal in Finder")
             }
             .buttonStyle(.plain)
             .help("Reveal property list in Finder")

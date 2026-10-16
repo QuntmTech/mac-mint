@@ -138,7 +138,7 @@ struct RootView: View {
     if let release = updates.bannerRelease {
       HStack(spacing: 10) {
         Image(systemName: updates.isRequired ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill")
-          .foregroundStyle(updates.isRequired ? .orange : AppTheme.accent)
+          .foregroundStyle(updates.isRequired ? .orange : AppTheme.accentText)
         Text(
           updates.isRequired
             ? "This version of MacMint is no longer supported. Please update to \(release.version)."
@@ -154,6 +154,7 @@ struct RootView: View {
             updates.dismissedVersion = release.version
           } label: {
             Image(systemName: "xmark")
+              .accessibilityLabel("Dismiss")
           }
           .buttonStyle(.borderless)
           .accessibilityLabel("Dismiss update notice")

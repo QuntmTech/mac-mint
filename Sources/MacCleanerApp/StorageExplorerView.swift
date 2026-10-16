@@ -5,6 +5,7 @@ struct StorageExplorerView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var hovered: String?
   @State private var focused: String?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(spacing: 0) {
@@ -169,7 +170,16 @@ struct StorageExplorerView: View {
       }
       .help("\(node.name) — \(ByteFormatter.string(node.allocatedBytes))\(node.kind == .folder ? " • click to open" : "")")
       .contextMenu { contextMenu(for: node) }
-      .animation(.easeOut(duration: 0.12), value: isHovered)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel("\(node.name), \(ByteFormatter.string(node.allocatedBytes))")
+      .accessibilityValue(isSelected ? "Selected for review" : "")
+      .accessibilityHint(node.kind == .folder && !node.children.isEmpty ? "Opens this folder" : "")
+      .accessibilityAddTraits(.isButton)
+      .accessibilityAction { model.openStorageNode(node) }
+      .accessibilityAction(named: isSelected ? "Remove from Review" : "Add to Review") {
+        model.toggleStorageSelection(node)
+      }
   }
 
   // MARK: List
@@ -216,6 +226,7 @@ struct StorageExplorerView: View {
             model.openStorageNode(child)
           } label: {
             Image(systemName: "chevron.right.circle")
+              .accessibilityLabel("Open folder")
           }
           .buttonStyle(.borderless)
           .help("Open \(child.name)")

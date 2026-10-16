@@ -30,6 +30,19 @@ struct MacCleanerDesktopApp: App {
     }
     .windowStyle(.automatic)
     .commands {
+      CommandGroup(replacing: .appSettings) {
+        Button("Settings…") { model.selectedSection = .settings }
+          .keyboardShortcut(",", modifiers: [.command])
+          .disabled(!account.isUnlocked)
+      }
+      CommandGroup(after: .sidebar) {
+        Divider()
+        ForEach(Array(AppViewModel.Section.allCases.prefix(9).enumerated()), id: \.element) { index, section in
+          Button(section.rawValue) { model.selectedSection = section }
+            .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
+            .disabled(!account.isUnlocked)
+        }
+      }
       CommandMenu("Scan") {
         Button("Smart Scan") { model.runSmartScan() }
           .keyboardShortcut("r", modifiers: [.command])

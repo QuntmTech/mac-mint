@@ -42,7 +42,7 @@ struct MenuBarView: View {
         MetricTile(
           title: "CPU",
           value: monitor.snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "…",
-          detail: "all cores", tint: AppTheme.accent)
+          detail: "all cores", tint: AppTheme.accentText)
         MetricTile(
           title: "Swap",
           value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
@@ -116,7 +116,7 @@ struct MetricTile: View {
   let title: String
   let value: String
   let detail: String
-  var tint: Color = AppTheme.accent
+  var tint: Color = AppTheme.accentText
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {

@@ -124,7 +124,7 @@ struct CleanerView: View {
       StatusPill(
         title: "\(model.cleanupTargets.filter(\.isSelected).count) selected",
         icon: "checkmark.circle",
-        tint: model.selectedCleanupBytes > 0 ? AppTheme.accent : .gray
+        tint: model.selectedCleanupBytes > 0 ? AppTheme.accentText : .gray
       )
     }
     .padding(.horizontal, AppTheme.pagePadding)
@@ -142,6 +142,7 @@ struct CleanerView: View {
         )
       )
       .labelsHidden()
+      .accessibilityLabel("Clean \(item.displayName), \(ByteFormatter.string(item.size))")
       .disabled(item.risk == .restricted)
 
       ZStack {
@@ -149,7 +150,8 @@ struct CleanerView: View {
           .fill(AppTheme.accent.opacity(0.08))
           .frame(width: 34, height: 34)
         Image(systemName: icon(for: item.category))
-          .foregroundStyle(AppTheme.accent)
+          .foregroundStyle(AppTheme.accentText)
+          .accessibilityHidden(true)
       }
 
       VStack(alignment: .leading, spacing: 3) {
@@ -178,6 +180,7 @@ struct CleanerView: View {
         Button("Exclude from future scans") { model.ignore(item.url) }
       } label: {
         Image(systemName: "ellipsis.circle")
+          .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
       .frame(width: 28)

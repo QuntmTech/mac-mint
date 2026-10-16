@@ -19,7 +19,7 @@ struct HistoryView: View {
         if !model.history.isEmpty {
           StatusPill(
             title: ByteFormatter.string(totalBytes) + " handled", icon: "clock.arrow.circlepath",
-            tint: AppTheme.accent)
+            tint: AppTheme.accentText)
         }
       }
       .padding(AppTheme.pagePadding)
@@ -72,7 +72,7 @@ struct HistoryView: View {
           Image(
             systemName: entry.action.localizedCaseInsensitiveContains("uninstall") ? "app.badge" : "trash"
           )
-          .foregroundStyle(AppTheme.accent)
+          .foregroundStyle(AppTheme.accentText)
         }
         VStack(alignment: .leading, spacing: 4) {
           HStack {

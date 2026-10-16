@@ -50,6 +50,10 @@ struct OnboardingView: View {
       .padding(16)
     }
     .frame(width: 560, height: 440)
+    .onExitCommand {
+      onboardingDone = true
+      dismiss()
+    }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       hasFullDiskAccess = Self.checkFullDiskAccess()
     }
@@ -69,7 +73,7 @@ struct OnboardingView: View {
     VStack(alignment: .leading, spacing: 16) {
       Image(systemName: hasFullDiskAccess ? "checkmark.seal.fill" : "lock.open.fill")
         .font(.system(size: 40))
-        .foregroundStyle(hasFullDiskAccess ? AppTheme.accent : .orange)
+        .foregroundStyle(hasFullDiskAccess ? AppTheme.accentText : .orange)
       Text(hasFullDiskAccess ? "Full Disk Access is on" : "Allow Full Disk Access (recommended)")
         .font(.title2.bold())
       Text(
@@ -116,7 +120,7 @@ struct OnboardingView: View {
 
   private func point(_ icon: String, _ title: String, _ detail: String) -> some View {
     HStack(alignment: .top, spacing: 12) {
-      Image(systemName: icon).font(.title3).foregroundStyle(AppTheme.accent).frame(width: 26)
+      Image(systemName: icon).font(.title3).foregroundStyle(AppTheme.accentText).frame(width: 26)
       VStack(alignment: .leading, spacing: 2) {
         Text(title).font(.headline)
         Text(detail).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
