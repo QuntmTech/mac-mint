@@ -258,6 +258,7 @@ public actor PhotoScanner {
     var skippedLibraries: [String] = []
     let collector = IssueCollector()
     for root in roots {
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(root) { continue }
       guard
         let enumerator = fileManager.enumerator(
           at: root,

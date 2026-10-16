@@ -44,6 +44,9 @@ public struct SafetyPolicy: Sendable {
   /// Baseline automatic-cleanup policy: only user-owned paths below the home directory,
   /// never system-owned paths, personal content roots, the Trash, or symbolic links.
   public func deletionDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries must be changed through their owning app.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
     if inside(path, roots: personalRoots()) {
@@ -106,6 +109,9 @@ public struct SafetyPolicy: Sendable {
   public func developerArtifactDecision(for url: URL, extraRoots: [URL] = []) -> (
     allowed: Bool, reason: String
   ) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries are protected.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
     guard isUnderHomeCheck(path) else {
@@ -143,6 +149,9 @@ public struct SafetyPolicy: Sendable {
   /// Explicit-review policy used by Large Files, Duplicates, and Storage. It permits personal
   /// files, but still blocks system/support data, the Trash, and symlinks.
   public func reviewedFileDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries and their contents are protected. Use Photos or the owning app.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) {
       return (false, "System-owned locations cannot be removed from review tools.")

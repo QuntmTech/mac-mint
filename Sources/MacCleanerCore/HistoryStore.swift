@@ -59,8 +59,15 @@ public actor HistoryStore {
   }
 
   public func append(_ entry: HistoryEntry) throws {
-    var items = load()
-    items.insert(entry, at: 0)
+    var items: [HistoryEntry] = []
+    // Do not overwrite a damaged store with a seemingly empty history.
+    if FileManager.default.fileExists(atPath: url.path) {
+      items = try decoder.decode([HistoryEntry].self, from: Data(contentsOf: url))
+    }
+    if let previous = items.first(where: { $0.id == entry.id }) {
+      items.removeAll { $0.id == entry.id }
+      items.insert(entry.markingRestored(previous.restoredPaths ?? []), at: 0)
+    } else { items.insert(entry, at: 0) }
     try persist(items)
   }
 
@@ -73,7 +80,10 @@ public actor HistoryStore {
   private func persist(_ items: [HistoryEntry]) throws {
     try FileManager.default.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try encoder.encode(Array(items.sorted { $0.date > $1.date }.prefix(200))).write(
+    let ordered = items.sorted { $0.date > $1.date }
+    // Never evict live recovery receipts merely because 200 newer operations exist.
+    let retained = ordered.enumerated().filter { $0.offset < 200 || !$0.element.pendingReceipts.isEmpty }.map(\.element)
+    try encoder.encode(retained).write(
       to: url, options: .atomic)
   }
 }

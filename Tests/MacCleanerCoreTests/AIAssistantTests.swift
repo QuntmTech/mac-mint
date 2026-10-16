@@ -12,14 +12,10 @@ final class AIAssistantTests: XCTestCase {
   // MARK: Anonymization
 
   func testSanitizeStripsAccountNameAndEmailsAndDropsOutsidePaths() {
-    XCTAssertEqual(
-      AIContextBuilder.sanitize("/Users/coltonwood/Documents/coltonwood-taxes", home: home),
-      "~/Documents/user-taxes")
-    XCTAssertEqual(
-      AIContextBuilder.sanitize("/Users/coltonwood/Library/Mail/jane.doe@example.com/INBOX", home: home),
-      "~/Library/Mail/[email]/INBOX")
-    XCTAssertEqual(AIContextBuilder.sanitize("/Applications/Xcode.app", home: home), "/Applications/Xcode.app")
-    XCTAssertEqual(AIContextBuilder.sanitize("/Library/Application Support/X", home: home), "/Library/Application Support/X")
+    XCTAssertNil(AIContextBuilder.sanitize("/Users/coltonwood/Documents/coltonwood-taxes", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Users/coltonwood/Library/Mail/jane.doe@example.com/INBOX", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Applications/Xcode.app", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Library/Application Support/X", home: home))
     XCTAssertNil(AIContextBuilder.sanitize("/Volumes/Backup/coltonwood", home: home))
     XCTAssertNil(AIContextBuilder.sanitize("/Users/someoneelse/Desktop", home: home))
     XCTAssertEqual(AIContextBuilder.sanitize("/Users/coltonwood", home: home), "~")
@@ -68,7 +64,7 @@ final class AIAssistantTests: XCTestCase {
     XCTAssertFalse(json.contains("@example.com"))
     XCTAssertEqual(Set(context.biggestFolders.map(\.path)), ["~/Library", "~/Documents", "~/Library/Caches"])
     XCTAssertEqual(context.downloadsGB["Documents"], 1.0)
-    XCTAssertEqual(context.unusedApps.map(\.name), ["Old Editor"])
+    XCTAssertTrue(context.unusedApps.isEmpty, "Unrecognized display names are omitted")
     XCTAssertEqual(context.disk["freeGB"], 20)
   }
 

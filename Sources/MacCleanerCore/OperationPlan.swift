@@ -176,6 +176,11 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
   }
 }
 
+public struct KeeperConstraint: Hashable, Sendable {
+  public let source: URL
+  public let keeper: KeeperSnapshot
+}
+
 public struct OperationPlan: Identifiable, Sendable {
   public let id: UUID
   public let title: String
@@ -184,6 +189,8 @@ public struct OperationPlan: Identifiable, Sendable {
   public let covered: [PlanItem]
   /// Selected items that cannot be part of this plan, with the reason.
   public let excluded: [OperationFailure]
+  /// Constraints survive collapsing a selected file into a selected ancestor.
+  public let keeperConstraints: [KeeperConstraint]
 
   public init(
     id: UUID = UUID(), title: String, items: [PlanItem], covered: [PlanItem] = [],
@@ -194,6 +201,9 @@ public struct OperationPlan: Identifiable, Sendable {
     self.items = items
     self.covered = covered
     self.excluded = excluded
+    self.keeperConstraints = (items + covered).compactMap { item in
+      item.keeper.map { KeeperConstraint(source: item.url, keeper: $0) }
+    }
   }
 
   public var totalBytes: Int64 { items.reduce(0) { $0 + $1.expectedBytes } }
@@ -228,6 +238,23 @@ public enum OperationPlanner {
       }
     }
 
+    // Reject the ancestor, rather than merely hiding the duplicate it covers. Otherwise
+    // selecting one folder can discard the last-copy protection along with its child row.
+    let constraints = eligible.compactMap { item in
+      item.keeper.map { KeeperConstraint(source: item.url, keeper: $0) }
+    }
+    eligible.removeAll { item in
+      let threatensBoth = constraints.contains {
+        FileSystem.path($0.source, isInsideOrEqual: item.url)
+          && FileSystem.path(URL(fileURLWithPath: $0.keeper.path), isInsideOrEqual: item.url)
+      }
+      if threatensBoth {
+        rejected.append(OperationFailure(url: item.url,
+          message: "This selection contains both a selected copy and the copy being kept. Choose smaller selections."))
+      }
+      return threatensBoth
+    }
+
     // Parents first, so a child whose ancestor is already planned is recognised as covered.
     let ordered = eligible.enumerated().sorted { lhs, rhs in
       let l = lhs.element.url.standardizedFileURL.path.count
@@ -238,7 +265,7 @@ public enum OperationPlanner {
     var keptIDs: Set<UUID> = []
     var covered: [PlanItem] = []
     for (_, item) in ordered {
-      let path = item.url.standardizedFileURL.path
+      let path = FileSystem.comparisonPath(item.url)
       if keptPaths.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
         covered.append(item)
       } else {
@@ -253,7 +280,8 @@ public enum OperationPlanner {
     // (selected directly, or inside a selected folder, from any screen).
     kept.removeAll { item in
       guard let keeper = item.keeper?.path else { return false }
-      let threatened = keptPaths.contains { keeper == $0 || keeper.hasPrefix($0 + "/") }
+      let key = FileSystem.comparisonPath(URL(fileURLWithPath: keeper))
+      let threatened = keptPaths.contains { key == $0 || key.hasPrefix($0 + "/") }
       if threatened {
         rejected.append(
           OperationFailure(

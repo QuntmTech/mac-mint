@@ -7,6 +7,8 @@ public enum ItemOutcomeStatus: String, Codable, Hashable, Sendable {
   case notAttempted
   /// Journal-only: the move had started when the app stopped. Resolved on recovery.
   case inFlight
+  /// A move was interrupted before its destination could be recorded. Never invent a receipt.
+  case uncertain
 }
 
 public struct ItemOutcome: Identifiable, Codable, Hashable, Sendable {
@@ -53,10 +55,11 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
   public var outcomes: [ItemOutcome]
   public var wasCancelled: Bool
   public var wasInterrupted: Bool
+  public var persistenceError: String?
 
   public init(
     id: UUID, title: String, startedAt: Date, finishedAt: Date? = nil, outcomes: [ItemOutcome],
-    wasCancelled: Bool = false, wasInterrupted: Bool = false
+    wasCancelled: Bool = false, wasInterrupted: Bool = false, persistenceError: String? = nil
   ) {
     self.id = id
     self.title = title
@@ -65,11 +68,12 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
     self.outcomes = outcomes
     self.wasCancelled = wasCancelled
     self.wasInterrupted = wasInterrupted
+    self.persistenceError = persistenceError
   }
 
   public var moved: [ItemOutcome] { outcomes.filter { $0.status == .moved } }
   public var problems: [ItemOutcome] {
-    outcomes.filter { $0.status == .skipped || $0.status == .failed }
+    outcomes.filter { $0.status == .skipped || $0.status == .failed || $0.status == .uncertain }
   }
   public var notAttempted: [ItemOutcome] { outcomes.filter { $0.status == .notAttempted } }
   public var receipts: [TrashReceipt] { outcomes.compactMap(\.receipt) }
@@ -80,6 +84,7 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
     if !problems.isEmpty { parts.append("\(problems.count) skipped") }
     if wasCancelled { parts.append("stopped early") }
     if wasInterrupted { parts.append("interrupted") }
+    if persistenceError != nil { parts.append("recovery record could not be saved; operation stopped") }
     return parts.joined(separator: ", ")
   }
 
@@ -90,7 +95,8 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
     }
     return HistoryEntry(
       id: id, date: finishedAt ?? startedAt, action: title,
-      paths: moved.map { $0.item.url.path }, bytes: bytesMoved, notes: notes, receipts: receipts)
+      paths: outcomes.filter { $0.status == .moved || $0.status == .uncertain }.map { $0.item.url.path },
+      bytes: bytesMoved, notes: notes + (persistenceError.map { " " + $0 } ?? ""), receipts: receipts)
   }
 }
 
@@ -130,7 +136,11 @@ public actor OperationExecutor {
     var report = OperationReport(
       id: plan.id, title: plan.title, startedAt: Date(),
       outcomes: plan.items.map { ItemOutcome(item: $0, status: .notAttempted) })
-    writeJournal(report)
+    do { try writeJournal(report) } catch {
+      report.persistenceError = error.localizedDescription
+      report.finishedAt = Date()
+      return report
+    }
 
     var movedIDs: Set<UUID> = []
     var movedPaths: [String] = []
@@ -147,14 +157,30 @@ public actor OperationExecutor {
 
       let outcome: ItemOutcome
       if let rejection = validate(
-        item, movedIDs: movedIDs, movedPaths: movedPaths, ignoredPaths: ignoredPaths)
+        item, plan: plan, movedIDs: movedIDs, movedPaths: movedPaths, ignoredPaths: ignoredPaths)
       {
         outcome = rejection
       } else {
         // Record intent first, so a crash mid-move still leaves an explanation behind.
         report.outcomes[index] = ItemOutcome(item: item, status: .inFlight)
-        writeJournal(report)
-        outcome = await move(item)
+        do { try writeJournal(report) } catch {
+          report.outcomes[index] = ItemOutcome(item: item, status: .notAttempted)
+          report.persistenceError = error.localizedDescription
+          break
+        }
+        // Sizing can be expensive. Check identity, policy, activity and keepers again after it.
+        let size = FileSystem.itemSize(at: item.url, fileManager: fileManager)
+        if Task.isCancelled {
+          report.wasCancelled = true
+          report.outcomes[index] = ItemOutcome(item: item, status: .notAttempted)
+          break
+        }
+        if let rejection = validate(item, plan: plan, movedIDs: movedIDs,
+          movedPaths: movedPaths, ignoredPaths: ignoredPaths) {
+          outcome = rejection
+        } else {
+          outcome = await move(item, size: size)
+        }
       }
       if outcome.status == .moved {
         movedIDs.insert(item.id)
@@ -162,7 +188,10 @@ public actor OperationExecutor {
         bytesMoved += outcome.receipt?.bytes ?? 0
       }
       report.outcomes[index] = outcome
-      writeJournal(report)
+      do { try writeJournal(report) } catch {
+        report.persistenceError = error.localizedDescription
+        break
+      }
     }
 
     report.finishedAt = Date()
@@ -170,13 +199,14 @@ public actor OperationExecutor {
       OperationProgress(
         completed: report.outcomes.filter { $0.status != .notAttempted }.count,
         total: plan.items.count, currentName: nil, bytesMoved: bytesMoved))
-    removeJournal(report.id)
+    do { try writeJournal(report) } catch { report.persistenceError = error.localizedDescription }
+    // The caller acknowledges only after HistoryStore commits this operation by ID.
     return report
   }
 
   /// Returns a skip outcome when the item must not be moved, or nil when it may proceed.
   private func validate(
-    _ item: PlanItem, movedIDs: Set<UUID>, movedPaths: [String], ignoredPaths: Set<String>
+    _ item: PlanItem, plan: OperationPlan, movedIDs: Set<UUID>, movedPaths: [String], ignoredPaths: Set<String>
   ) -> ItemOutcome? {
     let skip: (String) -> ItemOutcome = { ItemOutcome(item: item, status: .skipped, message: $0) }
     if let dependency = item.dependsOn, !movedIDs.contains(dependency) {
@@ -188,15 +218,20 @@ public actor OperationExecutor {
     guard fileManager.fileExists(atPath: item.url.path) || isSymlink(item.url) else {
       return skip("No longer exists; it may already have been removed.")
     }
-    if let expected = item.identity, let current = FileSystem.fileIdentity(at: item.url),
-      expected != current
-    {
+    if let expected = item.identity, FileSystem.fileIdentity(at: item.url) != expected {
       return skip("A different item now exists at this location. Rescan before removing it.")
     }
-    if let expected = item.snapshot, let current = FileSnapshot.current(item.url),
-      !expected.matches(current)
-    {
-      return skip("This file changed since it was scanned. Rescan to review it again.")
+    if let expected = item.snapshot {
+      guard let current = FileSnapshot.current(item.url), expected.matches(current) else {
+        return skip("This file changed or could not be verified. Rescan to review it again.")
+      }
+    }
+    for constraint in plan.keeperConstraints {
+      if FileSystem.path(URL(fileURLWithPath: constraint.keeper.path), isInsideOrEqual: item.url) {
+        return skip("This selection would remove a copy that must be kept.")
+      }
+      if FileSystem.path(constraint.source, isInsideOrEqual: item.url),
+        let problem = keeperProblem(constraint.keeper, movedPaths: movedPaths) { return skip(problem) }
     }
     if let keeper = item.keeper, let problem = keeperProblem(keeper, movedPaths: movedPaths) {
       return skip(problem)
@@ -222,21 +257,18 @@ public actor OperationExecutor {
     guard fileManager.fileExists(atPath: keeper.path) else {
       return "The copy you're keeping (\(name)) is gone, so this one is kept too."
     }
-    if let expected = keeper.identity, let current = FileSystem.fileIdentity(at: url),
-      expected != current
-    {
+    if let expected = keeper.identity, FileSystem.fileIdentity(at: url) != expected {
       return "The copy you're keeping (\(name)) was replaced. Rescan before removing duplicates."
     }
-    if let expected = keeper.snapshot, let current = FileSnapshot.current(url),
-      !expected.matches(current)
-    {
-      return "The copy you're keeping (\(name)) changed. Rescan before removing duplicates."
+    if let expected = keeper.snapshot {
+      guard let current = FileSnapshot.current(url), expected.matches(current) else {
+        return "The copy you're keeping (\(name)) changed or could not be verified. Rescan before removing duplicates."
+      }
     }
     return nil
   }
 
-  private func move(_ item: PlanItem) async -> ItemOutcome {
-    let size = FileSystem.itemSize(at: item.url, fileManager: fileManager)
+  private func move(_ item: PlanItem, size: Int64) async -> ItemOutcome {
     let identity = FileSystem.fileIdentity(at: item.url)
     do {
       let trashURL = try await trashService.trash(item.url)
@@ -277,18 +309,11 @@ public actor OperationExecutor {
     journalDirectory?.appendingPathComponent("operation-\(id.uuidString).json")
   }
 
-  private func writeJournal(_ report: OperationReport) {
+  private func writeJournal(_ report: OperationReport) throws {
     guard let url = journalURL(report.id) else { return }
-    try? fileManager.createDirectory(
+    try fileManager.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    if let data = try? OperationJournal.encoder.encode(report) {
-      try? data.write(to: url, options: .atomic)
-    }
-  }
-
-  private func removeJournal(_ id: UUID) {
-    guard let url = journalURL(id) else { return }
-    try? fileManager.removeItem(at: url)
+    try OperationJournal.encoder.encode(report).write(to: url, options: .atomic)
   }
 }
 
@@ -306,7 +331,7 @@ public enum OperationJournal {
   }()
 
   /// Reports left behind by operations that never finished (app quit or crashed mid-run).
-  /// Each journal is removed once read; callers record the reports in history.
+  /// Reading never consumes evidence. Call acknowledge only after a durable history commit.
   public static func recoverInterrupted(in directory: URL, fileManager: FileManager = .default)
     -> [OperationReport]
   {
@@ -315,25 +340,26 @@ public enum OperationJournal {
         at: directory, includingPropertiesForKeys: nil)
     else { return [] }
     return files.filter { $0.lastPathComponent.hasPrefix("operation-") }.compactMap { url in
-      defer { try? fileManager.removeItem(at: url) }
       guard let data = try? Data(contentsOf: url),
         var report = try? decoder.decode(OperationReport.self, from: data)
       else { return nil }
       report.outcomes = report.outcomes.map { outcome in
         guard outcome.status == .inFlight else { return outcome }
-        // The app stopped mid-move: if the item left its place it reached the Trash.
-        let path = outcome.item.url.path
-        let gone = !fileManager.fileExists(atPath: path) && FileSystem.fileIdentity(at: outcome.item.url) == nil
-        return gone
-          ? ItemOutcome(
-            item: outcome.item, status: .moved,
-            message: "Moved to the Trash while MacMint was quitting; find it there to restore.",
-            receipt: TrashReceipt(originalPath: path, trashPath: nil, bytes: outcome.item.expectedBytes))
-          : ItemOutcome(item: outcome.item, status: .notAttempted)
+        if let identity = outcome.item.identity,
+          FileSystem.fileIdentity(at: outcome.item.url) == identity {
+          return ItemOutcome(item: outcome.item, status: .notAttempted)
+        }
+        return ItemOutcome(item: outcome.item, status: .uncertain,
+          message: "MacMint stopped before recording the destination. Check the original folder and Finder's Trash; no verified restore receipt is available.")
       }
-      report.wasInterrupted = true
+      report.wasInterrupted = report.finishedAt == nil || report.outcomes.contains { $0.status == .uncertain }
       report.finishedAt = report.finishedAt ?? Date()
       return report
     }
+  }
+
+  public static func acknowledge(_ id: UUID, in directory: URL, fileManager: FileManager = .default) throws {
+    let url = directory.appendingPathComponent("operation-\(id.uuidString).json")
+    if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
   }
 }

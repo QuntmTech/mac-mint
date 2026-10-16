@@ -24,7 +24,7 @@ public struct Recommendation: Identifiable, Hashable, Sendable {
 
     public var label: String {
       switch self {
-      case .safe: return "Safe"
+      case .safe: return "Rebuildable"
       case .likely: return "Likely unneeded"
       case .review: return "Worth a look"
       }
@@ -62,6 +62,7 @@ public enum RecommendationEngine {
     public var duplicateGroups: [DuplicateGroup] = []
     public var trashBytes: Int64 = 0
     public var growth: [StorageGrowth] = []
+    public var runningBundleIDs: Set<String> = []
     public var now = Date()
     /// Apps not opened for this long are suggested for review.
     public var unusedAppDays = 180
@@ -77,7 +78,12 @@ public enum RecommendationEngine {
 
     /// Each path belongs to one recommendation only (the first, highest-priority rule).
     func take(_ items: [PlanItem]) -> [PlanItem] {
-      items.filter { claimed.insert($0.url.standardizedFileURL.path).inserted }
+      items.filter { item in
+        let key = FileSystem.comparisonPath(item.url)
+        guard !claimed.contains(where: { key == $0 || key.hasPrefix($0 + "/") || $0.hasPrefix(key + "/") }) else { return false }
+        claimed.insert(key)
+        return true
+      }
     }
     func add(
       _ id: String, symbol: String, title: String, detail: String, confidence: Recommendation.Confidence,
@@ -93,7 +99,8 @@ public enum RecommendationEngine {
 
     // 1. Caches and logs that rebuild themselves.
     let rebuildCategories: Set<CleanupCategory> = [.userCaches, .userLogs, .browserCaches]
-    let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category) }
+    let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
+      && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }
     let cacheItems = take(caches.map { PlanItem.cleanup($0) })
     add(
       "caches", symbol: "shippingbox", title: "Caches and logs that rebuild themselves",
@@ -101,12 +108,18 @@ public enum RecommendationEngine {
       confidence: .safe, items: cacheItems, destination: .cleaner)
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
-    let devTrash = inputs.developer.filter(\.isSuggested).compactMap(PlanItem.developer)
+    let devTrash = inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }.compactMap(PlanItem.developer)
     let devCleanup = inputs.cleanupTargets
-      .filter { $0.risk == .safe && $0.category == .developerJunk }.map { PlanItem.cleanup($0) }
+       .filter { target in
+        target.risk == .safe && target.category == .developerJunk
+          && target.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false
+          && !inputs.developer.contains { item in
+            item.url.map { FileSystem.path($0, isInsideOrEqual: target.url) || FileSystem.path(target.url, isInsideOrEqual: $0) } == true
+          }
+      }.map { PlanItem.cleanup($0) }
     let devItems = take(devTrash + devCleanup)
     if !devItems.isEmpty {
-      let tools = Dictionary(grouping: inputs.developer.filter(\.isSuggested), by: \.tool)
+      let tools = Dictionary(grouping: inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }, by: \.tool)
         .map { ($0.key, $0.value.reduce(Int64(0)) { $0 + $1.bytes }) }
         .sorted { $0.1 > $1.1 }.prefix(3)
         .map { "\($0.0) \(ByteFormatter.string($0.1))" }

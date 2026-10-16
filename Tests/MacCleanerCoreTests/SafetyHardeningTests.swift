@@ -32,7 +32,8 @@ final class SafetyHardeningTests: XCTestCase {
       expectedBytes: 1, reason: "", source: "Storage")
     let viaFolder = OperationPlanner.plan(
       title: "t", items: [PlanItem.duplicate(copy, keeper: keeper), folder])
-    XCTAssertFalse(viaFolder.items.contains { $0.kind == .duplicateCopy })
+    XCTAssertFalse(viaFolder.items.contains { $0.url == folder.url })
+    XCTAssertTrue(viaFolder.excluded.contains { $0.url == folder.url })
   }
 
   func testDuplicateEditedInPlaceOrLostKeeperIsSkipped() async throws {
@@ -82,8 +83,8 @@ final class SafetyHardeningTests: XCTestCase {
     // Bypass the planner to prove the executor enforces it too.
     let plan = OperationPlan(title: "t", items: [PlanItem.largeFile(keeper), PlanItem.duplicate(copy, keeper: keeper)])
     let report = await executor(home).run(plan)
-    XCTAssertEqual(report.outcomes.map(\.status), [.moved, .skipped])
-    XCTAssertTrue(fm.fileExists(atPath: b.path))
+    XCTAssertEqual(report.outcomes.map(\.status), [.skipped, .moved])
+    XCTAssertTrue(fm.fileExists(atPath: keeper.url.path))
   }
 
   // MARK: Policy
@@ -176,15 +177,15 @@ final class SafetyHardeningTests: XCTestCase {
     let gone = dir.appendingPathComponent("gone.bin")
     let items = [stillHere, gone].map {
       ItemOutcome(
-        item: PlanItem(url: $0, displayName: $0.lastPathComponent, kind: .reviewedFile, expectedBytes: 5, reason: "", source: "t"),
+        item: PlanItem(url: $0, displayName: $0.lastPathComponent, kind: .reviewedFile, expectedBytes: 5, reason: "", source: "t", identity: FileSystem.fileIdentity(at: $0)),
         status: .inFlight)
     }
     let report = OperationReport(id: UUID(), title: "t", startedAt: Date(), outcomes: items)
     try OperationJournal.encoder.encode(report).write(to: dir.appendingPathComponent("operation-\(report.id).json"))
 
     let recovered = try XCTUnwrap(OperationJournal.recoverInterrupted(in: dir).first)
-    XCTAssertEqual(recovered.outcomes.map(\.status), [.notAttempted, .moved])
-    XCTAssertEqual(recovered.receipts.map(\.originalPath), [gone.path])
+    XCTAssertEqual(recovered.outcomes.map(\.status), [.notAttempted, .uncertain])
+    XCTAssertTrue(recovered.receipts.isEmpty)
   }
 
   // MARK: Ownership

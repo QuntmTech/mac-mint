@@ -83,7 +83,8 @@ public enum FileSystem {
 
   /// Allocated size of a file or folder, including package contents, with unreadable
   /// descendants counted instead of silently treated as empty.
-  public static func measure(at url: URL, fileManager: FileManager = .default) -> SizeMeasurement {
+  public static func measure(at url: URL, fileManager: FileManager = .default, ignoredPaths: Set<String> = []) -> SizeMeasurement {
+    if isIgnored(url, ignoredPaths: ignoredPaths) { return SizeMeasurement(bytes: 0) }
     let url = fresh(url)
     let values: URLResourceValues
     do {
@@ -116,6 +117,7 @@ public enum FileSystem {
     var seenIdentities: Set<String> = []
     walk(enumerator) { child in
       if Task.isCancelled { return .stop }
+      if isIgnored(child, ignoredPaths: ignoredPaths) { return .skipDescendants }
       guard let childValues = try? child.resourceValues(forKeys: resourceKeys) else {
         errors.record(nil)
         return .continue
@@ -189,22 +191,41 @@ public enum FileSystem {
     return Int(info.st_nlink)
   }
 
+  /// Resolve parents without following the item itself. Case folding follows the nearest
+  /// existing volume, so case-sensitive APFS and Linux keep distinct names distinct.
+  public static func comparisonPath(_ url: URL) -> String {
+    let normalized = url.standardizedFileURL
+    let parent = normalized.deletingLastPathComponent().resolvingSymlinksInPath()
+    let path = normalized.path == "/" ? "/" : parent.appendingPathComponent(normalized.lastPathComponent).path
+    #if os(macOS)
+      var probe = parent
+      while !FileManager.default.fileExists(atPath: probe.path), probe.path != "/" {
+        probe.deleteLastPathComponent()
+      }
+      let sensitive = (try? fresh(probe).resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?
+        .volumeSupportsCaseSensitiveNames
+      return sensitive == true ? path : path.lowercased()
+    #else
+      return path
+    #endif
+  }
+
   public static func path(_ child: URL, isInsideOrEqual root: URL) -> Bool {
-    let childPath = child.standardizedFileURL.path
-    let rootPath = root.standardizedFileURL.path
-    return childPath == rootPath || childPath.hasPrefix(rootPath + "/")
+    let childPath = comparisonPath(child)
+    let rootPath = comparisonPath(root)
+    return rootPath == "/" || childPath == rootPath || childPath.hasPrefix(rootPath + "/")
   }
 
   public static func isIgnored(_ url: URL, ignoredPaths: Set<String>) -> Bool {
-    let path = url.standardizedFileURL.path
-    return ignoredPaths.contains { ignored in path == ignored || path.hasPrefix(ignored + "/") }
+    ignoredPaths.contains { path(url, isInsideOrEqual: URL(fileURLWithPath: $0)) }
   }
 
   /// True when an excluded path lives strictly inside `url`, so acting on `url` as a whole
   /// would also act on something the user asked to protect.
   public static func containsIgnoredDescendant(_ url: URL, ignoredPaths: Set<String>) -> Bool {
-    let path = url.standardizedFileURL.path
-    return ignoredPaths.contains { $0.hasPrefix(path + "/") }
+    guard !ignoredPaths.isEmpty else { return false }
+    let path = comparisonPath(url)
+    return ignoredPaths.contains { comparisonPath(URL(fileURLWithPath: $0)).hasPrefix(path + "/") }
   }
 
   /// Splits `url` into the largest pieces that do not include any excluded path. Returns

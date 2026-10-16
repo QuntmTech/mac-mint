@@ -47,9 +47,10 @@ final class OperationTests: XCTestCase {
     let trashPath = try XCTUnwrap(report.receipts.first?.trashPath)
     XCTAssertTrue(fm.fileExists(atPath: trashPath))
     XCTAssertGreaterThan(report.bytesMoved, 0)
-    XCTAssertTrue(
-      (try? fm.contentsOfDirectory(atPath: journal.path))?.isEmpty ?? true,
-      "journal is removed after a completed run")
+    XCTAssertEqual(OperationJournal.recoverInterrupted(in: journal).count, 1,
+      "journal remains until history is committed")
+    try OperationJournal.acknowledge(report.id, in: journal)
+    XCTAssertTrue(OperationJournal.recoverInterrupted(in: journal).isEmpty)
   }
 
   func testDependentItemsAreSkippedWhenTheirAppIsNotMoved() async throws {
@@ -122,6 +123,8 @@ final class OperationTests: XCTestCase {
     XCTAssertEqual(recovered.count, 1)
     XCTAssertTrue(recovered[0].wasInterrupted)
     XCTAssertEqual(recovered[0].historyEntry().receipts?.count, 1)
+    XCTAssertEqual(OperationJournal.recoverInterrupted(in: dir).count, 1)
+    try OperationJournal.acknowledge(report.id, in: dir)
     XCTAssertTrue(OperationJournal.recoverInterrupted(in: dir).isEmpty)
   }
 
