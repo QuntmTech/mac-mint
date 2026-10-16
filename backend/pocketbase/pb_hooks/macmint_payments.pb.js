@@ -2,7 +2,7 @@ routerAdd("GET", "/api/macmint/checkout/config", e => {
   const payments = require(`${__hooks}/macmint_payments_lib.js`)
   e.response.header().set("Cache-Control", "no-store")
   const cfg = payments.configuration(e.app)
-  return e.json(200, cfg ? { enabled: true, amount_cents: cfg.amount_cents, currency: cfg.currency, duration_days: cfg.duration_days, max_devices: cfg.max_devices } : { enabled: false })
+  return e.json(200, cfg ? { enabled: true, amount_minor: cfg.amount_minor, currency: cfg.currency, duration_days: cfg.duration_days, max_devices: cfg.max_devices } : { enabled: false })
 })
 
 routerAdd("POST", "/api/macmint/checkout", e => {

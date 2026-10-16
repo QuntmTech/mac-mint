@@ -170,6 +170,7 @@ final class TrustRegressionTests: XCTestCase {
     let url = try write(home, "history.json")
     let before = try Data(contentsOf: url)
     let store = HistoryStore(url: url)
+    do { _ = try await store.loadChecked(); XCTFail("Corrupt history must be distinguishable from an empty history") } catch {}
     do { try await store.append(HistoryEntry(action: "test", paths: [], bytes: 0, notes: "")); XCTFail("Must preserve corrupt history") } catch {}
     do { try await store.markRestored(entryID: UUID(), originalPaths: ["x"]); XCTFail("Must preserve corrupt history") } catch {}
     XCTAssertEqual(try Data(contentsOf: url), before)
@@ -232,6 +233,17 @@ final class TrustRegressionTests: XCTestCase {
     let recommendations = RecommendationEngine.recommend(inputs)
     XCTAssertTrue(RecommendationEngine.safeItems(recommendations).isEmpty)
     XCTAssertTrue(PlanItem.cleanup(inputs.cleanupTargets[0]).needsAttention)
+  }
+
+  func testPhotosRecoveryIsDistinctAndBackwardCompatible() throws {
+    let entry = HistoryEntry(action: "Photos: 2 moved to Recently Deleted", paths: [], bytes: 10,
+      notes: "Restore in Photos", recoveryKind: .photos)
+    let decoded = try JSONDecoder().decode(HistoryEntry.self, from: JSONEncoder().encode(entry))
+    XCTAssertTrue(decoded.restoresThroughPhotos)
+    XCTAssertTrue(decoded.markingRestored([]).restoresThroughPhotos)
+    let legacy = HistoryEntry(action: "Photos: 1 moved to Recently Deleted", paths: [], bytes: 10, notes: "")
+    XCTAssertTrue(legacy.restoresThroughPhotos)
+    XCTAssertFalse(HistoryEntry(action: "Uninstall Photos: app", paths: ["x"], bytes: 1, notes: "").restoresThroughPhotos)
   }
 
   func testActiveDeveloperEvidenceCannotBeOverriddenByCleanerParent() {

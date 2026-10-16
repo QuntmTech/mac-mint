@@ -8,7 +8,7 @@ struct CleanerView: View {
 
   enum RiskFilter: String, CaseIterable, Identifiable {
     case all = "All"
-    case safe = "Safe"
+    case safe = "Rebuildable"
     case review = "Review"
     var id: String { rawValue }
   }
@@ -118,7 +118,7 @@ struct CleanerView: View {
 
       Spacer()
 
-      Button("Safe only") { model.selectSafeCleanupOnly() }
+      Button("Rebuildable only") { model.selectSafeCleanupOnly() }
       Button("Deselect all") { model.deselectAllCleanup() }
 
       StatusPill(

@@ -52,6 +52,7 @@ extension AppViewModel {
   func resetAIState() {
     invalidateAIReview()
     assistantTurns = []
+    assistantDraft = ""
     explanations = [:]
     aiError = nil
     explanationError = nil
@@ -218,8 +219,10 @@ extension AppViewModel {
     guard !trimmed.isEmpty, !assistantBusy, !isScanning, !isWorking else { return }
     aiPayloadPreview = previewPayload(AIAskRequest(question: trimmed, history: assistantTurns, context: aiContext))
     withAIConsent { [self] in
+      guard !assistantBusy, !isScanning, !isWorking else { return }
       let generation = aiGeneration
       let history = assistantTurns
+      assistantDraft = ""
       assistantTurns.append(AITurn(role: .user, text: trimmed))
       assistantBusy = true
       aiError = nil

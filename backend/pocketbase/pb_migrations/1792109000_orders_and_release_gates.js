@@ -4,7 +4,7 @@ migrate((app) => {
     fields: [
       { name: "user", type: "relation", collectionId: app.findCollectionByNameOrId("users").id, maxSelect: 1, required: true },
       ...["request_key", "session_id", "price_id", "currency", "plan"].map(name => ({ name, type: "text", max: 200 })),
-      ...["amount_cents", "duration_days", "max_devices"].map(name => ({ name, type: "number", min: 0, onlyInt: true })),
+      ...["amount_minor", "duration_days", "max_devices"].map(name => ({ name, type: "number", min: 0, onlyInt: true })),
       { name: "livemode", type: "bool" },
       { name: "state", type: "select", maxSelect: 1, values: ["created", "pending", "fulfilled", "failed"] },
       { name: "created", type: "autodate", onCreate: true, onUpdate: false },

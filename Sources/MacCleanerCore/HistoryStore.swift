@@ -1,5 +1,7 @@
 import Foundation
 
+public enum HistoryRecoveryKind: String, Codable, Hashable, Sendable { case trash, photos }
+
 public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
   public let id: UUID
   public let date: Date
@@ -11,10 +13,12 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
   public let receipts: [TrashReceipt]?
   /// Original paths of receipts that have been restored from the Trash.
   public let restoredPaths: [String]?
+  public let recoveryKind: HistoryRecoveryKind?
+  public var restoresThroughPhotos: Bool { recoveryKind == .photos || (recoveryKind == nil && action.hasPrefix("Photos:") && paths.isEmpty && receipts == nil) }
 
   public init(
     id: UUID = UUID(), date: Date = Date(), action: String, paths: [String], bytes: Int64,
-    notes: String, receipts: [TrashReceipt]? = nil, restoredPaths: [String]? = nil
+    notes: String, receipts: [TrashReceipt]? = nil, restoredPaths: [String]? = nil, recoveryKind: HistoryRecoveryKind? = nil
   ) {
     self.id = id
     self.date = date
@@ -24,6 +28,7 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
     self.notes = notes
     self.receipts = receipts
     self.restoredPaths = restoredPaths
+    self.recoveryKind = recoveryKind
   }
 
   public func isRestored(_ receipt: TrashReceipt) -> Bool {
@@ -36,7 +41,7 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
     let merged = Array(Set((restoredPaths ?? []) + paths)).sorted()
     return HistoryEntry(
       id: id, date: date, action: action, paths: self.paths, bytes: bytes, notes: notes,
-      receipts: receipts, restoredPaths: merged)
+      receipts: receipts, restoredPaths: merged, recoveryKind: recoveryKind)
   }
 }
 
@@ -51,19 +56,17 @@ public actor HistoryStore {
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
   }
 
-  public func load() -> [HistoryEntry] {
-    guard let data = try? Data(contentsOf: url),
-      let items = try? decoder.decode([HistoryEntry].self, from: data)
-    else { return [] }
-    return items.sorted { $0.date > $1.date }
+  public func load() -> [HistoryEntry] { (try? loadChecked()) ?? [] }
+
+  /// Distinguishes a fresh installation from an unreadable or corrupt recovery store.
+  public func loadChecked() throws -> [HistoryEntry] {
+    do { return try decoder.decode([HistoryEntry].self, from: Data(contentsOf: url)).sorted { $0.date > $1.date } }
+    catch let error as CocoaError where error.code == .fileReadNoSuchFile { return [] }
   }
 
   public func append(_ entry: HistoryEntry) throws {
-    var items: [HistoryEntry] = []
     // Do not overwrite a damaged store with a seemingly empty history.
-    if FileManager.default.fileExists(atPath: url.path) {
-      items = try decoder.decode([HistoryEntry].self, from: Data(contentsOf: url))
-    }
+    var items = try loadChecked()
     if let previous = items.first(where: { $0.id == entry.id }) {
       items.removeAll { $0.id == entry.id }
       items.insert(entry.markingRestored(previous.restoredPaths ?? []), at: 0)
@@ -73,7 +76,10 @@ public actor HistoryStore {
 
   /// Records that some of an entry's items were restored from the Trash.
   public func markRestored(entryID: UUID, originalPaths: [String]) throws {
-    let current = try decoder.decode([HistoryEntry].self, from: Data(contentsOf: url))
+    let current = try loadChecked()
+    guard current.contains(where: { $0.id == entryID }) else {
+      throw CocoaError(.fileReadUnknown, userInfo: [NSLocalizedDescriptionKey: "The matching History operation could not be found. Its recovery evidence must be checked."])
+    }
     let items = current.map { $0.id == entryID ? $0.markingRestored(originalPaths) : $0 }
     try persist(items)
   }

@@ -44,7 +44,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
     (folder / 'migrations/1792109100_test_seed.js').write_text('''migrate(app=>{
       const u=new Record(app.findCollectionByNameOrId("users"));u.set("email","fixture@example.invalid");u.setPassword("fixture-test-password-123");u.set("verified",true);app.save(u)
       const ent=new Record(app.findCollectionByNameOrId("plan_entitlements"));ent.set("user",u.id);ent.set("plan","pro");ent.set("status","active");ent.set("max_devices",1);app.save(ent)
-      for(const [key,value] of [["ai",{enabled:true}],["commerce",{enabled:true,price_id:"price_fixture",amount_cents:1900,currency:"usd",plan:"pro",duration_days:365,max_devices:3,livemode:false}]]){
+      for(const [key,value] of [["ai",{enabled:true}],["commerce",{enabled:true,price_id:"price_fixture",amount_minor:1900,currency:"usd",plan:"pro",duration_days:365,max_devices:3,livemode:false}]]){
         const c=new Record(app.findCollectionByNameOrId("app_config"));c.set("key",key);c.set("value",value);app.save(c)
       }
       const release=new Record(app.findCollectionByNameOrId("app_releases"));release.set("version","0.0.1");release.set("channel","stable");release.set("sha256","a".repeat(64));release.set("download_url","https://example.invalid/fixture.zip");release.set("validated",true);release.set("notarized",true);release.set("published",true);app.save(release)

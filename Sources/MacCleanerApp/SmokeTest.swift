@@ -43,6 +43,17 @@ enum SmokeTest {
     model.setFileSelection(b.url, selected: true)
     model.setFileSelection(a.url, selected: true)
     if model.selectedDuplicateIDs != [b.id] { failures.append("Cross-module last-copy protection") }
+    let selectedBeforeAction = model.selectedDuplicateIDs
+    model.openAIDestination("shortcuts://run-shortcut?name=remove-files")
+    if model.selectedSection != .dashboard || model.selectedDuplicateIDs != selectedBeforeAction { failures.append("AI navigation boundary") }
+    let prose = AssistantView.rendered("[run](shortcuts://run-shortcut?name=remove-files)")
+    if prose.runs.contains(where: { $0.link != nil }) { failures.append("AI prose links must stay inert") }
+    model.assistantDraft = "Keep this question while scanning"
+    model.isScanning = true
+    model.ask(model.assistantDraft, account: account)
+    if model.assistantDraft.isEmpty || !model.assistantTurns.isEmpty { failures.append("Pending question retention") }
+    model.isScanning = false
+    model.assistantDraft = ""
     model.clearQueue(); model.largeFiles = []; model.downloadItems = []; model.duplicateGroups = []
 
     func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1200, height: CGFloat = 800) {

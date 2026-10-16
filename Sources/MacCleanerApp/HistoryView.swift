@@ -26,9 +26,9 @@ struct HistoryView: View {
       Divider()
       if !model.recoveryWarnings.isEmpty {
         VStack(alignment: .leading, spacing: 8) {
-          Label("\(model.recoveryWarnings.count) recovery records could not be read", systemImage: "exclamationmark.triangle")
-          Text("The records are retained. Inspect original folders and Finder’s Trash before making further changes.").font(.caption)
-          Button("Show Recovery Records") { model.reveal(AppPaths.journalDirectory) }
+          Label("Recovery needs attention (\(model.recoveryWarnings.count))", systemImage: "exclamationmark.triangle")
+          ForEach(model.recoveryWarnings) { Text($0.message).font(.caption) }
+          Button("Show Recovery Files") { model.reveal(AppPaths.supportDirectory) }
         }.padding(16).foregroundStyle(.orange)
       }
 
@@ -57,13 +57,16 @@ struct HistoryView: View {
     ) {
       if receipts.isEmpty {
         Text(
-          entry.receipts == nil
-            ? "Recorded before MacMint tracked Trash locations. Use Finder to restore these items from the Trash."
-            : entry.notes
+          entry.restoresThroughPhotos
+            ? "Restore through Photos → Recently Deleted while available. Deletion can sync to your other devices."
+            : entry.receipts == nil
+              ? "Recorded before MacMint tracked Trash locations. Use Finder to restore these items from the Trash."
+              : entry.notes
         )
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.vertical, 4)
+        if entry.restoresThroughPhotos { Button("Open Photos") { PhotoLibraryService.showInPhotos() } }
         ForEach(entry.paths, id: \.self) { path in
           Text(path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
         }
@@ -96,6 +99,7 @@ struct HistoryView: View {
           }
         }
         Spacer()
+        if entry.restoresThroughPhotos { StatusPill(title: "Restore through Photos", icon: "photo") }
         if pending.count > 1 {
           Button("Restore All") { model.restore(pending, entryID: entry.id) }
             .controlSize(.small)

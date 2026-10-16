@@ -250,7 +250,6 @@ struct AIRecommendationNote: View {
 struct AssistantView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
-  @State private var draft = ""
   @FocusState private var focused: Bool
 
   private let suggestions = [
@@ -377,20 +376,20 @@ struct AssistantView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      TextField("Ask about your Mac's storage…", text: $draft, axis: .vertical)
+      TextField("Ask about your Mac's storage…", text: $model.assistantDraft, axis: .vertical)
         .textFieldStyle(.roundedBorder)
         .lineLimit(1...4)
         .focused($focused)
-        .onSubmit { send(draft) }
+        .onSubmit { send(model.assistantDraft) }
       Button {
-        send(draft)
+        send(model.assistantDraft)
       } label: {
         Image(systemName: "arrow.up.circle.fill").font(.title2)
           .accessibilityLabel("Send")
       }
       .buttonStyle(.plain)
       .foregroundStyle(AppTheme.accentText)
-      .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy || model.isScanning || model.isWorking)
+      .disabled(model.assistantDraft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy || model.isScanning || model.isWorking)
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
@@ -399,8 +398,9 @@ struct AssistantView: View {
   }
 
   private func send(_ text: String) {
-    model.ask(String(text.prefix(600)), account: account)
-    if model.aiEnabled { draft = "" }
+    guard !model.assistantBusy else { return }
+    model.assistantDraft = String(text.prefix(600))
+    model.ask(model.assistantDraft, account: account)
   }
 }
 

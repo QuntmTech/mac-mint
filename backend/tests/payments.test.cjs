@@ -19,7 +19,7 @@ const payments = require('../pocketbase/pb_hooks/macmint_payments_lib.js')
 function fixture() {
   const rows = [], order = new Row('checkout_orders')
   order.id = 'order1'
-  Object.entries({ user: 'user1', price_id: 'price_test', amount_cents: 1900, currency: 'usd', livemode: false,
+  Object.entries({ user: 'user1', price_id: 'price_test', amount_minor: 1900, currency: 'usd', livemode: false,
     plan: 'pro', duration_days: 365, max_devices: 3, state: 'pending', session_id: 'cs_test_fixture' }).forEach(([k, v]) => order.set(k, v))
   rows.push(order)
   const app = {

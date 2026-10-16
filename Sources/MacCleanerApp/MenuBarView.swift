@@ -85,7 +85,8 @@ struct MenuBarView: View {
     switch monitor.snapshot.pressure {
     case .critical: return "Memory is under heavy pressure"
     case .warning: return "Memory is getting tight"
-    default:
+    case .unknown: return "Readings are not available yet"
+    case .normal:
       return monitor.snapshot.diskUsedFraction > 0.9 ? "Disk is almost full" : "Everything looks healthy"
     }
   }

@@ -107,7 +107,7 @@ struct RiskBadge: View {
 
   private var title: String {
     switch risk {
-    case .safe: return "Safe"
+    case .safe: return "Rebuildable"
     case .review: return "Review"
     case .restricted: return "Protected"
     }

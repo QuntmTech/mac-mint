@@ -316,18 +316,22 @@ extension AppViewModel {
 
   /// Called at launch: operations that never finished are recorded so nothing goes unexplained.
   func recoverInterruptedOperations() async {
-    recoveryWarnings = OperationJournal.unreadableJournals(in: AppPaths.journalDirectory).map {
+    recoveryWarnings += OperationJournal.unreadableJournals(in: AppPaths.journalDirectory).map {
       ScanIssue(area: "Recovery", path: $0.path, message: "An operation record could not be read. It has been preserved for diagnosis. Use Finder to inspect the original locations and Trash.")
     }
     let reports = OperationJournal.recoverInterrupted(in: AppPaths.journalDirectory)
     guard !reports.isEmpty else { return }
+    var committed = 0
     for report in reports {
       if await record(report.historyEntry()) {
+        committed += 1
         try? OperationJournal.acknowledge(report.id, in: AppPaths.journalDirectory)
+      } else {
+        recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
+          message: "An operation could not be committed to History. Its journal is retained; check the original locations and Trash."))
       }
     }
-    statusMessage =
-      "Reconciled \(reports.count) operation record\(reports.count == 1 ? "" : "s") — see History"
+    statusMessage = "Reconciled \(committed) operation records; \(reports.count - committed) still need a History commit — see History"
   }
 
   // MARK: Recovery

@@ -24,7 +24,7 @@ function configuration(app) {
   let cfg
   try { cfg = JSON.parse(toString(app.findFirstRecordByFilter("app_config", "key = 'commerce'").get("value"))) } catch (_) { return null }
   if (!cfg || cfg.enabled !== true || !/^price_[A-Za-z0-9]+$/.test(cfg.price_id || "") ||
-    !/^[a-z]{3}$/.test(cfg.currency || "") || !Number.isInteger(cfg.amount_cents) || cfg.amount_cents <= 0 ||
+    !/^[a-z]{3}$/.test(cfg.currency || "") || !Number.isInteger(cfg.amount_minor) || cfg.amount_minor <= 0 ||
     ["pro", "lifetime"].indexOf(cfg.plan) < 0 || !Number.isInteger(cfg.duration_days) || cfg.duration_days < 0 ||
     !Number.isInteger(cfg.max_devices) || cfg.max_devices < 1 || cfg.max_devices > 100 || typeof cfg.livemode !== "boolean") return null
   if (!secret(app, "stripe_restricted_key", "STRIPE_RESTRICTED_KEY") || !secret(app, "stripe_webhook_secret", "STRIPE_WEBHOOK_SECRET")) return null
@@ -48,7 +48,7 @@ function orderForRequest(app, user, key, cfg) {
     try { order = tx.findFirstRecordByFilter("checkout_orders", "user = {:u} && request_key = {:k}", { u: user.id, k: key }); return } catch (_) {}
     order = new Record(tx.findCollectionByNameOrId("checkout_orders"))
     order.set("user", user.id); order.set("request_key", key); order.set("state", "created")
-    for (const field of ["price_id", "amount_cents", "currency", "plan", "duration_days", "max_devices", "livemode"]) order.set(field, cfg[field])
+    for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode"]) order.set(field, cfg[field])
     tx.save(order)
   })
   return order
@@ -59,7 +59,7 @@ function checkout(app, user, key) {
   const client = new StripeClient(app)
   const order = orderForRequest(app, user, key, cfg)
   const price = client.send("GET", "prices/" + encodeURIComponent(order.get("price_id")))
-  if (!price.active || price.type !== "one_time" || price.unit_amount !== order.get("amount_cents") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
+  if (!price.active || price.type !== "one_time" || price.unit_amount !== order.get("amount_minor") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
   const session = client.send("POST", "checkout/sessions", {
     mode: "payment", "line_items[0][price]": order.get("price_id"), "line_items[0][quantity]": 1,
     client_reference_id: user.id, "metadata[macmint_order]": order.id,
@@ -89,7 +89,7 @@ function fulfill(app, session) {
   app.runInTransaction(tx => {
     const order = tx.findRecordById("checkout_orders", orderId)
     const lines = full.line_items && full.line_items.data
-    if (full.mode !== "payment" || full.client_reference_id !== order.get("user") || full.amount_total !== order.get("amount_cents") ||
+    if (full.mode !== "payment" || full.client_reference_id !== order.get("user") || full.amount_total !== order.get("amount_minor") ||
         full.currency !== order.get("currency") || full.livemode !== order.get("livemode") || !lines || lines.length !== 1 ||
         full.line_items.has_more || lines[0].quantity !== 1 || !lines[0].price || lines[0].price.id !== order.get("price_id") ||
         (order.get("session_id") && order.get("session_id") !== full.id)) throw Error("Order mismatch")

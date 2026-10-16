@@ -83,8 +83,7 @@ function config(app) {
   }
 }
 
-function usageRecord(app, userId) {
-  const day = today()
+function usageRecord(app, userId, day) {
   try {
     return app.findFirstRecordByFilter("ai_usage", "user = {:u} && day = {:d}", { u: userId, d: day })
   } catch (err) {
@@ -165,9 +164,10 @@ function reserve(app, userId, feature, model, inputUpperBound, maxOutput) {
     const cfg = config(tx)
     const tokenBudget = positive($os.getenv("AI_DAILY_TOKEN_BUDGET") || cfg.daily_token_budget, DEFAULT_GLOBAL_TOKEN_BUDGET)
     const moneyBudget = positive($os.getenv("AI_DAILY_USD_BUDGET") || cfg.daily_usd_budget, 20) * 1000000
-    const usage = usageRecord(tx, userId)
+    const day = today()
+    const usage = usageRecord(tx, userId, day)
     if (Number(usage.get(feature) || 0) >= DAILY_LIMITS[feature]) throw capacityError("ai_daily_limit")
-    const day = today(), budget = dailyBudget(tx, day), prices = PRICES[model]
+    const budget = dailyBudget(tx, day), prices = PRICES[model]
     const tokens = inputUpperBound + maxOutput
     const cost = Math.ceil(inputUpperBound * Math.max(prices.input, prices.write) + maxOutput * prices.output)
     if (Number(budget.get("used_tokens") || 0) + Number(budget.get("reserved_tokens") || 0) + tokens > tokenBudget ||

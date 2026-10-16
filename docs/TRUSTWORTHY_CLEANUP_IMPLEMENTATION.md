@@ -25,7 +25,7 @@ Restore runs filesystem moves off the UI thread, checks cancellation between ite
 | 21–23 | Developer rebuild/redownload/review costs; command-only actions remain copyable inventory. Ollama identifiers are validated and shell-quoted with option termination. External storage is labeled inspection-only and generic ineligible locations cannot be selected. |
 | 24–26 | Duplicate comparison, full paths/change dates, explicit keep choice, Quick Look/Space support and hard-link/shared-storage explanations. Photos has larger comparison, suggested keepers, local previews, explicit per-preview cloud permission, and indexed grouping that avoids weak similarity chains. |
 | 27–30 | Dragged app inspection, Keep my settings, distinct update outcomes, accurate declared startup settings and possible owner, direct Login Items access, actionable performance explanations and normal Quit behavior. |
-| 31–34 | Consent continuation, serialized payload preview, feature flag refresh, separate consent/plan/service errors, independent request errors, request cancellation, generation checks, and consent withdrawal while unavailable. AI actions retain navigation-only authority. |
+| 31–34 | Consent continuation, serialized payload preview, feature flag refresh, separate consent/plan/service errors, independent request errors, request cancellation, generation checks, and consent withdrawal while unavailable. A pending question survives navigation and a scan or consent interruption. AI actions retain navigation-only authority. |
 | 35–36 | Added keyboard/accessibility actions, smaller window support, list alternative to the treemap, expanded smoke rendering, permission/recovery/space explanations, and a previewed diagnostic export with no names, paths, questions or file contents. Interactive accessibility verification remains required. |
 
 Shared selection is scoped to filesystem inventories. Photos library asset deletion continues through PhotoKit and its own confirmation/recovery; it never enters the generic file-removal queue. App uninstall review retains its app-before-leftovers dependency.
@@ -40,7 +40,7 @@ Automatic context is rebuilt from fixed storage categories, known app/tool ident
 
 The default global limits are 3,000,000 tokens and USD 20 per UTC day; both are configurable via `app_config.ai` or `AI_DAILY_TOKEN_BUDGET` / `AI_DAILY_USD_BUDGET`. Explicit zero budgets stop calls. Per-user daily feature limits remain 150 explanations, 8 reviews and 30 questions. Pending and possibly charged attempts occupy allowance until settled. Models must exist in the explicit model/price allowlist; configured models actually control requests.
 
-Rates were checked against [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing). Update the allowlist/rates before adopting another model or provider pricing mode. Currency accounting assumes standard global pricing, no tools, no fast mode and five-minute cache writes. Provider spending controls remain a separate operational backstop.
+Rates were checked against [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing). Update the allowlist/rates before adopting another model or provider pricing mode. Currency accounting assumes standard global pricing, no tools, no fast mode and five-minute cache writes. Provider spending controls remain a separate operational backstop. Older usage rows lack cache measurements; on a mid-day cutover, reconcile provider history or start a fresh UTC budget cycle before enabling the new routes.
 
 An operator can reconcile a timed-out reservation through `POST /api/macmint/admin/ai-reconcile`, supplying its request ID and verified provider usage, or explicit `confirm_no_charge`. Do not release unknown reservations merely because a client timed out.
 
@@ -58,7 +58,7 @@ Before enabling checkout:
 
 1. Use a separate Stripe sandbox and a restricted key with only the necessary Checkout Session and Price permissions. Store it in the host secret store as `STRIPE_RESTRICTED_KEY` (or the existing private `app_secrets` fallback named `stripe_restricted_key`). Store the matching webhook secret as `STRIPE_WEBHOOK_SECRET` / `stripe_webhook_secret`. Never put values in the repository, website or logs.
 2. Register `/api/macmint/stripe/webhook` for `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`. The implementation pins API version `2026-08-26.dahlia`; configure and test compatible event payloads.
-3. Create a private `app_config` record keyed `commerce`, initially disabled. Use the already-approved price's `price_id`, `amount_cents`, `currency`, existing `plan`, `duration_days`, `max_devices`, and explicit `livemode`. No retail price was chosen or changed in this work. The server validates these against the retrieved one-time Stripe Price.
+3. Create a private `app_config` record keyed `commerce`, initially disabled. Use the already-approved price's `price_id`, `amount_minor`, `currency`, existing `plan`, `duration_days`, `max_devices`, and explicit `livemode`. No retail price was chosen or changed in this work. `amount_minor` must exactly match the Stripe Price’s integer `unit_amount`; the hosted Stripe page displays the currency and price. The server validates the offer against the retrieved one-time Stripe Price.
 4. Supply a validated, notarized stable release. Checkout remains closed without one. Verify a fresh account's email before purchase. No automatic tax configuration was added; confirm registrations before changing that behavior.
 5. Run the actual sandbox journey, failed/delayed payment, duplicate delivery, network loss after payment, receipt/support process and account transfer. Only then run a bounded, explicitly approved live canary.
 
@@ -74,7 +74,11 @@ For a rollback, disable checkout and AI first, preserve journals/orders/reservat
 
 Automated evidence is recorded in the PR's checks: the portable core suite, native build/package/render checks, backend unit checks, real PocketBase transaction/webhook tests, website build/lint and demo interaction checks. Browser probes covered public pages, signed-out routing, checkout redirect rejection and retry identity, mobile login, updated privacy copy, zero analytics requests and zero JavaScript errors.
 
+Local validation completed with 146 portable core tests, 14 backend unit tests, the real PocketBase integration suite, 35 demo interaction checks, website build/lint with no warnings, and production builds of both web packages. Both npm dependency audits reported zero known vulnerabilities. The macOS workflow also renders 25 screen states and checks shared selection, queue deduplication, keeper protection, inert AI links and navigation authority.
+
 The benchmark workflow includes a 100,000-file fixture with actual developer dependency trees, 100,000 synthetic photo fingerprints, the combined scan workload, memory gates, cancellation gates and hashing comparisons. Consult the latest run for timings; hardware, image decoding, filesystem layout and existing data affect real performance.
+
+The [validated macOS benchmark run](https://github.com/QuntmTech/mac-mint/actions/runs/38868907091) measured photo grouping at 5.01 seconds / 191 MB, developer scanning across 50 dependency trees at 2.51 seconds / 55 MB, and the combined workload at 13.79 seconds / 220 MB. Their cancellation latencies were 65 ms, 3 ms and 9 ms respectively; all benchmark gates passed. These are synthetic fixture measurements on the CI runner.
 
 The connected Mac was offline when checked. CI rendering is not interactive journey testing. These gates remain outstanding:
 

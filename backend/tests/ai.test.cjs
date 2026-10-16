@@ -126,3 +126,12 @@ test('zero budgets stop requests instead of silently using a default budget', ()
   assert.throws(() => request(db), e => e.code === 'ai_capacity')
   assert.equal(calls, 0)
 })
+
+test('known uncharged failures release both allowance and global capacity', () => {
+  const db = database(); upstream = () => ({ statusCode: 429 })
+  assert.throws(() => request(db), e => e.code === 'ai_busy')
+  assert.equal(db.rows('ai_requests')[0].get('state'), 'released')
+  assert.equal(db.rows('ai_usage')[0].get('review'), 0)
+  assert.equal(db.rows('ai_daily_budgets')[0].get('reserved_tokens'), 0)
+  assert.equal(db.rows('ai_daily_budgets')[0].get('reserved_micro_usd'), 0)
+})

@@ -4,28 +4,28 @@ A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller, evolved from Mac Clean
 
 ## Accounts and licensing
 
-MacMint requires a signed-in account with an active plan. Purchases on macmint.co issue a redemption code (`MINT-XXXX-XXXX-XXXX-XXXX`) that unlocks Pro on the account; each account can activate a limited number of Macs.
+Local scanning, inspection, exclusions, History and Restore are available before sign-in. An active account and plan are required to start a paid removal. Existing redemption codes (`MINT-XXXX-XXXX-XXXX-XXXX`) remain supported. Configured Stripe Checkout grants purchased access to the account through verified webhooks; it remains closed until configuration and a validated consumer build are available. Accounts have a device limit.
 
 - Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
 - The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
-- Account and license checks touch the network. File contents and personal file names never leave the Mac.
-- Optional AI features (off until the user turns them on) send an anonymized summary — item names like `com.spotify.client`, sizes, categories, app names, and home-relative folder paths with the account name and emails removed — to the PocketBase server, which calls Anthropic. See [MacMint AI](#macmint-ai).
+- Account and license checks touch the network. File contents stay local. Optional AI sends the user's own typed questions and a restricted automatic context after consent.
+- Optional AI features (off until the user turns them on) send previewable fixed categories, numeric summaries and allowlisted tool/app identifiers, plus the user's typed questions and recent conversation — to the PocketBase server, which calls Anthropic. See [MacMint AI](#macmint-ai).
 
 V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming SHA-256, duplicate detection, application scanner, startup inventory, history, and safety policy) and upgrades it in-place for stronger reliability, safer destructive operations, better scan visibility, exclusions, cancellation, richer review flows, and a substantially more polished desktop interface.
 
 ## What works now
 
-### Smart Care
+### Quick Scan
 - One pass (⌘R) over caches, apps, startup items, developer data, Removed Apps leftovers, Downloads, and the Trash, run in parallel.
-- Findings become **ranked recommendations** — estimated bytes × confidence (Safe / Likely unneeded / Worth a look) — each with a plain-English reason. "Review" always opens the normal review sheet; "Review Safe Items" bundles everything that rebuilds or re-downloads itself. No opaque health score.
+- Findings become **ranked recommendations** — estimated bytes × confidence (Rebuildable / Likely unneeded / Worth a look) — each with a plain-English reason. "Review" always opens the normal review sheet; "Review Rebuildable Items" bundles everything that rebuilds or re-downloads itself. No opaque health score.
 - **Usage intelligence** from Spotlight: last opened, date added, use count, and download source (host only). Unknown is never treated as unused, and file access times are never used.
-- **Downloads**: big items not opened in 3+ months ("Downloaded 8 months ago from example.com and never opened").
-- **Unused apps**: Applications can sort by *Last opened*; Smart Care lists apps not opened in 6 months (each uninstall is still reviewed individually).
+- **Downloads**: big items not opened in 3+ months ("Downloaded 8 months ago from example.com with no recorded opens").
+- **Unused apps**: Applications can sort by *Last opened*; Quick Scan lists apps not opened in 6 months (each uninstall is still reviewed individually).
 - **Free-space history** (one sample a day, 90 days) with a weekly trend, and **storage growth**: each Storage map is compared with the previous one and points at the most specific folder that grew.
 
-### Smart Scan
+### Inspection inventories
 - Runs cleanup, installed-app, and startup-item scans concurrently.
-- Reports safe reclaimable bytes separately from review-only bytes.
+- Reports estimated rebuildable bytes separately from review-only bytes.
 - Records scan duration/date and filesystem issues.
 - Supports cancellation instead of forcing a long scan to finish.
 - Honors persisted scan exclusions.
@@ -132,25 +132,25 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - No fake privileged mutation from the base app.
 
 ### Exclusions + privacy
-- Persisted local exclusions used by cleanup, app-leftover, duplicate, and large-file scans. An exclusion inside a cache folder splits that folder instead of letting the parent be removed whole.
-- No telemetry. Network use is limited to account sign-in, license checks, and optional AI requests the user starts.
+- Persisted local exclusions used across filesystem scanners and operation planning. An exclusion inside a cache folder splits that folder instead of letting the parent be removed whole.
+- No telemetry. Network use includes account/license verification, release checks, optional app update checks and consented AI requests. Photo analysis and previews stay local unless a user explicitly enables a cloud preview.
 - Cleanup history (with Trash locations for each moved item) and exclusions are local JSON files under `~/Library/Application Support/MacMint`.
 
 ## MacMint AI
 
 Advisory only: AI never selects, changes risk, skips review, or removes anything. Every answer is labelled "AI-generated — may be wrong", and MacMint's `SafetyPolicy` verdict is shown above the AI's.
 
-- **Explain with AI…** (Cleaner, Removed Apps, Developer, Storage inside `~/Library`, Startup Items): sends only the item name and its Library area. Claude Haiku 4.5; strict identifiers (bundle ids, launchd labels) are cached server-side for 30 days.
-- **Review with AI** (Smart Care): suggested order, a note per recommendation, cautions, and insights. The "AI order" toggle changes display order only. Claude Opus 5.5.
-- **Ask MacMint**: chat over an anonymized summary of the latest scans (`AIContextBuilder`); suggested actions can only navigate. Claude Opus 5.5.
-- Server: `backend/pocketbase/pb_hooks/macmint_ai.pb.js` + `macmint_ai_lib.js`. Requires an active plan; rate limits, per-user daily caps, a global daily token budget, and a kill switch (`app_config` key `ai` → `{"enabled": false}`) that the app respects. The Anthropic key lives only on the server (env `ANTHROPIC_API_KEY` or the superuser-only `app_secrets` collection). `ai_usage` stores counts and tokens only.
+- **Explain with AI…** (Cleaner, Removed Apps, Developer, Storage inside `~/Library`, Startup Items): sends only a recognized identifier and an allowlisted Library area; arbitrary names are omitted. Claude Haiku 4.5; strict identifiers (bundle ids, launchd labels) are cached server-side for 30 days.
+- **Review with AI** (Quick Scan): suggested order, a note per recommendation, cautions, and insights. The "AI order" toggle changes display order only. Claude Opus 5.5.
+- **Ask MacMint**: chat over a restricted category summary of the latest scans (`AIContextBuilder`); suggested actions can only navigate. Claude Opus 5.5.
+- Server: `backend/pocketbase/pb_hooks/macmint_ai.pb.js` + `macmint_ai_lib.js`. Requires an active plan; rate limits, per-user daily caps, transactional token and currency reservations, and a kill switch (`app_config` key `ai` → `{"enabled": false}`) that the app respects. The Anthropic key lives only on the server (env `ANTHROPIC_API_KEY` or the superuser-only `app_secrets` collection). Private accounting collections store usage counts, tokens, model identifiers and costs; they do not store prompts or chat transcripts. See [implementation coverage and release gates](docs/TRUSTWORTHY_CLEANUP_IMPLEMENTATION.md).
 
 ## V2 user interface
 
 V2 replaces the basic utility-style presentation with a consumer-facing SwiftUI layout while keeping the same underlying engine:
 
 - branded sidebar shell with disk-space footer;
-- Smart Scan hero with storage ring and safety/privacy status;
+- Quick Scan hero with storage ring and safety/privacy status;
 - module cards for Cleaner, Apps, Large Files, Duplicates, Startup Items, History, and Exclusions;
 - bottom operation/status bar with cancellation and scan-issue access;
 - dedicated scan-issue sheet instead of silently swallowing inaccessible paths;

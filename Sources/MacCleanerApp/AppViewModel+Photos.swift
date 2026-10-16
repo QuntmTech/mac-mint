@@ -190,7 +190,7 @@ extension AppViewModel {
       await record(
         HistoryEntry(
           action: "Photos: \(assets.count) moved to Recently Deleted", paths: [], bytes: bytes,
-          notes: "Restore them from Photos ▸ Recently Deleted within 30 days."))
+          notes: "Restore through Photos ▸ Recently Deleted while available. Deletion can sync to other devices.", recoveryKind: .photos))
       let ids = Set(assets.map(\.id))
       removePhotos { ids.contains($0.id) }
       statusMessage = "\(assets.count) photo\(assets.count == 1 ? "" : "s") moved to Photos ▸ Recently Deleted"

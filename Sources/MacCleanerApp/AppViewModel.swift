@@ -137,6 +137,7 @@ final class AppViewModel: ObservableObject {
   @Published var aiReviewBusy = false
   @Published var aiOrderRecommendations = false
   @Published var assistantTurns: [AITurn] = []
+  @Published var assistantDraft = ""
   @Published var assistantBusy = false
   var aiGeneration = UUID()
   var pendingAIAction: (@MainActor () -> Void)?
@@ -174,9 +175,10 @@ final class AppViewModel: ObservableObject {
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 
     Task {
-      async let loadedHistory = historyStore.load()
       async let loadedIgnores = ignoreStore.load()
-      history = await loadedHistory
+      do { history = try await historyStore.loadChecked() }
+      catch { recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
+        message: "History could not be read. The existing file has been preserved; check recovery records before further cleanup.")) }
       ignoredPaths = await loadedIgnores
       await recoverInterruptedOperations()
     }
