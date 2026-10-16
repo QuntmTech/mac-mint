@@ -34,6 +34,8 @@ public actor OrphanScanner {
   private let fileManager: FileManager
   private let homeDirectory: URL
   private let applicationRoots: [URL]
+  /// Folders where vendors install helper apps outside Applications (searched a few levels deep).
+  private let helperRoots: [URL]
   private let recentWindow: TimeInterval
 
   /// First labels of reverse-DNS identifiers we accept as evidence of a bundle ID.
@@ -60,7 +62,7 @@ public actor OrphanScanner {
 
   public init(
     fileManager: FileManager = .default, homeDirectory: URL? = nil, applicationRoots: [URL]? = nil,
-    recentWindow: TimeInterval = 30 * 86_400
+    helperRoots: [URL]? = nil, recentWindow: TimeInterval = 30 * 86_400
   ) {
     let home = homeDirectory ?? fileManager.homeDirectoryForCurrentUser
     self.fileManager = fileManager
@@ -69,6 +71,12 @@ public actor OrphanScanner {
       applicationRoots ?? [
         URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/System/Applications"),
         home.appendingPathComponent("Applications"),
+      ]
+    self.helperRoots =
+      helperRoots ?? [
+        URL(fileURLWithPath: "/Library/Application Support"),
+        URL(fileURLWithPath: "/Library/PrivilegedHelperTools"),
+        home.appendingPathComponent("Library/Application Support"),
       ]
     self.recentWindow = recentWindow
   }
@@ -139,6 +147,30 @@ public actor OrphanScanner {
         guard url.pathExtension.lowercased() == "app" else { return .continue }
         ids.formUnion(bundleIDs(inApp: url))
         return .skipDescendants
+      }
+    }
+    for root in helperRoots { ids.formUnion(helperBundleIDs(in: root, depth: 6)) }
+    return ids
+  }
+
+  /// Vendor-installed apps and helpers outside Applications (updaters, Toolbox-managed IDEs,
+  /// privileged helpers), searched to a shallow depth so this stays fast.
+  private func helperBundleIDs(in folder: URL, depth: Int) -> Set<String> {
+    guard depth > 0,
+      let children = try? fileManager.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+    else { return [] }
+    var ids: Set<String> = []
+    let isPrivilegedHelpers = folder.lastPathComponent == "PrivilegedHelperTools"
+    for child in children {
+      let ext = child.pathExtension.lowercased()
+      if ["app", "bundle", "xpc", "appex"].contains(ext) {
+        ids.formUnion(bundleIDs(inApp: child))
+      } else if isPrivilegedHelpers {
+        // Privileged helper tools are bare executables named by their bundle identifier.
+        ids.insert(child.lastPathComponent.lowercased())
+      } else if (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+        ids.formUnion(helperBundleIDs(in: child, depth: depth - 1))
       }
     }
     return ids

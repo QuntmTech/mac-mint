@@ -82,7 +82,8 @@ enum PhotoLibraryService {
     }
   }
 
-  static func thumbnail(assetID: String, side: CGFloat) async -> NSImage? {
+  /// Image data rather than NSImage so it can cross actors; build the image on the main actor.
+  static func thumbnailData(assetID: String, side: CGFloat) async -> Data? {
     guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
     else { return nil }
     let options = PHImageRequestOptions()
@@ -100,7 +101,7 @@ enum PhotoLibraryService {
         continuation.resume(returning: image?.tiffRepresentation)
       }
     }
-    return data.flatMap(NSImage.init(data:))
+    return data
   }
 
   static func showInPhotos() {

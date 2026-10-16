@@ -74,8 +74,20 @@ final class OrphanScannerTests: XCTestCase {
 
   // MARK: Helpers
 
+  func testVendorHelpersOutsideApplicationsCountAsInstalled() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let support = home.appendingPathComponent("Library/Application Support")
+    try makeApp(support.appendingPathComponent("JetBrains/Toolbox/apps"), "IDE.app", id: "com.jetbrains.ide")
+    try write(home, "Library/Caches/com.jetbrains.ide/cache.bin")
+
+    let items = await OrphanScanner(homeDirectory: home, applicationRoots: [], helperRoots: [support])
+      .scan().value
+    XCTAssertFalse(items.contains { $0.bundleID == "com.jetbrains.ide" })
+  }
+
   private func scanner(_ home: URL, apps: [URL]) -> OrphanScanner {
-    OrphanScanner(homeDirectory: home, applicationRoots: apps)
+    OrphanScanner(homeDirectory: home, applicationRoots: apps, helperRoots: [])
   }
 
   private func makeApp(_ root: URL, _ name: String, id: String, helpers: [String: String] = [:]) throws {

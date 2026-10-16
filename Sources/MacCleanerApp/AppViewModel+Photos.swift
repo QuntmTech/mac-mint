@@ -227,6 +227,8 @@ extension AppViewModel {
       statusMessage = error.localizedDescription
     }
     refreshTrashStatus()
+    // Receipts that pointed into the Trash are now unrestorable; redraw History's buttons.
+    Task { history = await historyStore.load() }
   }
 
   // MARK: Removed apps

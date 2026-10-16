@@ -152,12 +152,12 @@ public struct CleanupCatalog: Sendable {
       .init(
         category: .deviceFirmware, name: "iPhone software updates",
         url: h.appendingPathComponent("Library/iTunes/iPhone Software Updates"), risk: .safe,
-        reason: "Firmware kept for restoring devices; Finder downloads the current version again when needed.",
+        reason: "Firmware kept for restoring a device (often 10 GB or more). It's downloaded again the next time you update or restore that device.",
         expandChildren: true),
       .init(
         category: .deviceFirmware, name: "iPad software updates",
         url: h.appendingPathComponent("Library/iTunes/iPad Software Updates"), risk: .safe,
-        reason: "Firmware kept for restoring devices; Finder downloads the current version again when needed.",
+        reason: "Firmware kept for restoring a device (often 10 GB or more). It's downloaded again the next time you update or restore that device.",
         expandChildren: true),
 
       .init(

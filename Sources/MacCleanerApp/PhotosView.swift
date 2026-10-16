@@ -255,7 +255,8 @@ struct PhotoThumbnail: View {
     if let cached = Self.cache.object(forKey: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
-      loaded = await PhotoLibraryService.thumbnail(assetID: assetID, side: side)
+      loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side)
+        .flatMap(NSImage.init(data:))
     } else {
       let url = photo.url
       let pixels = side * 2
