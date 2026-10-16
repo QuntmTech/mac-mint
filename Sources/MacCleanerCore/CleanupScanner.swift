@@ -88,6 +88,8 @@ public actor CleanupScanner {
       var items: [CleanupTarget] = []
       var issues: [ScanIssue] = []
       for entry in entries where !rule.excludedChildNames.contains(entry.lastPathComponent) {
+        // Firmware folders also hold signatures and metadata; only the .ipsw images are offered.
+        if rule.category == .deviceFirmware, entry.pathExtension.lowercased() != "ipsw" { continue }
         for piece in FileSystem.eligiblePieces(
           of: entry, ignoredPaths: ignoredPaths, fileManager: fileManager)
         {

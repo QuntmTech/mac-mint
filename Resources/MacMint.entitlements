@@ -3,6 +3,10 @@
 <plist version="1.0">
 <dict>
   <!-- MacMint is distributed outside the App Store and is not sandboxed: it needs to read and
-       move user-selected files and Library caches. Hardened runtime with no exceptions. -->
+       move user-selected files and Library caches. Hardened runtime; the two entitlements below
+       are the hardened-runtime opt-ins for the Photos library and asking Finder to empty the
+       Trash (each still requires the user's consent). -->
+  <key>com.apple.security.personal-information.photos-library</key><true/>
+  <key>com.apple.security.automation.apple-events</key><true/>
 </dict>
 </plist>

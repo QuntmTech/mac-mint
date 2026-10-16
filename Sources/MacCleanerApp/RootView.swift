@@ -44,6 +44,8 @@ struct RootView: View {
         case .cleaner: CleanerView()
         case .storage: StorageExplorerView()
         case .developer: DeveloperView()
+        case .photos: PhotosView()
+        case .removedApps: RemovedAppsView()
         case .performance: PerformanceView()
         case .applications: ApplicationsView()
         case .largeFiles: LargeFilesView()

@@ -11,6 +11,8 @@ final class AppViewModel: ObservableObject {
     case cleaner = "Cleaner"
     case storage = "Storage"
     case developer = "Developer & AI"
+    case photos = "Photos"
+    case removedApps = "Removed Apps"
     case performance = "Performance"
     case applications = "Applications"
     case largeFiles = "Large Files"
@@ -28,6 +30,8 @@ final class AppViewModel: ObservableObject {
       case .cleaner: return "trash.circle"
       case .storage: return "chart.pie"
       case .developer: return "hammer"
+      case .photos: return "photo.on.rectangle.angled"
+      case .removedApps: return "folder.badge.questionmark"
       case .performance: return "gauge.with.dots.needle.33percent"
       case .applications: return "app.dashed"
       case .largeFiles: return "externaldrive"
@@ -66,6 +70,15 @@ final class AppViewModel: ObservableObject {
   @Published var selectedStoragePaths: Set<String> = []
   @Published var devItems: [DevStorageItem] = []
   @Published var selectedDevIDs: Set<String> = []
+  @Published var photoSource: PhotoSource = .library
+  @Published var photoScan: PhotoScanResult?
+  @Published var photoProgress: (done: Int, total: Int)?
+  @Published var selectedPhotoIDs: Set<String> = []
+  @Published var photoKeeperOverrides: [String: String] = [:]
+  @Published var orphans: [OrphanedItem] = []
+  @Published var selectedOrphanIDs: Set<String> = []
+  @Published var orphansScanned = false
+  @Published var trashStatus: TrashBinService.Status?
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?

@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var confirmEmptyTrash = false
 
   var body: some View {
     ScrollView {
@@ -33,11 +34,14 @@ struct DashboardView: View {
           )
         }
 
+        trashCard
+
         moduleGrid
 
         cleanupPreview
       }
       .padding(AppTheme.pagePadding)
+      .onAppear { model.refreshTrashStatus() }
     }
   }
 
@@ -112,6 +116,46 @@ struct DashboardView: View {
     }
   }
 
+  /// Emptying the Trash is permanent, so it is its own action with its own warning.
+  @ViewBuilder
+  private var trashCard: some View {
+    if let status = model.trashStatus, status.items > 0 || !status.isComplete {
+      SurfaceCard {
+        HStack(spacing: 14) {
+          Image(systemName: "trash.fill")
+            .font(.title2)
+            .foregroundStyle(AppTheme.accent)
+            .frame(width: 38)
+          VStack(alignment: .leading, spacing: 3) {
+            Text("Trash").font(.headline)
+            if status.isComplete {
+              Text(
+                "\(ByteFormatter.string(status.bytes)) in \(status.items) item\(status.items == 1 ? "" : "s"). Space is only freed once the Trash is emptied."
+              )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            } else {
+              Text("Grant Full Disk Access in Settings to see how much the Trash holds.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+          }
+          Spacer()
+          Button("Empty Trash…", role: .destructive) { confirmEmptyTrash = true }
+            .disabled(model.isWorking || status.items == 0)
+        }
+      }
+      .alert("Permanently erase the Trash?", isPresented: $confirmEmptyTrash) {
+        Button("Cancel", role: .cancel) {}
+        Button("Empty Trash", role: .destructive) { model.emptyTrash() }
+      } message: {
+        Text(
+          "\(ByteFormatter.string(status.bytes)) will be erased and can't be recovered — not even from MacMint's History. Finder empties the Trash for you."
+        )
+      }
+    }
+  }
+
   private var moduleGrid: some View {
     LazyVGrid(
       columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14
@@ -123,6 +167,21 @@ struct DashboardView: View {
         value: model.storageScan.map { ByteFormatter.string($0.root.allocatedBytes) + " mapped" }
           ?? "Map my Mac",
         section: .storage)
+      moduleCard(
+        title: "Photos",
+        detail: "Similar shots, blurry photos, and old screenshots — the best shot is always kept.",
+        icon: "photo.on.rectangle.angled",
+        value: model.photoScan.map {
+          "\($0.similarGroups.reduce(0) { $0 + $1.others.count } + $0.blurry.count) to review"
+        } ?? "Check photos",
+        section: .photos)
+      moduleCard(
+        title: "Removed Apps",
+        detail: "Settings and caches left behind by apps you've already deleted.",
+        icon: "folder.badge.questionmark",
+        value: model.orphansScanned
+          ? ByteFormatter.string(model.orphans.reduce(0) { $0 + $1.bytes }) + " found" : "Find leftovers",
+        section: .removedApps)
       moduleCard(
         title: "Developer & AI",
         detail: "Xcode build data, package caches, project build folders, and local AI models.",

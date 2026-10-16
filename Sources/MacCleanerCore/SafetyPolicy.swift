@@ -86,6 +86,14 @@ public struct SafetyPolicy: Sendable {
       allowed = inside(path, roots: appLeftoverRoots(), strict: true) && !isAppleData(url)
     case .installers:
       allowed = isReviewedInstaller(url, path: path)
+    case .mailAttachments:
+      allowed = inside(
+        path, homePath("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"), strict: true)
+    case .deviceFirmware:
+      allowed =
+        ["iPhone", "iPad", "iPod"].contains { device in
+          inside(path, homePath("Library/iTunes/\(device) Software Updates"), strict: true)
+        } && url.pathExtension.lowercased() == "ipsw"
     }
 
     return allowed

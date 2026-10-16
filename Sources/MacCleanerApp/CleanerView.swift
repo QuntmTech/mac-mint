@@ -195,6 +195,8 @@ struct CleanerView: View {
     case .diagnostics: return "waveform.path.ecg"
     case .appLeftovers: return "app.badge"
     case .installers: return "shippingbox.and.arrow.backward"
+    case .mailAttachments: return "paperclip"
+    case .deviceFirmware: return "iphone.and.arrow.forward"
     }
   }
 }

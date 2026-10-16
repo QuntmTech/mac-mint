@@ -143,6 +143,24 @@ public struct CleanupCatalog: Sendable {
         reason: "Swift Package Manager cache data can be rebuilt."),
 
       .init(
+        category: .mailAttachments, name: "Mail attachments",
+        url: h.appendingPathComponent("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"),
+        risk: .review,
+        reason:
+          "Copies of attachments you opened in Mail. IMAP and Exchange accounts can download them again; POP attachments may only exist here.",
+        expandChildren: true, ownerBundleID: "com.apple.mail"),
+      .init(
+        category: .deviceFirmware, name: "iPhone software updates",
+        url: h.appendingPathComponent("Library/iTunes/iPhone Software Updates"), risk: .safe,
+        reason: "Firmware kept for restoring devices; Finder downloads the current version again when needed.",
+        expandChildren: true),
+      .init(
+        category: .deviceFirmware, name: "iPad software updates",
+        url: h.appendingPathComponent("Library/iTunes/iPad Software Updates"), risk: .safe,
+        reason: "Firmware kept for restoring devices; Finder downloads the current version again when needed.",
+        expandChildren: true),
+
+      .init(
         category: .deviceBackups, name: "iPhone & iPad backups",
         url: h.appendingPathComponent("Library/Application Support/MobileSync/Backup"),
         risk: .review, reason: "Local device backups may be valuable. Review before removal.",

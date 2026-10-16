@@ -46,6 +46,20 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - **First-run onboarding** with a Full Disk Access check, plus an optional "Open at login" setting (SMAppService).
 - **Browser caches** for Chrome, Firefox, Edge, Brave, Arc, Vivaldi, Opera, and Safari. A browser's cache is skipped while that browser is open.
 
+### Photos
+- **Similar shots**: 64-bit perceptual hashes grouped by Hamming distance; the sharpest (then largest) shot is the suggested keeper, which you can change with "Keep This One Instead". The kept shot can never be selected, and nothing is preselected.
+- **Blurry photos**: variance-of-Laplacian sharpness judged relative to the rest of the collection; **Screenshots** listed by size.
+- **Photos library** is analysed through PhotoKit thumbnails (local only, never downloads originals) and removed only through Photos itself: the system asks for confirmation and items stay in Recently Deleted for 30 days. Files inside `.photoslibrary` packages are never touched.
+- **Folders** use the normal review → Trash → Restore pipeline; the kept shot's state is recorded so a plan can't remove it too.
+
+### Removed Apps
+- Finds Library data (Preferences, Application Support, Caches, Containers, Group Containers, Saved State, WebKit, Logs…) whose reverse-DNS bundle identifier no installed app, helper, login item, or extension claims — and that no running app uses.
+- Never includes macOS's own data; same-developer or recently changed items are flagged "check first"; nothing is preselected.
+
+### More system junk and the Trash
+- Mail attachments (review) and iPhone/iPad firmware `.ipsw` files (rebuildable), each with its own allowlist.
+- The Trash card shows what the Trash holds. **Empty Trash** is a separate, permanent action with its own warning (it can't be restored from History) and is performed by Finder.
+
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.
 - Safe-by-default selection; review items are opt-in; restricted items cannot be selected.

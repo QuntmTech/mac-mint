@@ -138,6 +138,34 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
       identity: item.identity, ownerBundleID: item.ownerBundleID)
   }
 
+  /// A folder-based image (never a Photos library asset). For similar shots, the suggested
+  /// keeper is recorded so the plan refuses to remove both, and the executor checks it survives.
+  public static func photo(
+    _ photo: PhotoFingerprint, keeper: PhotoFingerprint?, reason: String, source: String = "Photos"
+  ) -> PlanItem? {
+    guard !photo.isLibraryAsset, !PhotoAnalysis.isInsideLibraryPackage(photo.url) else { return nil }
+    return PlanItem(
+      url: photo.url, displayName: photo.url.lastPathComponent, kind: .reviewedFile,
+      expectedBytes: photo.bytes, reason: reason, source: source, needsAttention: true,
+      identity: photo.identity,
+      snapshot: FileSnapshot(size: photo.bytes, modified: photo.modified),
+      keeper: keeper.flatMap { kept in
+        kept.isLibraryAsset
+          ? nil
+          : KeeperSnapshot(
+            path: kept.url.standardizedFileURL.path, identity: kept.identity,
+            snapshot: FileSnapshot(size: kept.bytes, modified: kept.modified))
+      })
+  }
+
+  /// Library data from an app that is no longer installed. Always needs attention.
+  public static func orphan(_ item: OrphanedItem) -> PlanItem {
+    PlanItem(
+      url: item.url, displayName: item.url.lastPathComponent, kind: .appLeftover,
+      expectedBytes: item.bytes, reason: item.reason, source: "Removed apps", needsAttention: true,
+      identity: item.identity)
+  }
+
   public static func largeFile(_ file: LargeFile) -> PlanItem {
     PlanItem(
       url: file.url, displayName: file.url.lastPathComponent, kind: .reviewedFile,

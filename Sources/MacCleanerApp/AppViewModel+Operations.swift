@@ -32,11 +32,14 @@ extension AppViewModel {
       + queuedLargeFiles.map(PlanItem.largeFile)
       + queuedStorageNodes.map(PlanItem.storage)
       + queuedDevItems.compactMap(PlanItem.developer)
+      + queuedPhotoFileItems.items
+      + queuedOrphans.map(PlanItem.orphan)
   }
 
   var queuedCount: Int {
     queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
-      + queuedStorageNodes.count + queuedDevItems.count
+      + queuedStorageNodes.count + queuedDevItems.count + queuedPhotoFileItems.items.count
+      + queuedOrphans.count
   }
 
   var queuedBytes: Int64 {
@@ -57,6 +60,8 @@ extension AppViewModel {
     selectedLargeFileIDs.subtract(ids)
     selectedStoragePaths.remove(path)
     selectedDevIDs.remove(path)
+    selectedPhotoIDs.remove(path)
+    selectedOrphanIDs.remove(path)
   }
 
   func clearQueue() {
@@ -65,6 +70,8 @@ extension AppViewModel {
     selectedLargeFileIDs = []
     selectedStoragePaths = []
     selectedDevIDs = []
+    selectedPhotoIDs = []
+    selectedOrphanIDs = []
   }
 
   // MARK: Building plans
@@ -101,6 +108,7 @@ extension AppViewModel {
         + model.queuedLargeFiles.map(PlanItem.largeFile)
         + model.queuedStorageNodes.map(PlanItem.storage)
         + model.queuedDevItems.compactMap(PlanItem.developer)
+        + model.queuedPhotoFileItems.items + model.queuedOrphans.map(PlanItem.orphan)
       return OperationPlanner.plan(
         title: "Review queue", items: items, ignoredPaths: model.ignoredPaths,
         excluded: duplicates.skipped)
@@ -242,6 +250,9 @@ extension AppViewModel {
     pruneStorage(movedPaths)
     devItems.removeAll { $0.url.map(gone) == true }
     selectedDevIDs.formIntersection(devItems.map(\.id))
+    removePhotos { !$0.isLibraryAsset && gone($0.url) }
+    orphans.removeAll { gone($0.url) }
+    selectedOrphanIDs.formIntersection(orphans.map(\.id))
     cleanupTargets.removeAll { gone($0.url) }
     largeFiles.removeAll { gone($0.url) }
     selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))

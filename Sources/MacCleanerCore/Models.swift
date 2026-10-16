@@ -15,6 +15,8 @@ public enum CleanupCategory: String, Codable, Sendable, CaseIterable, Identifiab
   case diagnostics = "Diagnostics"
   case appLeftovers = "App Leftovers"
   case installers = "Old Installers"
+  case mailAttachments = "Mail Attachments"
+  case deviceFirmware = "Device Firmware"
 
   public var id: String { rawValue }
 }
