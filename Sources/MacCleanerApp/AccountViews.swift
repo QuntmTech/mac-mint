@@ -40,7 +40,7 @@ struct BrandMark: View {
 
   /// The bundled app icon, when running as MacMint.app (not via `swift run`).
   @MainActor private static let appIcon: NSImage? =
-    Bundle.main.bundleURL.pathExtension == "app" ? NSApp.applicationIconImage : nil
+    Bundle.main.bundleURL.pathExtension == "app" ? NSApplication.shared.applicationIconImage : nil
 
   var body: some View {
     if let icon = Self.appIcon {

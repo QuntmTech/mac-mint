@@ -13,7 +13,13 @@ for ((i = 0; i < TIMEOUT; i++)); do
   if ! kill -0 "$PID" 2>/dev/null; then
     wait "$PID"
     STATUS=$?
-    [[ $STATUS -eq 0 ]] && echo "✓ Smoke test exited cleanly" || echo "✗ Smoke test exited with $STATUS"
+    if [[ $STATUS -eq 0 ]]; then
+      echo "✓ Smoke test exited cleanly"
+    else
+      echo "✗ Smoke test exited with $STATUS"
+      REPORT=$(ls -t "$HOME/Library/Logs/DiagnosticReports"/MacMint* 2>/dev/null | head -1)
+      [[ -n "$REPORT" ]] && { echo "--- crash report: $REPORT"; head -c 12000 "$REPORT"; }
+    fi
     exit "$STATUS"
   fi
   sleep 1

@@ -10,6 +10,9 @@ enum SmokeTest {
   static var isRequested: Bool { CommandLine.arguments.contains("--smoke-test") }
 
   static func run() -> Never {
+    // Runs from App.init, before SwiftUI creates the application object.
+    _ = NSApplication.shared
+    setvbuf(stdout, nil, _IONBF, 0)
     let started = Date()
     let support = FileManager.default.temporaryDirectory
       .appendingPathComponent("macmint-smoke-\(ProcessInfo.processInfo.processIdentifier)")
