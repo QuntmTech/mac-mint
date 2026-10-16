@@ -15,6 +15,7 @@ struct RootView: View {
     NavigationSplitView {
       VStack(spacing: 0) {
         sidebarBrand
+          .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["brand": geometry.frame(in: .global)]) })
           .padding(.horizontal, 12)
           .padding(.top, 12)
           .padding(.bottom, 8)
@@ -54,6 +55,7 @@ struct RootView: View {
       .background(AppTheme.sidebar)
       .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 250)
     } detail: {
+      GeometryReader { geometry in
       Group {
         switch model.selectedSection {
         case .dashboard: DashboardView()
@@ -74,12 +76,15 @@ struct RootView: View {
         case .settings: SettingsView()
         }
       }
+      .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+      }
       .background(AppTheme.canvas)
       .scrollContentBackground(.hidden)
       .safeAreaInset(edge: .top, spacing: 0) {
         VStack(spacing: 0) {
           updateBanner
           workspaceBar
+            .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["workspace controls": geometry.frame(in: .global)]) })
         }
       }
       .safeAreaInset(edge: .bottom) {

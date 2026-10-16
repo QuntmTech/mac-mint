@@ -59,10 +59,15 @@ enum SmokeTest {
     let screenshotDirectory = ProcessInfo.processInfo.environment["MACMINT_SCREENSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let screenshotDirectory { try? FileManager.default.createDirectory(at: screenshotDirectory, withIntermediateDirectories: true) }
     var scheme: ColorScheme = .light
+    let layoutProbe = WorkspaceLayoutProbe()
 
     func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1200, height: CGFloat = 800) {
       rendered += 1
+      layoutProbe.frames = [:]
       let content = view
+        .onPreferenceChange(WorkspaceLayoutFrames.self) { frames in
+          Task { @MainActor in layoutProbe.frames = frames }
+        }
         .environmentObject(model).environmentObject(account).environmentObject(monitor)
         .environmentObject(care).environmentObject(updates).environmentObject(appUpdates)
         .environment(\.colorScheme, scheme).tint(AppTheme.accent)
@@ -82,6 +87,12 @@ enum SmokeTest {
           window.orderFront(nil)
           RunLoop.current.run(until: Date().addingTimeInterval(0.12))
           hosting.layoutSubtreeIfNeeded()
+          for (element, frame) in layoutProbe.frames {
+            if frame.minY < -1 || frame.maxY > height + 1 || frame.minX < -1 || frame.maxX > width + 1 {
+              failures.append("Offscreen " + element + ": " + name)
+              print("✗ Layout \(name): \(element) \(frame), bounds \(hosting.bounds)")
+            }
+          }
           if abs(hosting.bounds.width - width) > 1 || abs(hosting.bounds.height - height) > 1 {
             failures.append("Window exceeded requested size: " + name)
           }
@@ -138,4 +149,18 @@ enum SmokeTest {
     try? FileManager.default.removeItem(at: support)
     exit(failures.isEmpty ? 0 : 1)
   }
+}
+
+
+/// Only the smoke harness reads these preferences; normal windows do not collect them.
+struct WorkspaceLayoutFrames: PreferenceKey {
+  static let defaultValue: [String: CGRect] = [:]
+  static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+    value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+  }
+}
+
+@MainActor
+private final class WorkspaceLayoutProbe {
+  var frames: [String: CGRect] = [:]
 }
