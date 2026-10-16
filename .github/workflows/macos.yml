@@ -13,6 +13,8 @@ jobs:
         run: swift --version
       - name: Core tests
         run: swift test
+        env:
+          MACMINT_VOLUME_TESTS: "1"
       - name: Build desktop app
         run: swift build -c release --product MacMint
       - name: Package local app bundle

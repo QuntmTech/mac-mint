@@ -70,10 +70,11 @@ public enum FileSystem {
     }
   }
 
-  /// Returns a conservative reason to refuse moving a folder that contains managed photo data.
+  /// Refuse moving a folder containing managed photo data or a separate mounted volume.
   static func managedLibraryProblem(in url: URL, fileManager: FileManager) -> String? {
     guard (try? fresh(url).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
       (try? fresh(url).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+    guard let device = volumeIdentity(at: url) else { return "The selected folder's volume could not be verified." }
     let failures = IssueCollector()
     guard let enumerator = fileManager.enumerator(at: url,
       includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
@@ -81,13 +82,24 @@ public enum FileSystem {
         failures.append(ScanIssue(area: "Safety", path: path.path, message: "Could not inspect folder contents."))
         return false
       }) else { return "Folder contents could not be checked for managed photo libraries." }
-    var found = false
+    var problem: String?
     walk(enumerator) { child in
       if Task.isCancelled { return .stop }
-      if PhotoAnalysis.isInsideLibraryPackage(child) { found = true; return .stop }
+      if PhotoAnalysis.isInsideLibraryPackage(child) {
+        problem = "This folder contains a managed photo library. Choose smaller selections and manage library photos in Photos."
+        return .stop
+      }
+      guard let childDevice = volumeIdentity(at: child) else {
+        problem = "Folder contents changed or could not be inspected. Rescan before moving this folder."
+        return .stop
+      }
+      if childDevice != device {
+        problem = "This folder contains a separate mounted volume. Choose smaller selections; mounted volumes remain read-only."
+        return .stop
+      }
       return .continue
     }
-    if found { return "This folder contains a managed photo library. Choose smaller selections and manage library photos in Photos." }
+    if let problem { return problem }
     return failures.issues.isEmpty ? nil : "Folder contents could not be fully checked for managed photo libraries."
   }
 
@@ -235,6 +247,13 @@ public enum FileSystem {
     var info = stat()
     guard lstat(url.path, &info) == 0 else { return nil }
     return "\(info.st_dev):\(info.st_ino)"
+  }
+
+  /// st_dev distinguishes a mounted filesystem even when it appears below the home folder.
+  public static func volumeIdentity(at url: URL) -> String? {
+    var info = stat()
+    guard lstat(url.path, &info) == 0 else { return nil }
+    return String(info.st_dev)
   }
 
   public static func linkCount(at url: URL) -> Int {

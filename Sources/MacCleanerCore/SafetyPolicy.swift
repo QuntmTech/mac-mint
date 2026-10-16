@@ -43,6 +43,14 @@ public struct SafetyPolicy: Sendable {
     FileSystem.comparisonPath(url).hasPrefix(scopedHome + "/")
   }
 
+  private func volumeProblem(for url: URL, within root: URL) -> String? {
+    if let allowed = FileSystem.volumeIdentity(at: root.resolvingSymlinksInPath()),
+      let actual = FileSystem.volumeIdentity(at: url), allowed != actual {
+      return "This item is on a separate mounted volume. MacMint can inspect it, but removal is read-only until volume-specific recovery is supported."
+    }
+    return nil
+  }
+
   // MARK: Decisions
 
   /// Baseline automatic-cleanup policy: only user-owned paths below the home directory,
@@ -59,6 +67,7 @@ public struct SafetyPolicy: Sendable {
     guard isUnderHome(url) else {
       return (false, "Automatic cleanup is limited to user-owned paths below the home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not automatic-cleanup targets.") }
     return (true, "User-owned path passes the baseline automatic-cleanup policy.")
@@ -121,6 +130,7 @@ public struct SafetyPolicy: Sendable {
     guard isUnderHome(url) else {
       return (false, "Developer cleanup is limited to your home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not removed.") }
     let extra = DeveloperStorageScanner.validatedRoots(extraRoots, home: homeDirectory).map(canonical)
@@ -147,6 +157,9 @@ public struct SafetyPolicy: Sendable {
       return (false, "This application path is not eligible for uninstall.")
     }
     if isSymlink(url) { return (false, "Symbolic links are not uninstalled.") }
+    let root = FileSystem.path(url, isInsideOrEqual: homeDirectory.appendingPathComponent("Applications"))
+      ? homeDirectory : URL(fileURLWithPath: "/Applications")
+    if let problem = volumeProblem(for: url, within: root) { return (false, problem) }
     return (true, "Application bundle is in an Applications folder.")
   }
 
@@ -169,6 +182,7 @@ public struct SafetyPolicy: Sendable {
     guard isUnderHome(url) else {
       return (false, "Reviewed file removal is limited to files inside your home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not removed by the review tools.") }
     return (true, "Explicitly reviewed user file passes the safety policy.")
