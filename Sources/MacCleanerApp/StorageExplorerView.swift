@@ -163,7 +163,7 @@ struct StorageExplorerView: View {
   {
     let color = StorageStyle.color(for: node)
     let gradient = LinearGradient(
-      colors: [color.opacity(isHovered ? 1 : 0.88), color.opacity(isHovered ? 0.85 : 0.68)],
+      colors: [color, color.opacity(0.96)],
       startPoint: .topLeading, endPoint: .bottomTrailing)
     let corner: CGFloat = rect.width > 24 && rect.height > 24 ? 6 : 2
     let border: Color = isSelected ? .white : Color.black.opacity(0.08)
@@ -183,7 +183,7 @@ struct StorageExplorerView: View {
     if rect.width > 70 && rect.height > 34 {
       VStack(alignment: .leading, spacing: 1) {
         Text(node.name).font(.caption.weight(.semibold)).lineLimit(1)
-        Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2).opacity(0.85)
+        Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2)
       }
       .foregroundStyle(.white)
       .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
@@ -323,18 +323,18 @@ enum StorageStyle {
   static func color(for node: StorageNode) -> Color {
     switch node.kind {
     case .folder: return AppTheme.accent
-    case .package: return Color(red: 0.25, green: 0.47, blue: 0.95)
-    case .aggregate: return Color.gray
-    case .inaccessible: return Color.red.opacity(0.7)
-    case .otherVolume: return Color.gray.opacity(0.6)
+    case .package: return Color(red: 0.17, green: 0.34, blue: 0.67)
+    case .aggregate: return Color(red: 0.36, green: 0.40, blue: 0.38)
+    case .inaccessible: return Color(red: 0.64, green: 0.23, blue: 0.23)
+    case .otherVolume: return Color(red: 0.33, green: 0.37, blue: 0.35)
     case .file:
       let ext = node.url.pathExtension.lowercased()
-      if video.contains(ext) { return Color(red: 0.55, green: 0.33, blue: 0.92) }
-      if audio.contains(ext) { return Color(red: 0.93, green: 0.33, blue: 0.56) }
-      if images.contains(ext) { return Color(red: 0.97, green: 0.55, blue: 0.18) }
-      if archives.contains(ext) { return Color(red: 0.62, green: 0.45, blue: 0.30) }
-      if models.contains(ext) { return Color(red: 0.10, green: 0.62, blue: 0.75) }
-      return Color(red: 0.42, green: 0.48, blue: 0.56)
+      if video.contains(ext) { return Color(red: 0.43, green: 0.28, blue: 0.66) }
+      if audio.contains(ext) { return Color(red: 0.64, green: 0.24, blue: 0.41) }
+      if images.contains(ext) { return Color(red: 0.59, green: 0.32, blue: 0.12) }
+      if archives.contains(ext) { return Color(red: 0.49, green: 0.35, blue: 0.24) }
+      if models.contains(ext) { return Color(red: 0.07, green: 0.42, blue: 0.49) }
+      return Color(red: 0.33, green: 0.39, blue: 0.46)
     }
   }
 

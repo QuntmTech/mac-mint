@@ -177,7 +177,7 @@ struct ApplicationsView: View {
             ViewThatFits(in: .horizontal) {
               HStack(spacing: 8) { appDetails(app) }
               VStack(alignment: .leading, spacing: 6) { appDetails(app) }
-            }
+            }.fixedSize(horizontal: false, vertical: true)
           }
           Spacer(minLength: 0)
           Button { model.reveal(app.url) } label: { Image(systemName: "arrow.up.right.square") }

@@ -30,6 +30,7 @@ struct PageHeader<Actions: View>: View {
       VStack(alignment: .leading, spacing: 16) { heading; actions() }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .contain)
   }
 

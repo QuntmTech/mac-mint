@@ -67,30 +67,38 @@ enum SmokeTest {
         .environmentObject(care).environmentObject(updates).environmentObject(appUpdates)
         .environment(\.colorScheme, scheme).tint(AppTheme.accent)
         .frame(width: width, height: height).background(AppTheme.canvas)
-      let renderer = ImageRenderer(content: content)
-      guard renderer.nsImage != nil else { failures.append(name); print("✗ \(name)"); return }
-      if let screenshotDirectory {
-        // ImageRenderer omits some AppKit-backed views (including lists). Capture a real
-        // hosting window so the visual evidence contains those controls as well.
-        let hosting = NSHostingView(rootView: content)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-          styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        window.contentView = hosting
-        window.orderFront(nil)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.16))
-        hosting.layoutSubtreeIfNeeded()
-        if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
-          hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
-          if let png = bitmap.representation(using: .png, properties: [:]) {
-            let filename = name.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "/", with: "-")
-            do { try png.write(to: screenshotDirectory.appendingPathComponent(filename + ".png")) }
-            catch { failures.append("Screenshot write: " + name) }
-          } else { failures.append("Screenshot encoding: " + name) }
-        } else { failures.append("Screenshot layout: " + name) }
-        window.orderOut(nil)
-        window.close()
+      autoreleasepool {
+        if let screenshotDirectory {
+          // Capture actual AppKit-backed controls as well as SwiftUI. Release each
+          // hosting tree before changing shared models for the next screen.
+          let hosting = NSHostingView(rootView: content)
+          hosting.sizingOptions = []
+          let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+          window.isReleasedWhenClosed = false
+          window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+          window.contentView = hosting
+          window.setContentSize(NSSize(width: width, height: height))
+          window.orderFront(nil)
+          RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+          hosting.layoutSubtreeIfNeeded()
+          if abs(hosting.bounds.width - width) > 1 || abs(hosting.bounds.height - height) > 1 {
+            failures.append("Window exceeded requested size: " + name)
+          }
+          if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            if let png = bitmap.representation(using: .png, properties: [:]) {
+              let filename = name.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "/", with: "-")
+              do { try png.write(to: screenshotDirectory.appendingPathComponent(filename + ".png")) }
+              catch { failures.append("Screenshot write: " + name) }
+            } else { failures.append("Screenshot encoding: " + name) }
+          } else { failures.append("Screenshot layout: " + name) }
+          window.orderOut(nil)
+          window.contentView = nil
+          window.close()
+        } else if ImageRenderer(content: content).nsImage == nil {
+          failures.append(name)
+        }
       }
       print("✓ \(name)")
     }
