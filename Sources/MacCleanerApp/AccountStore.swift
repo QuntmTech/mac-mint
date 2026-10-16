@@ -2,6 +2,19 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
+/// Defaults to Keychain; injectable so lifecycle checks never touch a real session.
+@MainActor
+struct AccountTokenStorage {
+  var load: () -> String?
+  var save: (String) -> Void
+  var delete: () -> Void
+
+  static var keychain: Self {
+    Self(load: { KeychainStore.loadToken() }, save: { _ = KeychainStore.saveToken($0) },
+      delete: { KeychainStore.deleteToken() })
+  }
+}
+
 /// Owns the signed-in session and decides whether the app is unlocked.
 /// Flow: Keychain token -> refresh -> activate this Mac -> active / needs plan / device limit.
 @MainActor
@@ -33,13 +46,17 @@ final class AccountStore: ObservableObject {
   private let cacheURL: URL
   private(set) var token: String?
   private let now: @Sendable () -> Date
+  private let tokenStorage: AccountTokenStorage
   private var recheckTask: Task<Void, Never>?
 
-  init(supportDirectory: URL, client: AccountClient = AccountClient(), now: @escaping @Sendable () -> Date = { Date() }) {
+  init(supportDirectory: URL, client: AccountClient = AccountClient(),
+    deviceInfo: DeviceInfo? = nil, tokenStorage: AccountTokenStorage = .keychain,
+    now: @escaping @Sendable () -> Date = { Date() }) {
     self.now = now
     self.client = client
     self.cacheURL = supportDirectory.appendingPathComponent("account.json")
-    self.deviceInfo = Self.currentDevice()
+    self.deviceInfo = deviceInfo ?? Self.currentDevice()
+    self.tokenStorage = tokenStorage
   }
 
   var isUnlocked: Bool {
@@ -52,7 +69,7 @@ final class AccountStore: ObservableObject {
   // MARK: Lifecycle
 
   func start() async {
-    guard let stored = KeychainStore.loadToken() else {
+    guard let stored = tokenStorage.load() else {
       phase = .signedOut
       return
     }
@@ -66,6 +83,12 @@ final class AccountStore: ObservableObject {
     errorMessage = nil
     phase = .checking
     await verify(refreshToken: true, quiet: false)
+  }
+
+  /// Foregrounding also enforces expiry and remote deactivation after a sleeping Mac wakes.
+  func refreshAccess() async {
+    guard token != nil, !isBusy else { return }
+    await verify(refreshToken: true, quiet: true)
   }
 
   // MARK: Auth
@@ -140,7 +163,7 @@ final class AccountStore: ObservableObject {
 
   private func adopt(_ session: AuthSession) async throws {
     token = session.token
-    KeychainStore.saveToken(session.token)
+    tokenStorage.save(session.token)
     try await activate(token: session.token)
     scheduleRecheck()
   }
@@ -178,7 +201,7 @@ final class AccountStore: ObservableObject {
         let session = try await client.refresh(token: current)
         active = session.token
         token = active
-        KeychainStore.saveToken(active)
+        tokenStorage.save(active)
       }
       // Verification must not silently reactivate a device removed through the portal.
       let result = try await client.me(token: active)
@@ -240,7 +263,7 @@ final class AccountStore: ObservableObject {
   private func signOutLocally(message: String?) {
     recheckTask?.cancel()
     recheckTask = nil
-    KeychainStore.deleteToken()
+    tokenStorage.delete()
     clearCache()
     token = nil
     snapshot = nil

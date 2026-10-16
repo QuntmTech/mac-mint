@@ -63,7 +63,6 @@ struct MacCleanerDesktopApp: App {
           model.scanStorage()
         }
         .keyboardShortcut("m", modifiers: [.command, .shift])
-        .disabled(!account.isUnlocked)
         Button("Choose Folder for Large Files") { model.chooseLargeFileFolder() }
 
         Button("Choose Folder for Duplicates") { model.chooseDuplicateFolder() }

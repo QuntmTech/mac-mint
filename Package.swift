@@ -21,6 +21,7 @@ targets.append(
         dependencies: ["MacCleanerCore"]
     )
 )
+targets.append(.testTarget(name: "MacCleanerAppTests", dependencies: ["MacCleanerApp"]))
 #endif
 
 let package = Package(

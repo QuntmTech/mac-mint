@@ -93,7 +93,10 @@ struct RootView: View {
     }) { AccountAccessSheet() }
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-      Task { await account.refreshAIStatus() }
+      Task {
+        await account.refreshAccess()
+        await account.refreshAIStatus()
+      }
     }
     .sheet(isPresented: $model.showingScanIssues) {
       ScanIssueSheet(issues: model.scanIssues)
