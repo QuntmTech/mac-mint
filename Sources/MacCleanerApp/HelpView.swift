@@ -26,7 +26,7 @@ struct HelpView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        Text("Help & recovery").font(.title.bold())
+        PageHeader("Help & recovery", subtitle: "A little guidance, whenever you need it.")
         Text("Scans and previews work locally before sign-in. An active plan is needed to start a removal. History and Restore remain available.")
         topic("Why didn't my free space increase?", "Moving files to Trash does not free their space. Review Trash in Finder when you no longer need recovery. APFS snapshots, shared file blocks and other activity can affect the observed change.")
         topic("An area could not be read", "Check the scan issues. Full Disk Access can improve coverage; choose System Settings → Privacy & Security → Full Disk Access. Continue without it to inspect permitted locations.")
@@ -49,14 +49,22 @@ struct HelpView: View {
             }
           }
         }
-        HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
       }.padding(24)
-    }.frame(width: 620, height: 620)
+    }.frame(width: 660, height: 640).background(AppTheme.canvas)
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        HStack {
+          Label("Here to help", systemImage: "leaf").font(.caption).foregroundStyle(.secondary)
+          Spacer()
+          Button("Done") { dismiss() }.buttonStyle(MintButtonStyle()).keyboardShortcut(.defaultAction)
+        }.padding(16).background(AppTheme.surface).overlay(alignment: .top) { Divider() }
+      }.onExitCommand { dismiss() }
   }
   private func topic(_ title: String, _ text: String) -> some View {
-    VStack(alignment: .leading, spacing: 5) {
-      Text(title).font(.headline)
-      Text(text).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+    SurfaceCard {
+      DisclosureGroup {
+        Text(text).font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true).padding(.top, 10)
+      } label: { Text(title).font(.system(size: 13, weight: .semibold)) }
     }
   }
 }

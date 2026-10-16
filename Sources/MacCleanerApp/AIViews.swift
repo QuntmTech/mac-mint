@@ -251,6 +251,7 @@ struct AssistantView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
   @FocusState private var focused: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private let suggestions = [
     "What's using the most space on my Mac?",
@@ -261,17 +262,10 @@ struct AssistantView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(alignment: .firstTextBaseline) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Ask MacMint").font(.system(size: 29, weight: .semibold))
-          Text("Answers from category-level scan summaries. Your questions are sent as written.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Ask MacMint", subtitle: "A second opinion on your storage. AI advises; you decide.") {
         if !model.assistantTurns.isEmpty {
-          Button("New Chat") {
-            model.resetAIState()
-          }
+          Button("New chat", systemImage: "square.and.pencil") { model.resetAIState() }
+            .buttonStyle(MintButtonStyle(prominent: false))
         }
       }
       .padding(AppTheme.pagePadding)
@@ -306,7 +300,7 @@ struct AssistantView: View {
           }
           .onChange(of: model.assistantTurns.count) {
             if let last = model.assistantTurns.last?.id {
-              withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+              withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { proxy.scrollTo(last, anchor: .bottom) }
             }
           }
         }
@@ -349,11 +343,13 @@ struct AssistantView: View {
 
   private func bubble(_ turn: AITurn) -> some View {
     VStack(alignment: turn.role == .user ? .trailing : .leading, spacing: 8) {
+      Label(turn.role == .user ? "You" : "MacMint", systemImage: turn.role == .user ? "person.crop.circle" : "sparkles")
+        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
       Text(Self.rendered(turn.text))
         .textSelection(.enabled)
         .padding(12)
         .background(
-          turn.role == .user ? AppTheme.accent.opacity(0.14) : AppTheme.panel,
+          turn.role == .user ? AppTheme.selection : AppTheme.surface,
           in: RoundedRectangle(cornerRadius: 12, style: .continuous))
       if !turn.actions.isEmpty {
         HStack(spacing: 8) {
@@ -376,8 +372,10 @@ struct AssistantView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      TextField("Ask about your Mac's storage…", text: $model.assistantDraft, axis: .vertical)
-        .textFieldStyle(.roundedBorder)
+      TextField("Ask about your Mac’s storage…", text: $model.assistantDraft, axis: .vertical)
+        .textFieldStyle(.plain).font(.callout).padding(12)
+        .background(AppTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppTheme.border))
         .lineLimit(1...4)
         .focused($focused)
         .onSubmit { send(model.assistantDraft) }

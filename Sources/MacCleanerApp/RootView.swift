@@ -8,6 +8,8 @@ struct RootView: View {
   @EnvironmentObject private var updates: UpdateService
   @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @State private var showingOnboarding = false
+  @State private var hoveredSection: AppViewModel.Section?
+  @State private var lastTabs: [AppViewModel.Section: AppViewModel.Section] = [:]
 
   var body: some View {
     NavigationSplitView {
@@ -162,6 +164,7 @@ struct RootView: View {
     .sheet(isPresented: $showingOnboarding) {
       OnboardingView()
     }
+    .onChange(of: model.selectedSection) { _, section in lastTabs[section.parent] = section }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
       guard !SmokeTest.isRequested else { return }
@@ -190,7 +193,7 @@ struct RootView: View {
 
   private func sidebarDestination(_ section: AppViewModel.Section) -> some View {
     let selected = model.selectedSection.parent == section
-    return Button { model.selectedSection = section } label: {
+    return Button { model.selectedSection = lastTabs[section] ?? section } label: {
       HStack(spacing: 11) {
         Image(systemName: section.icon).font(.system(size: 16, weight: selected ? .semibold : .regular))
           .frame(width: 22)
@@ -199,9 +202,10 @@ struct RootView: View {
         if selected { Circle().fill(AppTheme.accentText).frame(width: 5, height: 5) }
       }.foregroundStyle(selected ? AppTheme.accentText : AppTheme.ink.opacity(0.8))
         .padding(.horizontal, 12).padding(.vertical, 11)
-        .background(selected ? AppTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 10))
+        .background(selected ? AppTheme.selection : hoveredSection == section ? AppTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
-    }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+    }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }
+      .accessibilityAddTraits(selected ? .isSelected : [])
       .help(section.rawValue)
   }
 
