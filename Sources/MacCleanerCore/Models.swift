@@ -70,6 +70,8 @@ public struct CleanupTarget: Identifiable, Codable, Hashable, Sendable {
   public let risk: CleanupRisk
   public let reason: String
   public var isSelected: Bool
+  /// App that writes this data; cleanup is skipped while it is running.
+  public let ownerBundleID: String?
 
   public init(
     id: UUID = UUID(),
@@ -80,8 +82,10 @@ public struct CleanupTarget: Identifiable, Codable, Hashable, Sendable {
     size: Int64,
     risk: CleanupRisk,
     reason: String,
-    isSelected: Bool = true
+    isSelected: Bool = true,
+    ownerBundleID: String? = nil
   ) {
+    self.ownerBundleID = ownerBundleID
     self.id = id
     self.category = category
     self.url = url

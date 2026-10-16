@@ -37,12 +37,15 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
   public let dependsOn: UUID?
   /// "device:inode" observed when the plan was made. A different file at the same path is skipped.
   public let identity: String?
+  /// App whose data this is; the item is skipped while that app is running.
+  public let ownerBundleID: String?
 
   public init(
     id: UUID = UUID(), url: URL, displayName: String, kind: PlanItemKind, expectedBytes: Int64,
     reason: String, source: String, needsAttention: Bool = false, dependsOn: UUID? = nil,
-    identity: String? = nil
+    identity: String? = nil, ownerBundleID: String? = nil
   ) {
+    self.ownerBundleID = ownerBundleID
     self.id = id
     self.url = url
     self.displayName = displayName
@@ -61,7 +64,7 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
       kind: .cleanupTarget(category: target.category, risk: target.risk),
       expectedBytes: target.size, reason: target.reason, source: source,
       needsAttention: target.risk != .safe,
-      identity: FileSystem.fileIdentity(at: target.url))
+      identity: FileSystem.fileIdentity(at: target.url), ownerBundleID: target.ownerBundleID)
   }
 
   public static func duplicate(_ file: LargeFile, keeper: URL?) -> PlanItem {

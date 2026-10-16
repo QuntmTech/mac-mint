@@ -15,6 +15,8 @@ struct SettingsView: View {
 
         AccountSettingsCard()
 
+        HelpersSettingsCard()
+
         SurfaceCard {
           VStack(alignment: .leading, spacing: 12) {
             Label("Safety model", systemImage: "checkmark.shield.fill")
@@ -118,5 +120,55 @@ struct SettingsView: View {
       Text(value).foregroundStyle(.secondary)
     }
     .font(.callout)
+  }
+}
+
+struct HelpersSettingsCard: View {
+  @EnvironmentObject private var care: CareService
+  @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
+  @AppStorage(CareService.Keys.lowSpaceAlerts) private var lowSpaceAlerts = false
+  @AppStorage(CareService.Keys.lowSpaceThresholdGB) private var thresholdGB = 20
+  @AppStorage(CareService.Keys.scanReminders) private var scanReminders = false
+  @State private var launchAtLogin = false
+
+  var body: some View {
+    SurfaceCard {
+      VStack(alignment: .leading, spacing: 12) {
+        Label("Helpers & reminders", systemImage: "bell.badge").font(.headline)
+        Toggle("Show MacMint in the menu bar", isOn: $showMenuBar)
+        Toggle("Open MacMint at login", isOn: $launchAtLogin)
+          .onChange(of: launchAtLogin) { _, enabled in
+            if enabled != care.launchesAtLogin { care.setLaunchAtLogin(enabled) }
+          }
+        if let error = care.launchAtLoginError {
+          Text(error).font(.caption).foregroundStyle(.orange)
+        }
+        Divider()
+        HStack {
+          Toggle("Alert me when free space drops below", isOn: $lowSpaceAlerts)
+          Picker("", selection: $thresholdGB) {
+            ForEach([10, 20, 50, 100], id: \.self) { Text("\($0) GB").tag($0) }
+          }
+          .labelsHidden()
+          .frame(width: 90)
+          .disabled(!lowSpaceAlerts)
+        }
+        Toggle("Remind me to scan if a week goes by", isOn: $scanReminders)
+        Text(
+          "Alerts are checked while MacMint or its menu bar item is running, at most once a day, and never between 10 pm and 8 am. Nothing is ever cleaned automatically."
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        if care.notificationsDenied {
+          Text("Notifications are turned off for MacMint in System Settings → Notifications.")
+            .font(.caption)
+            .foregroundStyle(.orange)
+        }
+      }
+      .toggleStyle(.switch)
+    }
+    .onAppear { launchAtLogin = care.launchesAtLogin }
+    .onChange(of: lowSpaceAlerts) { _, enabled in if enabled { care.requestAuthorization() } }
+    .onChange(of: scanReminders) { _, enabled in if enabled { care.requestAuthorization() } }
   }
 }

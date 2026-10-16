@@ -184,7 +184,10 @@ extension AppViewModel {
     let excluded = ignoredPaths
     let executor = OperationExecutor(
       trashService: MacTrashService(), safetyPolicy: safetyPolicy,
-      journalDirectory: AppPaths.journalDirectory)
+      journalDirectory: AppPaths.journalDirectory,
+      isAppRunning: { bundleID in
+        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+      })
 
     currentTask = Task { [weak self] in
       guard let self else { return }

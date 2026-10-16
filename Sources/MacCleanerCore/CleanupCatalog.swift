@@ -8,11 +8,14 @@ public struct CleanupRule: Sendable {
   public let reason: String
   public let expandChildren: Bool
   public let excludedChildNames: Set<String>
+  /// App that writes this data. Its data is skipped while it is running.
+  public let ownerBundleID: String?
 
   public init(
     category: CleanupCategory, name: String, url: URL, risk: CleanupRisk, reason: String,
-    expandChildren: Bool = false, excludedChildNames: Set<String> = []
+    expandChildren: Bool = false, excludedChildNames: Set<String> = [], ownerBundleID: String? = nil
   ) {
+    self.ownerBundleID = ownerBundleID
     self.category = category
     self.name = name
     self.url = url
@@ -39,7 +42,8 @@ public struct CleanupCatalog: Sendable {
         reason: "Regenerable per-user cache data.", expandChildren: true,
         excludedChildNames: [
           "Google", "Firefox", "Microsoft Edge", "com.apple.Safari", "Homebrew",
-          "pip", "CocoaPods", "Yarn", "org.swift.swiftpm",
+          "pip", "CocoaPods", "Yarn", "org.swift.swiftpm", "BraveSoftware", "Arc",
+          "company.thebrowser.Browser", "Vivaldi", "com.operasoftware.Opera",
         ]),
       .init(
         category: .userLogs, name: "Application logs",
@@ -55,19 +59,42 @@ public struct CleanupCatalog: Sendable {
       .init(
         category: .browserCaches, name: "Chrome cache",
         url: h.appendingPathComponent("Library/Caches/Google/Chrome"), risk: .safe,
-        reason: "Browser cache only; history, bookmarks, passwords, and cookies are not targeted."),
+        reason: "Browser cache only; history, bookmarks, passwords, and cookies are not targeted.",
+        ownerBundleID: "com.google.Chrome"),
       .init(
         category: .browserCaches, name: "Firefox cache",
         url: h.appendingPathComponent("Library/Caches/Firefox"), risk: .safe,
-        reason: "Browser cache only."),
+        reason: "Browser cache only.", ownerBundleID: "org.mozilla.firefox"),
       .init(
         category: .browserCaches, name: "Edge cache",
         url: h.appendingPathComponent("Library/Caches/Microsoft Edge"), risk: .safe,
-        reason: "Browser cache only."),
+        reason: "Browser cache only.", ownerBundleID: "com.microsoft.edgemac"),
+      .init(
+        category: .browserCaches, name: "Brave cache",
+        url: h.appendingPathComponent("Library/Caches/BraveSoftware/Brave-Browser"), risk: .safe,
+        reason: "Browser cache only; history, passwords, and cookies are not targeted.",
+        ownerBundleID: "com.brave.Browser"),
+      .init(
+        category: .browserCaches, name: "Arc cache",
+        url: h.appendingPathComponent("Library/Caches/Arc"), risk: .safe,
+        reason: "Browser cache only.", ownerBundleID: "company.thebrowser.Browser"),
+      .init(
+        category: .browserCaches, name: "Arc cache",
+        url: h.appendingPathComponent("Library/Caches/company.thebrowser.Browser"), risk: .safe,
+        reason: "Browser cache only.", ownerBundleID: "company.thebrowser.Browser"),
+      .init(
+        category: .browserCaches, name: "Vivaldi cache",
+        url: h.appendingPathComponent("Library/Caches/Vivaldi"), risk: .safe,
+        reason: "Browser cache only.", ownerBundleID: "com.vivaldi.Vivaldi"),
+      .init(
+        category: .browserCaches, name: "Opera cache",
+        url: h.appendingPathComponent("Library/Caches/com.operasoftware.Opera"), risk: .safe,
+        reason: "Browser cache only.", ownerBundleID: "com.operasoftware.Opera"),
       .init(
         category: .browserCaches, name: "Safari cache",
         url: h.appendingPathComponent("Library/Caches/com.apple.Safari"), risk: .review,
-        reason: "Safari cache only; macOS privacy permissions may restrict visibility."),
+        reason: "Safari cache only; macOS privacy permissions may restrict visibility.",
+        ownerBundleID: "com.apple.Safari"),
 
       .init(
         category: .developerJunk, name: "Xcode DerivedData",
