@@ -201,6 +201,7 @@ struct DeveloperView: View {
           Button("Reveal in Finder") { model.reveal(url) }
           Button("Exclude from Future Scans") { model.ignore(url) }
         }
+        ExplainMenuItem(target: model.aiTarget(for: item))
       } label: {
         Image(systemName: "ellipsis.circle")
           .accessibilityLabel("More actions")

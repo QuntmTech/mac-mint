@@ -178,7 +178,7 @@ public struct AccountClient: Sendable {
   public static let defaultBaseURL = URL(string: "https://macmint.cloudpod.pro")!
 
   public let baseURL: URL
-  private let transport: Transport
+  let transport: Transport
 
   public init(baseURL: URL = AccountClient.defaultBaseURL, transport: Transport? = nil) {
     self.baseURL = baseURL
@@ -268,14 +268,29 @@ public struct AccountClient: Sendable {
   private func send<T: Decodable>(
     _ method: String, _ path: String, token: String? = nil, body: [String: String]? = nil
   ) async throws -> T {
+    try await send(
+      method, path, token: token,
+      bodyData: try body.map { try JSONSerialization.data(withJSONObject: $0) })
+  }
+
+  /// Sends any Encodable body (camelCase keys) — used by the AI routes.
+  func send<T: Decodable, Body: Encodable>(
+    _ method: String, _ path: String, token: String?, json body: Body, timeout: TimeInterval
+  ) async throws -> T {
+    try await send(method, path, token: token, bodyData: try JSONEncoder().encode(body), timeout: timeout)
+  }
+
+  private func send<T: Decodable>(
+    _ method: String, _ path: String, token: String?, bodyData: Data?, timeout: TimeInterval = 20
+  ) async throws -> T {
     var request = URLRequest(url: baseURL.appendingPathComponent(path))
     request.httpMethod = method
-    request.timeoutInterval = 20
+    request.timeoutInterval = timeout
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let token { request.setValue(token, forHTTPHeaderField: "Authorization") }
-    if let body {
+    if let bodyData {
       request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-      request.httpBody = try JSONSerialization.data(withJSONObject: body)
+      request.httpBody = bodyData
     }
 
     let data: Data

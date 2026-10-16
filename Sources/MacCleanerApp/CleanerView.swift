@@ -174,6 +174,7 @@ struct CleanerView: View {
       Menu {
         Button("Reveal in Finder") { model.reveal(item.url) }
         Button("Exclude from future scans") { model.ignore(item.url) }
+        ExplainMenuItem(target: model.aiTarget(for: item))
       } label: {
         Image(systemName: "ellipsis.circle")
           .accessibilityLabel("More actions")

@@ -278,6 +278,7 @@ struct StorageExplorerView: View {
       Button(model.selectedStoragePaths.contains(node.id) ? "Remove from Review" : "Add to Review") {
         model.toggleStorageSelection(node)
       }
+      ExplainMenuItem(target: model.aiTarget(for: node))
       Divider()
       Button("Exclude from Future Scans") { model.ignore(node.url) }
     }

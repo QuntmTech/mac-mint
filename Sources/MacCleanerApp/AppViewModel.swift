@@ -11,6 +11,7 @@ final class AppViewModel: ObservableObject {
     case cleaner = "Cleaner"
     case storage = "Storage"
     case developer = "Developer & AI"
+    case assistant = "Ask MacMint"
     case downloads = "Downloads"
     case photos = "Photos"
     case removedApps = "Removed Apps"
@@ -31,6 +32,7 @@ final class AppViewModel: ObservableObject {
       case .cleaner: return "trash.circle"
       case .storage: return "chart.pie"
       case .developer: return "hammer"
+      case .assistant: return "bubble.left.and.text.bubble.right"
       case .downloads: return "arrow.down.circle"
       case .photos: return "photo.on.rectangle.angled"
       case .removedApps: return "folder.badge.questionmark"
@@ -91,6 +93,15 @@ final class AppViewModel: ObservableObject {
   @Published var spaceHistory: [SpaceSample] = []
   @Published var storageGrowth: [StorageGrowth] = []
   @Published var applicationsSortByLastOpened = false
+  @Published var explainTarget: ExplainTarget?
+  @Published var explanations: [String: AIExplanation] = [:]
+  @Published var aiReview: AIReview?
+  @Published var aiReviewBusy = false
+  @Published var aiOrderRecommendations = false
+  @Published var assistantTurns: [AITurn] = []
+  @Published var assistantBusy = false
+  @Published var aiError: String?
+  @Published var aiConsentPending = false
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?

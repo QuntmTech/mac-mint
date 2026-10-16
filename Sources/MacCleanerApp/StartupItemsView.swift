@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StartupItemsView: View {
   @EnvironmentObject private var model: AppViewModel
+  @EnvironmentObject private var account: AccountStore
   @State private var search = ""
 
   private var filtered: [StartupItem] {
@@ -91,6 +92,16 @@ struct StartupItemsView: View {
             }
             .buttonStyle(.plain)
             .help("Reveal property list in Finder")
+            if account.aiAvailable {
+              Button {
+                model.explain(model.aiTarget(for: item))
+              } label: {
+                Image(systemName: "sparkles")
+                  .accessibilityLabel("Explain with AI")
+              }
+              .buttonStyle(.plain)
+              .help("Explain with AI")
+            }
           }
           .padding(.vertical, 5)
         }
