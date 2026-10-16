@@ -237,6 +237,6 @@ public struct SafetyPolicy: Sendable {
   }
 
   private func isSymlink(_ url: URL) -> Bool {
-    (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    (try? FileSystem.fresh(url).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
   }
 }
