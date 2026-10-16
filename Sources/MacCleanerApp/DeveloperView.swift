@@ -81,7 +81,7 @@ struct DeveloperView: View {
 
   private var projectBar: some View {
     HStack(spacing: 8) {
-      Image(systemName: "folder.badge.gearshape").foregroundStyle(AppTheme.accent)
+      Image(systemName: "folder.badge.gearshape").foregroundStyle(AppTheme.accentText)
       if model.devProjectRoots.isEmpty {
         Text("Add your code folder to find node_modules, .build, target, and other build output.")
           .font(.caption)
@@ -96,6 +96,7 @@ struct DeveloperView: View {
                   model.removeProjectFolder(url)
                 } label: {
                   Image(systemName: "xmark.circle.fill")
+                    .accessibilityLabel("Stop scanning this folder")
                 }
                 .buttonStyle(.borderless)
                 .help("Stop scanning \(url.path)")
@@ -197,6 +198,7 @@ struct DeveloperView: View {
         }
       } label: {
         Image(systemName: "ellipsis.circle")
+          .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
       .frame(width: 28)

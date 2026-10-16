@@ -44,7 +44,7 @@ struct LargeFilesView: View {
               .labelsHidden()
               .accessibilityLabel("Select \(file.url.lastPathComponent)")
             Image(systemName: "doc.fill")
-              .foregroundStyle(AppTheme.accent)
+              .foregroundStyle(AppTheme.accentText)
               .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
               Text(file.url.lastPathComponent).fontWeight(.medium)
@@ -69,6 +69,7 @@ struct LargeFilesView: View {
               Button("Move to Trash…", role: .destructive) { model.reviewLargeFiles([file]) }
             } label: {
               Image(systemName: "ellipsis.circle")
+                .accessibilityLabel("More actions")
             }
             .menuStyle(.borderlessButton)
             .frame(width: 28)
@@ -90,7 +91,7 @@ struct LargeFilesView: View {
       Spacer()
       if !model.largeFiles.isEmpty {
         StatusPill(
-          title: "\(model.largeFiles.count) found", icon: "doc.on.doc", tint: AppTheme.accent)
+          title: "\(model.largeFiles.count) found", icon: "doc.on.doc", tint: AppTheme.accentText)
         if model.selectedLargeFileIDs.isEmpty {
           Button("Select All") { model.selectedLargeFileIDs = Set(model.largeFiles.map(\.id)) }
         } else {

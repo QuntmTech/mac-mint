@@ -15,8 +15,9 @@ struct PlanItemRow: View {
           .fill((item.needsAttention ? Color.orange : AppTheme.accent).opacity(0.12))
           .frame(width: 30, height: 30)
         Image(systemName: Self.icon(for: item.kind))
+          .accessibilityHidden(true)
           .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(item.needsAttention ? Color.orange : AppTheme.accent)
+          .foregroundStyle(item.needsAttention ? Color.orange : AppTheme.accentText)
       }
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
@@ -37,19 +38,21 @@ struct PlanItemRow: View {
         model.reveal(item.url)
       } label: {
         Image(systemName: "magnifyingglass.circle")
+          .accessibilityLabel("Reveal in Finder")
       }
       .buttonStyle(.borderless)
       .help("Reveal in Finder")
       if let onRemove {
         Button(action: onRemove) {
           Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+            .accessibilityLabel("Remove \(item.displayName) from review")
         }
         .buttonStyle(.borderless)
         .help("Remove from review")
       }
     }
     .padding(.vertical, 3)
-    .accessibilityElement(children: .combine)
+    .accessibilityElement(children: .contain)
   }
 
   static func icon(for kind: PlanItemKind) -> String {
@@ -130,7 +133,7 @@ struct PlanReviewSheet: View {
     HStack(alignment: .top, spacing: 14) {
       Image(systemName: "trash.circle.fill")
         .font(.system(size: 38))
-        .foregroundStyle(AppTheme.accent)
+        .foregroundStyle(AppTheme.accentText)
       VStack(alignment: .leading, spacing: 4) {
         Text("Review: \(plan.title)").font(.title2.bold())
         Text(
@@ -225,7 +228,7 @@ struct OperationReportSheet: View {
       HStack(alignment: .top, spacing: 14) {
         Image(systemName: allGood ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
           .font(.system(size: 38))
-          .foregroundStyle(allGood ? AppTheme.accent : .orange)
+          .foregroundStyle(allGood ? AppTheme.accentText : .orange)
         VStack(alignment: .leading, spacing: 4) {
           Text(report.moved.isEmpty ? "Nothing was moved" : "\(ByteFormatter.string(report.bytesMoved)) moved to Trash")
             .font(.title2.bold())
@@ -284,6 +287,7 @@ struct OperationReportSheet: View {
       .padding(16)
     }
     .frame(width: 600)
+    .onExitCommand { dismiss() }
   }
 }
 

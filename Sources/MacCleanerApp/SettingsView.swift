@@ -61,7 +61,7 @@ struct SettingsView: View {
               ForEach(model.ignoredPaths.sorted(), id: \.self) { path in
                 HStack(spacing: 10) {
                   Image(systemName: "folder.badge.minus")
-                    .foregroundStyle(AppTheme.accent)
+                    .foregroundStyle(AppTheme.accentText)
                   Text(path)
                     .font(.caption)
                     .lineLimit(1)
@@ -71,6 +71,7 @@ struct SettingsView: View {
                     model.removeIgnore(path: path)
                   } label: {
                     Image(systemName: "xmark.circle.fill")
+                      .accessibilityLabel("Remove exclusion")
                   }
                   .buttonStyle(.plain)
                   .foregroundStyle(.secondary)
@@ -193,7 +194,7 @@ struct AboutSettingsCard: View {
             Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
           case .available(let release):
             Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
-              .foregroundStyle(AppTheme.accent)
+              .foregroundStyle(AppTheme.accentText)
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
           case .required(let release, let minimum):
             Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")

@@ -68,7 +68,7 @@ struct AppUpdatesView: View {
                 Text("Installed \(update.installedVersion)")
                 if let available = update.availableVersion, update.hasUpdate {
                   Image(systemName: "arrow.right")
-                  Text(available).foregroundStyle(AppTheme.accent).fontWeight(.semibold)
+                  Text(available).foregroundStyle(AppTheme.accentText).fontWeight(.semibold)
                 }
                 if let minOS = update.minimumSystem, update.hasUpdate { Text("• needs macOS \(minOS)") }
               }

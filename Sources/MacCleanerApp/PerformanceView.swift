@@ -21,14 +21,14 @@ struct PerformanceView: View {
             detail: memoryDetail, icon: "memorychip", tint: pressureTint)
           gauge(
             "CPU", value: monitor.snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "Measuring…",
-            detail: "Across all cores", icon: "cpu", tint: AppTheme.accent)
+            detail: "Across all cores", icon: "cpu", tint: AppTheme.accentText)
           gauge(
             "Swap", value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
             detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: .blue)
           gauge(
             "Free space", value: ByteFormatter.string(monitor.snapshot.freeBytes),
             detail: "of \(ByteFormatter.string(monitor.snapshot.totalBytes))", icon: "internaldrive",
-            tint: monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accent)
+            tint: monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accentText)
         }
 
         SurfaceCard {

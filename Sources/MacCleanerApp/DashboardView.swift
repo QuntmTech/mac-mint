@@ -124,7 +124,7 @@ struct DashboardView: View {
         HStack(spacing: 14) {
           Image(systemName: "trash.fill")
             .font(.title2)
-            .foregroundStyle(AppTheme.accent)
+            .foregroundStyle(AppTheme.accentText)
             .frame(width: 38)
           VStack(alignment: .leading, spacing: 3) {
             Text("Trash").font(.headline)
@@ -233,15 +233,16 @@ struct DashboardView: View {
           HStack {
             Image(systemName: icon)
               .font(.title3.weight(.semibold))
-              .foregroundStyle(AppTheme.accent)
+              .foregroundStyle(AppTheme.accentText)
             Spacer()
             Image(systemName: "arrow.up.right")
               .font(.caption.bold())
               .foregroundStyle(.tertiary)
           }
           Text(title).font(.headline)
-          Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-          Text(value).font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accent)
+          Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+          Text(value).font(.caption.weight(.semibold)).foregroundStyle(AppTheme.accentText)
         }
         .frame(maxWidth: .infinity, minHeight: 112, alignment: .leading)
       }
@@ -273,7 +274,7 @@ struct DashboardView: View {
           ForEach(model.cleanupTargets.prefix(6)) { item in
             HStack(spacing: 12) {
               Image(systemName: item.isSelected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(item.isSelected ? AppTheme.accent : .secondary)
+                .foregroundStyle(item.isSelected ? AppTheme.accentText : .secondary)
               VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayName).fontWeight(.medium)
                 Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)

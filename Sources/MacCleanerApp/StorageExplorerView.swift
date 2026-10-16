@@ -5,6 +5,7 @@ struct StorageExplorerView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var hovered: String?
   @State private var focused: String?
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     VStack(spacing: 0) {
@@ -136,40 +137,77 @@ struct StorageExplorerView: View {
   private func tile(_ node: StorageNode, rect: Treemap.Rect) -> some View {
     let isSelected = model.selectedStoragePaths.contains(node.id)
     let isHovered = hovered == node.id || focused == node.id
+    return tileInteractions(
+      tileFace(node, rect: rect, isSelected: isSelected, isHovered: isHovered), node: node,
+      isHovered: isHovered
+    )
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel(tileLabel(node))
+    .accessibilityValue(isSelected ? "Selected for review" : "")
+    .accessibilityHint(opensFolder(node) ? "Opens this folder" : "")
+    .accessibilityAddTraits(.isButton)
+    .accessibilityAction { model.openStorageNode(node) }
+    .accessibilityAction(named: isSelected ? "Remove from Review" : "Add to Review") {
+      model.toggleStorageSelection(node)
+    }
+  }
+
+  private func tileLabel(_ node: StorageNode) -> String {
+    "\(node.name), \(ByteFormatter.string(node.allocatedBytes))"
+  }
+
+  private func opensFolder(_ node: StorageNode) -> Bool {
+    node.kind == .folder && !node.children.isEmpty
+  }
+
+  private func tileFace(_ node: StorageNode, rect: Treemap.Rect, isSelected: Bool, isHovered: Bool)
+    -> some View
+  {
     let color = StorageStyle.color(for: node)
-    return RoundedRectangle(cornerRadius: rect.width > 24 && rect.height > 24 ? 6 : 2, style: .continuous)
-      .fill(
-        LinearGradient(
-          colors: [color.opacity(isHovered ? 1 : 0.88), color.opacity(isHovered ? 0.85 : 0.68)],
-          startPoint: .topLeading, endPoint: .bottomTrailing)
-      )
+    let gradient = LinearGradient(
+      colors: [color.opacity(isHovered ? 1 : 0.88), color.opacity(isHovered ? 0.85 : 0.68)],
+      startPoint: .topLeading, endPoint: .bottomTrailing)
+    let corner: CGFloat = rect.width > 24 && rect.height > 24 ? 6 : 2
+    let border: Color = isSelected ? .white : Color.black.opacity(0.08)
+    return RoundedRectangle(cornerRadius: corner, style: .continuous)
+      .fill(gradient)
       .overlay {
         RoundedRectangle(cornerRadius: 6, style: .continuous)
-          .strokeBorder(isSelected ? Color.white : Color.black.opacity(0.08), lineWidth: isSelected ? 3 : 1)
+          .strokeBorder(border, lineWidth: isSelected ? 3 : 1)
       }
-      .overlay(alignment: .topLeading) {
-        if rect.width > 70 && rect.height > 34 {
-          VStack(alignment: .leading, spacing: 1) {
-            Text(node.name).font(.caption.weight(.semibold)).lineLimit(1)
-            Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2).opacity(0.85)
-          }
-          .foregroundStyle(.white)
-          .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
-          .padding(6)
-        }
-      }
+      .overlay(alignment: .topLeading) { tileCaption(node, rect: rect) }
       .frame(width: max(0, rect.width - 2), height: max(0, rect.height - 2))
       .offset(x: rect.x + 1, y: rect.y + 1)
+  }
+
+  @ViewBuilder
+  private func tileCaption(_ node: StorageNode, rect: Treemap.Rect) -> some View {
+    if rect.width > 70 && rect.height > 34 {
+      VStack(alignment: .leading, spacing: 1) {
+        Text(node.name).font(.caption.weight(.semibold)).lineLimit(1)
+        Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2).opacity(0.85)
+      }
+      .foregroundStyle(.white)
+      .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+      .padding(6)
+    }
+  }
+
+  private func tileInteractions<Face: View>(_ face: Face, node: StorageNode, isHovered: Bool)
+    -> some View
+  {
+    let help = "\(tileLabel(node))\(node.kind == .folder ? " • click to open" : "")"
+    return face
       .contentShape(Rectangle())
       .onHover { inside in hovered = inside ? node.id : (hovered == node.id ? nil : hovered) }
       .onTapGesture(count: 2) { model.openStorageNode(node) }
       .onTapGesture {
         focused = node.id
-        if node.kind == .folder && !node.children.isEmpty { model.openStorageNode(node) }
+        if opensFolder(node) { model.openStorageNode(node) }
       }
-      .help("\(node.name) — \(ByteFormatter.string(node.allocatedBytes))\(node.kind == .folder ? " • click to open" : "")")
+      .help(help)
       .contextMenu { contextMenu(for: node) }
-      .animation(.easeOut(duration: 0.12), value: isHovered)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovered)
   }
 
   // MARK: List
@@ -216,6 +254,7 @@ struct StorageExplorerView: View {
             model.openStorageNode(child)
           } label: {
             Image(systemName: "chevron.right.circle")
+              .accessibilityLabel("Open folder")
           }
           .buttonStyle(.borderless)
           .help("Open \(child.name)")

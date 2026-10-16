@@ -49,8 +49,10 @@ struct DuplicatesView: View {
                 Spacer()
                 Button("Select copies") { model.selectDuplicateCopies(in: group.id) }
                   .buttonStyle(.link)
+        .tint(AppTheme.accentText)
                 Button("Clear") { model.clearDuplicateSelection(in: group.id) }
                   .buttonStyle(.link)
+        .tint(AppTheme.accentText)
               }
             }
           }
@@ -72,7 +74,7 @@ struct DuplicatesView: View {
       if totalReclaimable > 0 {
         StatusPill(
           title: ByteFormatter.string(totalReclaimable) + " possible", icon: "square.on.square",
-          tint: AppTheme.accent)
+          tint: AppTheme.accentText)
       }
       if model.duplicateSelectedBytes > 0 {
         Button {
@@ -155,6 +157,7 @@ struct DuplicatesView: View {
         )
       )
       .labelsHidden()
+      .accessibilityLabel("Remove copy \(file.url.lastPathComponent)")
 
       FileThumbnail(url: file.url, size: 46)
         .overlay(alignment: .bottomTrailing) {
@@ -183,6 +186,7 @@ struct DuplicatesView: View {
         previewURL = file.url
       } label: {
         Image(systemName: "eye")
+          .accessibilityLabel("Preview")
       }
       .buttonStyle(.borderless)
       .help("Quick Look")
@@ -193,6 +197,7 @@ struct DuplicatesView: View {
         Button("Exclude from future scans") { model.ignore(file.url) }
       } label: {
         Image(systemName: "ellipsis.circle")
+          .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
       .frame(width: 28)
