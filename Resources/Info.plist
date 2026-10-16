@@ -3,16 +3,17 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
-  <key>CFBundleExecutable</key><string>MacCleaner</string>
-  <key>CFBundleIdentifier</key><string>com.example.MacCleanerHybridBase</string>
+  <key>CFBundleExecutable</key><string>MacMint</string>
+  <key>CFBundleIdentifier</key><string>co.macmint.MacMint</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Mac Cleaner</string>
-  <key>CFBundleDisplayName</key><string>Mac Cleaner</string>
+  <key>CFBundleName</key><string>MacMint</string>
+  <key>CFBundleDisplayName</key><string>MacMint</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.2.0</string>
-  <key>CFBundleVersion</key><string>2</string>
+  <key>CFBundleShortVersionString</key><string>0.3.0</string>
+  <key>CFBundleVersion</key><string>3</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSHumanReadableCopyright</key><string>© 2026 MacMint</string>
 </dict>
 </plist>

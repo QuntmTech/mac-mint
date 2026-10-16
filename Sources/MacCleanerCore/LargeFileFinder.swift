@@ -27,16 +27,16 @@ public actor LargeFileFinder {
   ) async -> ScanReport<[LargeFile]> {
     let started = Date()
     var found: [LargeFile] = []
-    var issues: [ScanIssue] = []
+    let collector = IssueCollector()
 
     for root in roots {
       if Task.isCancelled {
         return ScanReport(
-          value: sorted(found, limit: limit), issues: issues,
+          value: sorted(found, limit: limit), issues: collector.issues,
           duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
       guard fileManager.fileExists(atPath: root.path) else {
-        issues.append(
+        collector.append(
           ScanIssue(
             area: "Large Files", path: root.path, severity: .info,
             message: "Scan root does not exist."))
@@ -49,41 +49,42 @@ public actor LargeFileFinder {
           includingPropertiesForKeys: Array(FileSystem.resourceKeys),
           options: [.skipsHiddenFiles, .skipsPackageDescendants],
           errorHandler: { url, error in
-            issues.append(
+            collector.append(
               ScanIssue(area: "Large Files", path: url.path, message: error.localizedDescription))
             return true
           }
         )
       else {
-        issues.append(
+        collector.append(
           ScanIssue(
             area: "Large Files", path: root.path, message: "Could not enumerate this folder."))
         continue
       }
 
-      for case let url as URL in enumerator {
-        if Task.isCancelled {
-          return ScanReport(
-            value: sorted(found, limit: limit), issues: issues,
-            duration: Date().timeIntervalSince(started), wasCancelled: true)
-        }
-
+      FileSystem.walk(enumerator) { url in
+        if Task.isCancelled { return .stop }
         if shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
-          if isDirectory(url) { enumerator.skipDescendants() }
-          continue
+          return isDirectory(url) ? .skipDescendants : .continue
         }
-
         guard let meta = FileSystem.fileMetadata(at: url), meta.size >= minimumSize else {
-          continue
+          return .continue
         }
         found.append(
-          LargeFile(url: url, size: meta.size, modifiedAt: meta.modified, accessedAt: meta.accessed)
+          LargeFile(
+            url: url, size: meta.size, modifiedAt: meta.modified, accessedAt: meta.accessed,
+            identity: FileSystem.fileIdentity(at: url))
         )
+        return .continue
+      }
+      if Task.isCancelled {
+        return ScanReport(
+          value: sorted(found, limit: limit), issues: collector.issues,
+          duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
     }
 
     return ScanReport(
-      value: sorted(found, limit: limit), issues: issues,
+      value: sorted(found, limit: limit), issues: collector.issues,
       duration: Date().timeIntervalSince(started))
   }
 

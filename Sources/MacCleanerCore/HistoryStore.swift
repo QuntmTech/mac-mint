@@ -7,10 +7,12 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
   public let paths: [String]
   public let bytes: Int64
   public let notes: String
+  /// Trash locations for each moved item (absent in entries written before receipts existed).
+  public let receipts: [TrashReceipt]?
 
   public init(
     id: UUID = UUID(), date: Date = Date(), action: String, paths: [String], bytes: Int64,
-    notes: String
+    notes: String, receipts: [TrashReceipt]? = nil
   ) {
     self.id = id
     self.date = date
@@ -18,6 +20,7 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
     self.paths = paths
     self.bytes = bytes
     self.notes = notes
+    self.receipts = receipts
   }
 }
 

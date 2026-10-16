@@ -1,6 +1,14 @@
-# Mac Cleaner Hybrid Base V2
+# MacMint
 
-A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller foundation evolved directly from the original `mac-cleaner-hybrid-base` — **not a rewrite**.
+A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller, evolved from Mac Cleaner Hybrid Base V2 — **not a rewrite**.
+
+## Accounts and licensing
+
+MacMint requires a signed-in account with an active plan. Purchases on macmint.co issue a redemption code (`MINT-XXXX-XXXX-XXXX-XXXX`) that unlocks Pro on the account; each account can activate a limited number of Macs.
+
+- Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
+- The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
+- Only account and license checks touch the network. Files, paths, and scan results never leave the Mac.
 
 V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming SHA-256, duplicate detection, application scanner, startup inventory, history, and safety policy) and upgrades it in-place for stronger reliability, safer destructive operations, better scan visibility, exclusions, cancellation, richer review flows, and a substantially more polished desktop interface.
 
@@ -56,10 +64,9 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - No fake privileged mutation from the base app.
 
 ### Exclusions + privacy
-- Persisted local exclusions used by cleanup, app-leftover, duplicate, and large-file scans.
-- No telemetry.
-- No network calls in the base.
-- Cleanup history and exclusions are local JSON files under Application Support.
+- Persisted local exclusions used by cleanup, app-leftover, duplicate, and large-file scans. An exclusion inside a cache folder splits that folder instead of letting the parent be removed whole.
+- No telemetry. Network use is limited to account sign-in and license checks.
+- Cleanup history (with Trash locations for each moved item) and exclusions are local JSON files under `~/Library/Application Support/MacMint`.
 
 ## V2 user interface
 
@@ -120,7 +127,7 @@ Current V2 regression suite: **18 tests** covering:
 ## Run from source on macOS
 
 ```bash
-swift run MacCleaner
+swift run MacMint
 ```
 
 ## Build a local `.app`
@@ -134,7 +141,7 @@ The script now:
 1. runs the core regression suite;
 2. validates `Resources/Info.plist` with `plutil`;
 3. builds the release `MacCleaner` executable;
-4. constructs `dist/MacCleaner.app`;
+4. constructs `dist/MacMint.app` and `dist/MacMint.zip`;
 5. ad-hoc signs it for local testing;
 6. verifies the code signature;
 7. opens the app unless `NO_OPEN=1` is set.

@@ -26,16 +26,16 @@ public actor DuplicateFinder {
   ) async -> ScanReport<[DuplicateGroup]> {
     let started = Date()
     var bySize: [Int64: [LargeFile]] = [:]
-    var issues: [ScanIssue] = []
+    let collector = IssueCollector()
 
     for root in roots {
       if Task.isCancelled {
         return ScanReport(
-          value: [], issues: issues, duration: Date().timeIntervalSince(started), wasCancelled: true
+          value: [], issues: collector.issues, duration: Date().timeIntervalSince(started), wasCancelled: true
         )
       }
       guard fileManager.fileExists(atPath: root.path) else {
-        issues.append(
+        collector.append(
           ScanIssue(
             area: "Duplicates", path: root.path, severity: .info,
             message: "Scan root does not exist."))
@@ -48,36 +48,37 @@ public actor DuplicateFinder {
           includingPropertiesForKeys: Array(FileSystem.resourceKeys),
           options: [.skipsHiddenFiles, .skipsPackageDescendants],
           errorHandler: { url, error in
-            issues.append(
+            collector.append(
               ScanIssue(area: "Duplicates", path: url.path, message: error.localizedDescription))
             return true
           }
         )
       else {
-        issues.append(
+        collector.append(
           ScanIssue(
             area: "Duplicates", path: root.path, message: "Could not enumerate this folder."))
         continue
       }
 
-      for case let url as URL in enumerator {
-        if Task.isCancelled {
-          return ScanReport(
-            value: [], issues: issues, duration: Date().timeIntervalSince(started),
-            wasCancelled: true)
-        }
-
+      FileSystem.walk(enumerator) { url in
+        if Task.isCancelled { return .stop }
         if shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
-          if isDirectory(url) { enumerator.skipDescendants() }
-          continue
+          return isDirectory(url) ? .skipDescendants : .continue
         }
-
         guard let meta = FileSystem.logicalFileMetadata(at: url), meta.size >= minimumSize else {
-          continue
+          return .continue
         }
         bySize[meta.size, default: []].append(
-          LargeFile(url: url, size: meta.size, modifiedAt: meta.modified, accessedAt: meta.accessed)
+          LargeFile(
+            url: url, size: meta.size, modifiedAt: meta.modified, accessedAt: meta.accessed,
+            identity: FileSystem.fileIdentity(at: url))
         )
+        return .continue
+      }
+      if Task.isCancelled {
+        return ScanReport(
+          value: [], issues: collector.issues, duration: Date().timeIntervalSince(started),
+          wasCancelled: true)
       }
     }
 
@@ -85,22 +86,27 @@ public actor DuplicateFinder {
     for (_, sameSize) in bySize where sameSize.count > 1 {
       if Task.isCancelled {
         return ScanReport(
-          value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes }, issues: issues,
+          value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes }, issues: collector.issues,
           duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
 
-      var bySample: [String: [LargeFile]] = [:]
-      for file in sameSize {
+      // Hard links share content by definition; hash one path per physical file.
+      let physical = Self.groupByIdentity(sameSize)
+      guard physical.count > 1 else { continue }
+
+      var bySample: [String: [[LargeFile]]] = [:]
+      for links in physical {
+        let file = links[0]
         if Task.isCancelled { break }
         do {
           let sample = try SHA256.hexDigest(file: file.url, sampleLimit: 64 * 1024)
-          bySample[sample, default: []].append(file)
+          bySample[sample, default: []].append(links)
         } catch is CancellationError {
           return ScanReport(
             value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes },
-            issues: issues, duration: Date().timeIntervalSince(started), wasCancelled: true)
+            issues: collector.issues, duration: Date().timeIntervalSince(started), wasCancelled: true)
         } catch {
-          issues.append(
+          collector.append(
             ScanIssue(
               area: "Duplicates", path: file.url.path,
               message: "Could not sample file: \(error.localizedDescription)"))
@@ -109,32 +115,45 @@ public actor DuplicateFinder {
 
       for (_, candidates) in bySample where candidates.count > 1 {
         var byFull: [String: [LargeFile]] = [:]
-        for file in candidates {
+        for links in candidates {
+          let file = links[0]
           if Task.isCancelled { break }
           do {
             let full = try SHA256.hexDigest(file: file.url)
-            byFull[full, default: []].append(file)
+            byFull[full, default: []].append(contentsOf: links)
           } catch is CancellationError {
             return ScanReport(
               value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes },
-              issues: issues, duration: Date().timeIntervalSince(started), wasCancelled: true)
+              issues: collector.issues, duration: Date().timeIntervalSince(started), wasCancelled: true)
           } catch {
-            issues.append(
+            collector.append(
               ScanIssue(
                 area: "Duplicates", path: file.url.path,
                 message: "Could not hash file: \(error.localizedDescription)"))
           }
         }
-        for (hash, exact) in byFull where exact.count > 1 {
-          groups.append(
-            DuplicateGroup(fingerprint: hash, files: exact.sorted { $0.url.path < $1.url.path }))
+        for (hash, exact) in byFull {
+          let group = DuplicateGroup(
+            fingerprint: hash, files: exact.sorted { $0.url.path < $1.url.path })
+          if group.physicalCopyCount > 1 { groups.append(group) }
         }
       }
     }
 
     return ScanReport(
-      value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes }, issues: issues,
+      value: groups.sorted { $0.reclaimableBytes > $1.reclaimableBytes }, issues: collector.issues,
       duration: Date().timeIntervalSince(started), wasCancelled: Task.isCancelled)
+  }
+
+  static func groupByIdentity(_ files: [LargeFile]) -> [[LargeFile]] {
+    var order: [String] = []
+    var buckets: [String: [LargeFile]] = [:]
+    for file in files {
+      let key = file.identity ?? "path:" + file.url.standardizedFileURL.path
+      if buckets[key] == nil { order.append(key) }
+      buckets[key, default: []].append(file)
+    }
+    return order.compactMap { buckets[$0] }
   }
 
   private func shouldExclude(_ url: URL, excludedRoots: [URL], ignoredPaths: Set<String>) -> Bool {

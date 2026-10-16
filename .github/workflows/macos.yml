@@ -6,7 +6,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
@@ -14,6 +14,12 @@ jobs:
       - name: Core tests
         run: swift test
       - name: Build desktop app
-        run: swift build -c release --product MacCleaner
+        run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMint-${{ github.sha }}
+          path: dist/MacMint.zip
+          retention-days: 14

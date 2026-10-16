@@ -3,6 +3,7 @@ import SwiftUI
 
 struct RootView: View {
   @EnvironmentObject private var model: AppViewModel
+  @EnvironmentObject private var account: AccountStore
   @State private var showingIssues = false
 
   var body: some View {
@@ -59,24 +60,11 @@ struct RootView: View {
 
   private var sidebarBrand: some View {
     HStack(spacing: 11) {
-      ZStack {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-          .fill(
-            LinearGradient(
-              colors: [AppTheme.accent, AppTheme.accent.opacity(0.65)],
-              startPoint: .topLeading,
-              endPoint: .bottomTrailing
-            )
-          )
-          .frame(width: 38, height: 38)
-        Image(systemName: "sparkles")
-          .font(.system(size: 17, weight: .bold))
-          .foregroundStyle(.white)
-      }
+      BrandMark()
       VStack(alignment: .leading, spacing: 1) {
-        Text("Mac Cleaner")
+        Text("MacMint")
           .font(.headline)
-        Text("Hybrid Base V2")
+        Text(account.isOffline ? "Pro • Offline" : "Pro")
           .font(.caption2)
           .foregroundStyle(.secondary)
       }
@@ -89,7 +77,8 @@ struct RootView: View {
     let fraction = stats.total > 0 ? min(1, Double(stats.used) / Double(stats.total)) : 0
     return VStack(alignment: .leading, spacing: 8) {
       HStack {
-        Text("Macintosh HD")
+        Text(model.volumeName)
+          .lineLimit(1)
           .font(.caption.weight(.semibold))
         Spacer()
         Text(ByteFormatter.string(stats.free) + " free")

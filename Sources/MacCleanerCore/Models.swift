@@ -100,13 +100,19 @@ public struct LargeFile: Identifiable, Codable, Hashable, Sendable {
   public let size: Int64
   public let modifiedAt: Date?
   public let accessedAt: Date?
+  /// Physical file identity ("device:inode"). Equal identities are hard links to one file.
+  public let identity: String?
 
-  public init(id: UUID = UUID(), url: URL, size: Int64, modifiedAt: Date?, accessedAt: Date?) {
+  public init(
+    id: UUID = UUID(), url: URL, size: Int64, modifiedAt: Date?, accessedAt: Date?,
+    identity: String? = nil
+  ) {
     self.id = id
     self.url = url
     self.size = size
     self.modifiedAt = modifiedAt
     self.accessedAt = accessedAt
+    self.identity = identity
   }
 }
 
@@ -121,14 +127,36 @@ public struct DuplicateGroup: Identifiable, Codable, Hashable, Sendable {
     self.files = files
   }
 
+  /// Distinct physical copies. Hard links to the same file count once.
+  public var physicalCopyCount: Int {
+    var seen: Set<String> = []
+    var count = 0
+    for file in files {
+      if let identity = file.identity {
+        if seen.insert(identity).inserted { count += 1 }
+      } else {
+        count += 1
+      }
+    }
+    return count
+  }
+
   public var reclaimableBytes: Int64 {
-    guard files.count > 1 else { return 0 }
-    return files.dropFirst().reduce(0) { $0 + $1.size }
+    guard let size = files.first?.size, physicalCopyCount > 1 else { return 0 }
+    return Int64(physicalCopyCount - 1) * size
   }
 }
 
 public enum MatchConfidence: String, Codable, Sendable, CaseIterable {
   case high, medium, low
+
+  var rank: Int {
+    switch self {
+    case .high: return 0
+    case .medium: return 1
+    case .low: return 2
+    }
+  }
 }
 
 public struct AppRecord: Identifiable, Codable, Hashable, Sendable {
@@ -160,15 +188,23 @@ public struct AppLeftover: Identifiable, Codable, Hashable, Sendable {
   public let size: Int64
   public let confidence: MatchConfidence
   public let reason: String
+  /// Shared containers (e.g. app groups) may also be used by other apps from the same developer.
+  public let isShared: Bool
 
-  public init(id: UUID = UUID(), url: URL, size: Int64, confidence: MatchConfidence, reason: String)
-  {
+  public init(
+    id: UUID = UUID(), url: URL, size: Int64, confidence: MatchConfidence, reason: String,
+    isShared: Bool = false
+  ) {
     self.id = id
     self.url = url
     self.size = size
     self.confidence = confidence
     self.reason = reason
+    self.isShared = isShared
   }
+
+  /// Only exact, unshared matches are suggested for selection by default.
+  public var isSuggested: Bool { confidence == .high && !isShared }
 }
 
 public struct StartupItem: Identifiable, Codable, Hashable, Sendable {
@@ -246,18 +282,38 @@ public struct OperationFailure: Codable, Hashable, Sendable {
   }
 }
 
+/// Where an item went when it was moved to Trash, so it can be restored later.
+public struct TrashReceipt: Codable, Hashable, Sendable {
+  public let originalPath: String
+  public let trashPath: String?
+  public let bytes: Int64
+  public let movedAt: Date
+
+  public init(originalPath: String, trashPath: String?, bytes: Int64, movedAt: Date = Date()) {
+    self.originalPath = originalPath
+    self.trashPath = trashPath
+    self.bytes = bytes
+    self.movedAt = movedAt
+  }
+}
+
 public struct CleanupResult: Sendable {
   public let movedToTrash: [URL]
   public let failed: [OperationFailure]
   public let bytesAttempted: Int64
   public let bytesMoved: Int64
+  public let receipts: [TrashReceipt]
+  public let wasCancelled: Bool
 
   public init(
-    movedToTrash: [URL], failed: [OperationFailure], bytesAttempted: Int64, bytesMoved: Int64
+    movedToTrash: [URL], failed: [OperationFailure], bytesAttempted: Int64, bytesMoved: Int64,
+    receipts: [TrashReceipt] = [], wasCancelled: Bool = false
   ) {
     self.movedToTrash = movedToTrash
     self.failed = failed
     self.bytesAttempted = bytesAttempted
     self.bytesMoved = bytesMoved
+    self.receipts = receipts
+    self.wasCancelled = wasCancelled
   }
 }

@@ -61,14 +61,13 @@ final class AppViewModel: ObservableObject {
   private let largeFileFinder = LargeFileFinder()
   private let duplicateFinder = DuplicateFinder()
   private let safetyPolicy = SafetyPolicy()
+  private let duplicateVerifier = DuplicateRemovalVerifier()
   private let historyStore: HistoryStore
   private let ignoreStore: IgnoreStore
   private var currentTask: Task<Void, Never>?
 
   init() {
-    let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
-      .first!
-      .appendingPathComponent("MacCleanerHybridBase", isDirectory: true)
+    let support = AppPaths.supportDirectory
     historyStore = HistoryStore(url: support.appendingPathComponent("history.json"))
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 
@@ -94,6 +93,13 @@ final class AppViewModel: ObservableObject {
 
   var reviewableBytes: Int64 {
     cleanupTargets.filter { $0.risk == .review }.reduce(0) { $0 + $1.size }
+  }
+
+  var volumeName: String {
+    let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
+      .volumeLocalizedNameKey
+    ])
+    return values?.volumeLocalizedName ?? "Startup Disk"
   }
 
   var duplicateSelectedBytes: Int64 {
@@ -147,9 +153,9 @@ final class AppViewModel: ObservableObject {
   }
 
   func cancelCurrentOperation() {
-    guard isScanning else { return }
+    guard isScanning || isWorking else { return }
     currentTask?.cancel()
-    statusMessage = "Stopping scan…"
+    statusMessage = isWorking ? "Stopping after the current item…" : "Stopping scan…"
   }
 
   func toggleCleanup(_ id: UUID, selected: Bool) {
@@ -181,26 +187,35 @@ final class AppViewModel: ObservableObject {
     currentTask = Task { [weak self] in
       guard let self else { return }
       let engine = CleanupEngine(trashService: MacTrashService(), safetyPolicy: safetyPolicy)
-      let result = await engine.execute(selected)
+      let result = await engine.execute(selected, ignoredPaths: ignoredPaths)
       lastCleanupResult = result
 
-      let entry = HistoryEntry(
-        action: "Cleanup",
-        paths: result.movedToTrash.map(\.path),
-        bytes: result.bytesMoved,
-        notes: result.failed.isEmpty
+      if !result.movedToTrash.isEmpty || !result.failed.isEmpty {
+        var notes =
+          result.failed.isEmpty
           ? "All selected items moved to Trash."
           : "\(result.failed.count) item(s) could not be moved to Trash."
-      )
-      try? await historyStore.append(entry)
-      history = await historyStore.load()
+        if result.wasCancelled { notes += " Stopped before finishing; remaining items were not touched." }
+        await record(
+          HistoryEntry(
+            action: "Cleanup", paths: result.movedToTrash.map(\.path), bytes: result.bytesMoved,
+            notes: notes, receipts: result.receipts))
+      }
+      scanIssues = result.failed.map {
+        ScanIssue(area: "Cleanup", path: $0.url.path, message: $0.message)
+      }
       isWorking = false
       operationTitle = nil
       currentTask = nil
-      statusMessage =
-        result.failed.isEmpty
-        ? "Cleanup complete — \(ByteFormatter.string(result.bytesMoved)) moved to Trash"
-        : "Cleanup finished with \(result.failed.count) issue(s)"
+      if result.wasCancelled {
+        statusMessage =
+          "Cleanup stopped — \(ByteFormatter.string(result.bytesMoved)) moved to Trash before stopping"
+      } else {
+        statusMessage =
+          result.failed.isEmpty
+          ? "Cleanup complete — \(ByteFormatter.string(result.bytesMoved)) moved to Trash"
+          : "Cleanup finished with \(result.failed.count) issue(s)"
+      }
 
       runSmartScan()
     }
@@ -215,13 +230,15 @@ final class AppViewModel: ObservableObject {
 
     currentTask = Task { [weak self] in
       guard let self else { return }
-      let report = await appScanner.leftoversReport(for: app, ignoredPaths: ignoredPaths)
+      let others = Set(apps.compactMap(\.bundleIdentifier))
+      let report = await appScanner.leftoversReport(
+        for: app, otherBundleIDs: others, ignoredPaths: ignoredPaths)
       guard !Task.isCancelled else {
         finishCancelledOperation()
         return
       }
       appLeftovers = report.value
-      selectedLeftoverIDs = Set(report.value.filter { $0.confidence == .high }.map(\.id))
+      selectedLeftoverIDs = Set(report.value.filter(\.isSuggested).map(\.id))
       scanIssues = report.issues
       lastScanDuration = report.duration
       finishScan(message: "Found \(report.value.count) related item(s)")
@@ -252,12 +269,14 @@ final class AppViewModel: ObservableObject {
     operationTitle = "Uninstalling \(app.name)"
     statusMessage = "Moving app and selected leftovers to Trash…"
     let selectedLeftovers = appLeftovers.filter { selectedLeftoverIDs.contains($0.id) }
+    let excluded = ignoredPaths
 
     currentTask = Task { [weak self] in
       guard let self else { return }
       let trash = MacTrashService()
       var moved: [URL] = []
       var failed: [OperationFailure] = []
+      var receipts: [TrashReceipt] = []
       var bytesMoved: Int64 = 0
       var appMoved = false
 
@@ -272,9 +291,12 @@ final class AppViewModel: ObservableObject {
 
       if appAllowed {
         do {
-          try await trash.trash(app.url)
+          let size = FileSystem.itemSize(at: app.url)
+          let trashURL = try await trash.trash(app.url)
           moved.append(app.url)
-          bytesMoved += app.bundleSize
+          bytesMoved += size
+          receipts.append(
+            TrashReceipt(originalPath: app.url.path, trashPath: trashURL?.path, bytes: size))
           appMoved = true
         } catch {
           failed.append(OperationFailure(url: app.url, message: error.localizedDescription))
@@ -296,30 +318,41 @@ final class AppViewModel: ObservableObject {
 
       for leftover in appMoved ? selectedLeftovers : [] {
         if Task.isCancelled { break }
+        if FileSystem.isIgnored(leftover.url, ignoredPaths: excluded)
+          || FileSystem.containsIgnoredDescendant(leftover.url, ignoredPaths: excluded)
+        {
+          failed.append(
+            OperationFailure(url: leftover.url, message: "Item is on your exclusion list."))
+          continue
+        }
         let decision = safetyPolicy.appLeftoverDecision(for: leftover.url)
         guard decision.allowed else {
           failed.append(OperationFailure(url: leftover.url, message: decision.reason))
           continue
         }
         do {
-          try await trash.trash(leftover.url)
+          let size = FileSystem.itemSize(at: leftover.url)
+          let trashURL = try await trash.trash(leftover.url)
           moved.append(leftover.url)
-          bytesMoved += leftover.size
+          bytesMoved += size
+          receipts.append(
+            TrashReceipt(originalPath: leftover.url.path, trashPath: trashURL?.path, bytes: size))
         } catch {
           failed.append(OperationFailure(url: leftover.url, message: error.localizedDescription))
         }
       }
 
-      try? await historyStore.append(
+      await record(
         HistoryEntry(
           action: "Uninstall \(app.name)",
           paths: moved.map(\.path),
           bytes: bytesMoved,
           notes: failed.isEmpty
             ? "App and selected leftovers moved to Trash."
-            : "Completed with \(failed.count) failure(s)."
+            : "Completed with \(failed.count) failure(s).",
+          receipts: receipts
         ))
-      history = await historyStore.load()
+      scanIssues = failed.map { ScanIssue(area: "Uninstall", path: $0.url.path, message: $0.message) }
       isWorking = false
       operationTitle = nil
       currentTask = nil
@@ -418,68 +451,82 @@ final class AppViewModel: ObservableObject {
 
   func trashSelectedDuplicates() {
     guard !isWorking, !isScanning else { return }
-    let files = duplicateGroups.flatMap { group -> [LargeFile] in
-      let selected = group.files.filter { selectedDuplicateIDs.contains($0.id) }
-      // Re-check the invariant at execution time rather than trusting only the UI toggles.
-      return selected.count < group.files.count ? selected : []
-    }
-    guard !files.isEmpty else {
-      statusMessage = "Nothing can be removed — at least one copy must remain in each group"
+    let groups = duplicateGroups
+    let selection = selectedDuplicateIDs
+    guard groups.contains(where: { group in group.files.contains { selection.contains($0.id) } })
+    else {
+      statusMessage = "Select at least one duplicate copy first"
       return
     }
 
     isWorking = true
     operationTitle = "Removing duplicates"
-    statusMessage = "Moving reviewed duplicate copies to Trash…"
+    statusMessage = "Verifying that each kept copy is still present and unchanged…"
+    let excluded = ignoredPaths
 
     currentTask = Task { [weak self] in
       guard let self else { return }
+      // Re-verify keepers and selected copies against the live filesystem before moving anything.
+      let plan = await duplicateVerifier.plan(
+        groups: groups, selectedIDs: selection, ignoredPaths: excluded)
+      statusMessage = "Moving verified duplicate copies to Trash…"
+
       let trash = MacTrashService()
       var movedIDs: Set<UUID> = []
-      var paths: [String] = []
+      var receipts: [TrashReceipt] = []
+      var failures = plan.skipped
       var bytesMoved: Int64 = 0
-      var failures = 0
+      var cancelled = plan.wasCancelled
 
-      for file in files {
-        if Task.isCancelled { break }
-        let decision = safetyPolicy.reviewedFileDecision(for: file.url)
-        guard decision.allowed else {
-          failures += 1
-          continue
+      for file in plan.wasCancelled ? [] : plan.approved {
+        if Task.isCancelled {
+          cancelled = true
+          break
         }
         do {
-          try await trash.trash(file.url)
+          let trashURL = try await trash.trash(file.url)
           movedIDs.insert(file.id)
-          paths.append(file.url.path)
           bytesMoved += file.size
+          receipts.append(
+            TrashReceipt(originalPath: file.url.path, trashPath: trashURL?.path, bytes: file.size))
         } catch {
-          failures += 1
+          failures.append(OperationFailure(url: file.url, message: error.localizedDescription))
         }
       }
 
       duplicateGroups = duplicateGroups.compactMap { group in
         let remaining = group.files.filter { !movedIDs.contains($0.id) }
-        return remaining.count > 1
-          ? DuplicateGroup(id: group.id, fingerprint: group.fingerprint, files: remaining) : nil
+        let updated = DuplicateGroup(id: group.id, fingerprint: group.fingerprint, files: remaining)
+        return updated.physicalCopyCount > 1 ? updated : nil
       }
       selectedDuplicateIDs.subtract(movedIDs)
+      scanIssues = failures.map {
+        ScanIssue(area: "Duplicates", path: $0.url.path, message: $0.message)
+      }
 
-      try? await historyStore.append(
-        HistoryEntry(
-          action: "Remove duplicates",
-          paths: paths,
-          bytes: bytesMoved,
-          notes: failures == 0
-            ? "Reviewed duplicate copies moved to Trash." : "Completed with \(failures) failure(s)."
-        ))
-      history = await historyStore.load()
+      if !movedIDs.isEmpty {
+        await record(
+          HistoryEntry(
+            action: "Remove duplicates",
+            paths: receipts.map(\.originalPath),
+            bytes: bytesMoved,
+            notes: failures.isEmpty
+              ? "Verified duplicate copies moved to Trash."
+              : "\(failures.count) selected copy(ies) skipped after re-verification.",
+            receipts: receipts
+          ))
+      }
       isWorking = false
       operationTitle = nil
       currentTask = nil
-      statusMessage =
-        failures == 0
-        ? "Moved \(ByteFormatter.string(bytesMoved)) of duplicates to Trash"
-        : "Duplicate cleanup finished with \(failures) issue(s)"
+      if cancelled {
+        statusMessage = "Stopped — \(ByteFormatter.string(bytesMoved)) of duplicates moved to Trash"
+      } else {
+        statusMessage =
+          failures.isEmpty
+          ? "Moved \(ByteFormatter.string(bytesMoved)) of duplicates to Trash"
+          : "Moved \(ByteFormatter.string(bytesMoved)); \(failures.count) copy(ies) skipped — see issues"
+      }
     }
   }
 
@@ -496,20 +543,20 @@ final class AppViewModel: ObservableObject {
     currentTask = Task { [weak self] in
       guard let self else { return }
       do {
-        try await MacTrashService().trash(url)
-        try? await historyStore.append(
+        let trashURL = try await MacTrashService().trash(url)
+        await record(
           HistoryEntry(
             action: action,
             paths: [url.path],
             bytes: bytes,
-            notes: "Moved to Trash after explicit review."
+            notes: "Moved to Trash after explicit review.",
+            receipts: [TrashReceipt(originalPath: url.path, trashPath: trashURL?.path, bytes: bytes)]
           ))
-        history = await historyStore.load()
         largeFiles.removeAll { $0.url == url }
         duplicateGroups = duplicateGroups.compactMap { group in
-          let remaining = group.files.filter { $0.url != url }
-          return remaining.count > 1
-            ? DuplicateGroup(id: group.id, fingerprint: group.fingerprint, files: remaining) : nil
+          let updated = DuplicateGroup(
+            id: group.id, fingerprint: group.fingerprint, files: group.files.filter { $0.url != url })
+          return updated.physicalCopyCount > 1 ? updated : nil
         }
         statusMessage = "Moved \(url.lastPathComponent) to Trash"
       } catch {
@@ -528,12 +575,23 @@ final class AppViewModel: ObservableObject {
         cleanupTargets.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
         largeFiles.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
         duplicateGroups = duplicateGroups.compactMap { group in
-          let remaining = group.files.filter {
-            !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
-          }
-          return remaining.count > 1
-            ? DuplicateGroup(id: group.id, fingerprint: group.fingerprint, files: remaining) : nil
+          let updated = DuplicateGroup(
+            id: group.id, fingerprint: group.fingerprint,
+            files: group.files.filter { !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) })
+          return updated.physicalCopyCount > 1 ? updated : nil
         }
+        selectedDuplicateIDs.formIntersection(duplicateGroups.flatMap(\.files).map(\.id))
+        // Cleanup targets that contain the new exclusion can no longer be acted on as a whole.
+        cleanupTargets.removeAll {
+          FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+        }
+        let blockedLeftovers = Set(
+          appLeftovers.filter {
+            FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
+              || FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+          }.map(\.id))
+        appLeftovers.removeAll { blockedLeftovers.contains($0.id) }
+        selectedLeftoverIDs.subtract(blockedLeftovers)
         statusMessage = "Added \(url.lastPathComponent) to exclusions"
       } catch {
         statusMessage = "Could not save exclusion: \(error.localizedDescription)"
@@ -586,6 +644,15 @@ final class AppViewModel: ObservableObject {
 
   func openSystemSettings() {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+  }
+
+  private func record(_ entry: HistoryEntry) async {
+    do {
+      try await historyStore.append(entry)
+    } catch {
+      statusMessage = "Could not save history: \(error.localizedDescription)"
+    }
+    history = await historyStore.load()
   }
 
   private func runningInstances(of app: AppRecord) -> [NSRunningApplication] {
