@@ -17,6 +17,8 @@ jobs:
         run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+      - name: Launch smoke test
+        run: ./scripts/smoke_test.sh dist/MacMint.app
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:

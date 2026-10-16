@@ -11,6 +11,10 @@ struct MacCleanerDesktopApp: App {
   @StateObject private var appUpdates = AppUpdatesStore()
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
 
+  init() {
+    if SmokeTest.isRequested { SmokeTest.run() }
+  }
+
   var body: some Scene {
     WindowGroup("MacMint", id: "main") {
       AccountGateView()
