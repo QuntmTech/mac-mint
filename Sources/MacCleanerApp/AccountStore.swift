@@ -47,6 +47,8 @@ final class AccountStore: ObservableObject {
   private(set) var token: String?
   private let now: @Sendable () -> Date
   private let tokenStorage: AccountTokenStorage
+  private var sessionGeneration = UUID()
+  private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
 
   init(supportDirectory: URL, client: AccountClient = AccountClient(),
@@ -73,6 +75,7 @@ final class AccountStore: ObservableObject {
       phase = .signedOut
       return
     }
+    sessionGeneration = UUID()
     token = stored
     phase = .checking
     await verify(refreshToken: true, quiet: false)
@@ -88,7 +91,7 @@ final class AccountStore: ObservableObject {
   /// Foregrounding also enforces expiry and remote deactivation after a sleeping Mac wakes.
   func refreshAccess() async {
     guard token != nil, !isBusy else { return }
-    await verify(refreshToken: true, quiet: true)
+    await verify(refreshToken: false, quiet: true)
   }
 
   // MARK: Auth
@@ -162,6 +165,7 @@ final class AccountStore: ObservableObject {
   // MARK: Internals
 
   private func adopt(_ session: AuthSession) async throws {
+    sessionGeneration = UUID()
     token = session.token
     tokenStorage.save(session.token)
     try await activate(token: session.token)
@@ -191,6 +195,10 @@ final class AccountStore: ObservableObject {
 
   /// `quiet` re-checks keep an unlocked app usable through transient network failures.
   private func verify(refreshToken: Bool, quiet: Bool) async {
+    guard !isVerifying else { return }
+    isVerifying = true
+    defer { isVerifying = false }
+    let generation = sessionGeneration
     guard let current = token else {
       phase = .signedOut
       return
@@ -199,12 +207,14 @@ final class AccountStore: ObservableObject {
       var active = current
       if refreshToken {
         let session = try await client.refresh(token: current)
+        guard generation == sessionGeneration else { return }
         active = session.token
         token = active
         tokenStorage.save(active)
       }
       // Verification must not silently reactivate a device removed through the portal.
       let result = try await client.me(token: active)
+      guard generation == sessionGeneration else { return }
       guard result.entitlement.active else {
         snapshot = result
         clearCache()
@@ -218,8 +228,10 @@ final class AccountStore: ObservableObject {
       }
       apply(result)
     } catch let error as AccountAPIError {
+      guard generation == sessionGeneration else { return }
       handle(error, quiet: quiet)
     } catch {
+      guard generation == sessionGeneration else { return }
       handle(
         AccountAPIError(status: 0, code: "network", message: error.localizedDescription),
         quiet: quiet)
@@ -261,6 +273,7 @@ final class AccountStore: ObservableObject {
   }
 
   private func signOutLocally(message: String?) {
+    sessionGeneration = UUID()
     recheckTask?.cancel()
     recheckTask = nil
     tokenStorage.delete()

@@ -27,7 +27,7 @@ All signing and notarization secrets must be present to publish a consumer relea
 
 ## Verifying a build locally
 
-Every macOS CI run executes the 146 portable core tests and six native integration tests. The native tests move only their own temporary fixtures through the actual macOS Trash and check receipt identity, name collisions, History commits, no-overwrite restore, alternate destinations and dangling symlinks. Account lifecycle tests use an isolated token store and clock. No test empties Trash or uses a real account.
+Every macOS CI run executes the 146 portable core tests and seven native integration tests. The native tests move only their own temporary fixtures through the actual macOS Trash and check receipt identity, name collisions, History commits, no-overwrite restore, alternate destinations and dangling symlinks. Account lifecycle tests use an isolated token store and clock. No test empties Trash or uses a real account.
 
 CI also downloads the uploaded ZIP on a fresh runner, checks its SHA-256, extracts it, verifies its signature and launches its smoke tests. An ad-hoc artifact passing this check is still not a notarized consumer installation. Test the actual Developer ID-signed download with quarantine and Gatekeeper before publishing feed attestations.
 

@@ -49,6 +49,30 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertFalse(store.isUnlocked)
     XCTAssertNil(tokens.value)
   }
+
+  func testLateVerificationCannotRestoreAccessAfterSignOut() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.holdNextVerification()
+    let checking = Task { await store.refreshAccess() }
+    for _ in 0..<100 {
+      if await fixture.isPaused { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    let paused = await fixture.isPaused
+    XCTAssertTrue(paused)
+    await store.signOut()
+    await fixture.resumeVerification()
+    await checking.value
+    XCTAssertEqual(store.phase, .signedOut)
+    XCTAssertNil(tokens.value)
+    XCTAssertFalse(store.isUnlocked)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("account.json").path))
+  }
 }
 
 @MainActor
@@ -70,11 +94,20 @@ private actor AccountFixture {
   var offline = false
   var removed = false
   var activations = 0
+  private var shouldPause = false
+  private var pending: CheckedContinuation<Void, Never>?
+  var isPaused: Bool { pending != nil }
   func goOffline() { offline = true }
   func removeDevice() { removed = true }
-  func respond(_ request: URLRequest) throws -> (Data, URLResponse) {
+  func holdNextVerification() { shouldPause = true }
+  func resumeVerification() { pending?.resume(); pending = nil }
+  func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
     if offline { throw URLError(.notConnectedToInternet) }
     let path = request.url!.path
+    if path.hasSuffix("/me"), shouldPause {
+      shouldPause = false
+      await withCheckedContinuation { pending = $0 }
+    }
     var body: [String: Any] = [:]
     if path.hasSuffix("auth-with-password") || path.hasSuffix("auth-refresh") {
       body = ["token": "fixture-token", "record": ["id": "fixture", "email": "fixture@example.invalid", "verified": true]]
