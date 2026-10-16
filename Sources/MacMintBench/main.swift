@@ -152,6 +152,17 @@ func buildFixture(root: URL, items: Int) {
   }
   created += 18
 
+  // Real project metadata and rebuildable dependency trees exercise Developer inventory,
+  // rather than timing only an empty search through source files.
+  for project in 0..<50 {
+    let root = home.appendingPathComponent("Documents/Projects/p\(project)")
+    write(root.appendingPathComponent("package.json"), Data("{\"name\":\"benchmark-project\"}".utf8))
+    for file in 0..<50 {
+      write(root.appendingPathComponent("node_modules/pkg\(file % 5)/file\(file).js"), smallFile(project * 1000 + file, size: 4096))
+    }
+  }
+  created += 50 * 51
+
   // Nested project files for the remainder
   let remaining = max(0, items - created)
   for i in 0..<remaining {
