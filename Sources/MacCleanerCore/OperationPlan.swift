@@ -21,6 +21,44 @@ public enum PlanItemKind: Codable, Hashable, Sendable {
   }
 }
 
+/// Size and modification time of a file when it was scanned; a mismatch means it was edited.
+public struct FileSnapshot: Codable, Hashable, Sendable {
+  /// Logical size in bytes; nil when only the modification time was recorded.
+  public let size: Int64?
+  public let modified: Date?
+
+  public init(size: Int64?, modified: Date?) {
+    self.size = size
+    self.modified = modified
+  }
+
+  /// Snapshot of a regular file right now (logical size), or nil for folders.
+  public static func current(_ url: URL) -> FileSnapshot? {
+    guard let meta = FileSystem.logicalFileMetadata(at: url) else { return nil }
+    return FileSnapshot(size: meta.size, modified: meta.modified)
+  }
+
+  func matches(_ other: FileSnapshot) -> Bool {
+    if let size, let otherSize = other.size, size != otherSize { return false }
+    guard let modified, let otherModified = other.modified else { return true }
+    return abs(modified.timeIntervalSince(otherModified)) < 0.001
+  }
+}
+
+/// The copy that stays when a duplicate is removed. It must still exist, unchanged, and must
+/// not be removed by the same plan.
+public struct KeeperSnapshot: Codable, Hashable, Sendable {
+  public let path: String
+  public let identity: String?
+  public let snapshot: FileSnapshot?
+
+  public init(path: String, identity: String?, snapshot: FileSnapshot?) {
+    self.path = path
+    self.identity = identity
+    self.snapshot = snapshot
+  }
+}
+
 /// One item the user has chosen to move to Trash, with the evidence used to re-check it later.
 public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
   public let id: UUID
@@ -39,13 +77,20 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
   public let identity: String?
   /// App whose data this is; the item is skipped while that app is running.
   public let ownerBundleID: String?
+  /// For files: size + modification time at scan time.
+  public let snapshot: FileSnapshot?
+  /// For duplicate copies: the copy that must survive.
+  public let keeper: KeeperSnapshot?
 
   public init(
     id: UUID = UUID(), url: URL, displayName: String, kind: PlanItemKind, expectedBytes: Int64,
     reason: String, source: String, needsAttention: Bool = false, dependsOn: UUID? = nil,
-    identity: String? = nil, ownerBundleID: String? = nil
+    identity: String? = nil, ownerBundleID: String? = nil, snapshot: FileSnapshot? = nil,
+    keeper: KeeperSnapshot? = nil
   ) {
     self.ownerBundleID = ownerBundleID
+    self.snapshot = snapshot
+    self.keeper = keeper
     self.id = id
     self.url = url
     self.displayName = displayName
@@ -64,17 +109,24 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
       kind: .cleanupTarget(category: target.category, risk: target.risk),
       expectedBytes: target.size, reason: target.reason, source: source,
       needsAttention: target.risk != .safe,
-      identity: FileSystem.fileIdentity(at: target.url), ownerBundleID: target.ownerBundleID)
+      identity: target.identity, ownerBundleID: target.ownerBundleID)
   }
 
-  public static func duplicate(_ file: LargeFile, keeper: URL?) -> PlanItem {
+  /// `keeper` is the copy that stays; its scan-time state is recorded so the executor can
+  /// refuse to remove this copy if the keeper is gone, changed, or also being removed.
+  public static func duplicate(_ file: LargeFile, keeper: LargeFile?) -> PlanItem {
     PlanItem(
       url: file.url, displayName: file.url.lastPathComponent, kind: .duplicateCopy,
       expectedBytes: file.size,
-      reason: keeper.map { "Identical to \($0.lastPathComponent), which is kept." }
+      reason: keeper.map { "Identical to \($0.url.lastPathComponent), which is kept." }
         ?? "Exact duplicate; another copy is kept.",
-      source: "Duplicates", needsAttention: true,
-      identity: file.identity ?? FileSystem.fileIdentity(at: file.url))
+      source: "Duplicates", needsAttention: true, identity: file.identity,
+      snapshot: FileSnapshot(size: file.size, modified: file.modifiedAt),
+      keeper: keeper.map {
+        KeeperSnapshot(
+          path: $0.url.standardizedFileURL.path, identity: $0.identity,
+          snapshot: FileSnapshot(size: $0.size, modified: $0.modifiedAt))
+      })
   }
 
   public static func developer(_ item: DevStorageItem) -> PlanItem? {
@@ -83,14 +135,16 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
       url: url, displayName: "\(item.tool): \(item.title)", kind: .developerArtifact,
       expectedBytes: item.bytes, reason: item.rebuild.explanation, source: item.group.rawValue,
       needsAttention: item.rebuild == .review || item.isActive,
-      identity: FileSystem.fileIdentity(at: url))
+      identity: item.identity, ownerBundleID: item.ownerBundleID)
   }
 
   public static func largeFile(_ file: LargeFile) -> PlanItem {
     PlanItem(
       url: file.url, displayName: file.url.lastPathComponent, kind: .reviewedFile,
       expectedBytes: file.size, reason: "Large file you chose to remove.", source: "Large Files",
-      needsAttention: true, identity: file.identity ?? FileSystem.fileIdentity(at: file.url))
+      needsAttention: true, identity: file.identity,
+      // Large-file sizes are allocated bytes, so only the modification time is compared.
+      snapshot: FileSnapshot(size: nil, modified: file.modifiedAt))
   }
 }
 
@@ -165,7 +219,21 @@ public enum OperationPlanner {
       }
     }
     // Keep the caller's order (it reflects dependencies such as app before its data).
-    let kept = eligible.filter { keptIDs.contains($0.id) }
+    var kept = eligible.filter { keptIDs.contains($0.id) }
+
+    // A duplicate may only go if the copy being kept is not removed by this same plan
+    // (selected directly, or inside a selected folder, from any screen).
+    kept.removeAll { item in
+      guard let keeper = item.keeper?.path else { return false }
+      let threatened = keptPaths.contains { keeper == $0 || keeper.hasPrefix($0 + "/") }
+      if threatened {
+        rejected.append(
+          OperationFailure(
+            url: item.url,
+            message: "The copy you're keeping (\(URL(fileURLWithPath: keeper).lastPathComponent)) is also selected for removal."))
+      }
+      return threatened
+    }
     return OperationPlan(title: title, items: kept, covered: covered, excluded: rejected)
   }
 }

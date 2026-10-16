@@ -93,12 +93,27 @@ extension AppViewModel {
 }
 
 extension PlanItem {
+  /// Folders kept in sync with other devices: removing an item here removes it everywhere.
+  private static let syncRoots = [
+    "Dropbox", "Google Drive", "OneDrive", "Box", "Library/CloudStorage", "Library/Mobile Documents",
+  ].map { FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent($0).path.lowercased() }
+
+  static func isSynced(_ url: URL) -> Bool {
+    let path = url.standardizedFileURL.path.lowercased()
+    return syncRoots.contains { path.hasPrefix($0 + "/") }
+      || path.contains("/onedrive - ")  // "OneDrive - Company" folders
+  }
+
   static func storage(_ node: StorageNode) -> PlanItem {
-    PlanItem(
+    let base = node.kind == .file
+      ? "File you chose in Storage."
+      : "Folder you chose in Storage (\(node.itemCount.formatted()) items)."
+    return PlanItem(
       url: node.url, displayName: node.name, kind: .reviewedFile, expectedBytes: node.allocatedBytes,
-      reason: node.kind == .file
-        ? "File you chose in Storage."
-        : "Folder you chose in Storage (\(node.itemCount.formatted()) items).",
-      source: "Storage", needsAttention: true, identity: FileSystem.fileIdentity(at: node.url))
+      reason: isSynced(node.url)
+        ? "Synced folder — moving it to the Trash also removes it from your other devices."
+        : base,
+      source: "Storage", needsAttention: true, identity: node.identity,
+      snapshot: node.kind == .file ? FileSnapshot(size: node.logicalBytes, modified: node.modified) : nil)
   }
 }

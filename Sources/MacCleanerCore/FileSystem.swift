@@ -84,6 +84,7 @@ public enum FileSystem {
   /// Allocated size of a file or folder, including package contents, with unreadable
   /// descendants counted instead of silently treated as empty.
   public static func measure(at url: URL, fileManager: FileManager = .default) -> SizeMeasurement {
+    let url = fresh(url)
     let values: URLResourceValues
     do {
       values = try url.resourceValues(forKeys: resourceKeys)
@@ -138,10 +139,14 @@ public enum FileSystem {
     measure(at: url, fileManager: fileManager).bytes
   }
 
+  /// A URL with no cached resource values. Foundation caches values per URL instance on macOS,
+  /// so safety re-checks must never reuse the URL object captured at scan time.
+  public static func fresh(_ url: URL) -> URL { URL(fileURLWithPath: url.path) }
+
   /// Allocated bytes, useful for storage-reclamation estimates.
   public static func fileMetadata(at url: URL) -> (size: Int64, modified: Date?, accessed: Date?)? {
     do {
-      let values = try url.resourceValues(forKeys: resourceKeys)
+      let values = try fresh(url).resourceValues(forKeys: resourceKeys)
       guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
       return (
         Int64(values.totalFileAllocatedSize ?? values.fileSize ?? 0),
@@ -158,7 +163,7 @@ public enum FileSystem {
     size: Int64, modified: Date?, accessed: Date?
   )? {
     do {
-      let values = try url.resourceValues(forKeys: resourceKeys)
+      let values = try fresh(url).resourceValues(forKeys: resourceKeys)
       guard values.isRegularFile == true, values.isSymbolicLink != true else { return nil }
       return (
         Int64(values.fileSize ?? 0),

@@ -1,42 +1,63 @@
 import Foundation
 
+/// The write gate for every removal. Paths are compared in canonical form: parent symlinks are
+/// resolved (so a symlinked folder can't smuggle a protected location in) and comparisons ignore
+/// case, matching APFS's default case-insensitive behaviour.
 public struct SafetyPolicy: Sendable {
   public let homeDirectory: URL
+  private let home: String
 
   public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
     self.homeDirectory = homeDirectory.standardizedFileURL
+    self.home = Self.canonicalPath(of: homeDirectory.standardizedFileURL.resolvingSymlinksInPath())
   }
 
+  // MARK: Canonical paths
+
+  /// Standardized path with every parent symlink resolved (the item itself is not followed),
+  /// lowercased for case-insensitive comparison.
+  static func canonicalPath(of url: URL) -> String {
+    let standardized = url.standardizedFileURL
+    let parent = standardized.deletingLastPathComponent().resolvingSymlinksInPath()
+    let path = standardized.path == "/" ? "/" : parent.appendingPathComponent(standardized.lastPathComponent).path
+    return path.lowercased()
+  }
+
+  private func canonical(_ url: URL) -> String { Self.canonicalPath(of: url) }
+
+  private func homePath(_ relative: String) -> String {
+    (home + "/" + relative).lowercased()
+  }
+
+  private func inside(_ path: String, _ root: String, strict: Bool = false) -> Bool {
+    (!strict && path == root) || path.hasPrefix(root + "/")
+  }
+
+  private func inside(_ path: String, roots: [String], strict: Bool = false) -> Bool {
+    roots.contains { inside(path, $0, strict: strict) }
+  }
+
+  private var isUnderHomeCheck: (String) -> Bool { { [home] in $0.hasPrefix(home + "/") } }
+
+  // MARK: Decisions
+
   /// Baseline automatic-cleanup policy: only user-owned paths below the home directory,
-  /// never system-owned paths, personal content roots, or symbolic links.
+  /// never system-owned paths, personal content roots, the Trash, or symbolic links.
   public func deletionDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let candidate = url.standardizedFileURL
-    let path = candidate.path
-    let home = homeDirectory.path
-
-    if isSystemOwned(candidate) {
-      return (false, "System-owned location is protected by the app.")
-    }
-
-    let personal = ["Desktop", "Documents", "Pictures", "Movies", "Music"]
-      .map { homeDirectory.appendingPathComponent($0).standardizedFileURL.path }
-    if personal.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+    let path = canonical(url)
+    if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
+    if inside(path, roots: personalRoots()) {
       return (false, "Personal-content folders are never automatic-cleanup targets.")
     }
-
-    guard path != home, path.hasPrefix(home + "/") else {
+    guard isUnderHomeCheck(path) else {
       return (false, "Automatic cleanup is limited to user-owned paths below the home folder.")
     }
-
-    if isSymlink(candidate) {
-      return (false, "Symbolic links are not automatic-cleanup targets.")
-    }
-
+    if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
+    if isSymlink(url) { return (false, "Symbolic links are not automatic-cleanup targets.") }
     return (true, "User-owned path passes the baseline automatic-cleanup policy.")
   }
 
-  /// Stronger policy used by CleanupEngine. A target must pass the baseline policy AND
-  /// belong to an allowlisted location appropriate for its cleanup category.
+  /// A target must pass the baseline policy AND sit in a location appropriate for its category.
   public func cleanupTargetDecision(for target: CleanupTarget) -> (allowed: Bool, reason: String) {
     cleanupDecision(for: target.url, category: target.category)
   }
@@ -46,56 +67,25 @@ public struct SafetyPolicy: Sendable {
   ) {
     let baseline = deletionDecision(for: url)
     guard baseline.allowed else { return baseline }
-
-    let candidate = url.standardizedFileURL
+    let path = canonical(url)
     let allowed: Bool
 
     switch category {
-    case .userCaches:
-      allowed = isInside(candidate, roots: [homeDirectory.appendingPathComponent("Library/Caches")])
-
+    case .userCaches, .browserCaches:
+      // Items inside Caches, never the Caches folder itself.
+      allowed = inside(path, homePath("Library/Caches"), strict: true)
     case .userLogs:
-      allowed = isInside(candidate, roots: [homeDirectory.appendingPathComponent("Library/Logs")])
-
-    case .browserCaches:
-      allowed = isInside(candidate, roots: [homeDirectory.appendingPathComponent("Library/Caches")])
-
+      allowed = inside(path, homePath("Library/Logs"), strict: true)
     case .developerJunk:
-      allowed = isInside(
-        candidate,
-        roots: [
-          homeDirectory.appendingPathComponent("Library/Developer/Xcode/DerivedData"),
-          homeDirectory.appendingPathComponent("Library/Developer/Xcode/Archives"),
-          homeDirectory.appendingPathComponent("Library/Developer/Xcode/iOS DeviceSupport"),
-          homeDirectory.appendingPathComponent("Library/Developer/CoreSimulator/Caches"),
-          homeDirectory.appendingPathComponent(".npm/_cacache"),
-          homeDirectory.appendingPathComponent(".gradle/caches"),
-          homeDirectory.appendingPathComponent("Library/Caches/Homebrew"),
-          homeDirectory.appendingPathComponent("Library/Caches/pip"),
-          homeDirectory.appendingPathComponent("Library/Caches/CocoaPods"),
-          homeDirectory.appendingPathComponent("Library/Caches/Yarn"),
-          homeDirectory.appendingPathComponent("Library/Caches/org.swift.swiftpm"),
-        ])
-
+      allowed = inside(path, roots: catalogDeveloperRoots())
     case .deviceBackups:
-      allowed = isInside(
-        candidate,
-        roots: [
-          homeDirectory.appendingPathComponent("Library/Application Support/MobileSync/Backup")
-        ])
-
+      allowed = inside(path, homePath("Library/Application Support/MobileSync/Backup"), strict: true)
     case .diagnostics:
-      allowed = isInside(
-        candidate,
-        roots: [
-          homeDirectory.appendingPathComponent("Library/Logs/DiagnosticReports")
-        ])
-
+      allowed = inside(path, homePath("Library/Logs/DiagnosticReports"))
     case .appLeftovers:
-      allowed = isInside(candidate, roots: appLeftoverRoots())
-
+      allowed = inside(path, roots: appLeftoverRoots(), strict: true) && !isAppleData(url)
     case .installers:
-      allowed = isReviewedInstaller(candidate)
+      allowed = isReviewedInstaller(url, path: path)
     }
 
     return allowed
@@ -103,33 +93,101 @@ public struct SafetyPolicy: Sendable {
       : (false, "Target is outside the allowlisted location for \(category.rawValue).")
   }
 
-  /// Developer and AI storage: known tool caches, or build-output folders inside projects
-  /// (projects may live under Documents, so the personal-folder block does not apply here).
+  /// Developer and AI storage: known tool caches, or a build-output folder that sits next to
+  /// its tool's marker file (projects may live under Documents, so that block doesn't apply).
   public func developerArtifactDecision(for url: URL, extraRoots: [URL] = []) -> (
     allowed: Bool, reason: String
   ) {
-    let candidate = url.standardizedFileURL
-    let path = candidate.path
-    let home = homeDirectory.path
-    if isSystemOwned(candidate) { return (false, "System-owned location is protected by the app.") }
-    guard path != home, path.hasPrefix(home + "/") else {
+    let path = canonical(url)
+    if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
+    guard isUnderHomeCheck(path) else {
       return (false, "Developer cleanup is limited to your home folder.")
     }
-    if isSymlink(candidate) { return (false, "Symbolic links are not removed.") }
-    if isInside(candidate, roots: developerRoots() + extraRoots) {
+    if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
+    if isSymlink(url) { return (false, "Symbolic links are not removed.") }
+    let extra = DeveloperStorageScanner.validatedRoots(extraRoots, home: homeDirectory).map(canonical)
+    if inside(path, roots: developerRoots() + extra) {
       return (true, "Inside a known developer or AI cache.")
     }
-    let library = homeDirectory.appendingPathComponent("Library").standardizedFileURL.path
-    let parent = candidate.deletingLastPathComponent().path
-    if !path.hasPrefix(library + "/"), parent != home,
-      DeveloperStorageScanner.projectArtifactNames.contains(candidate.lastPathComponent)
+    let parent = (path as NSString).deletingLastPathComponent
+    if !inside(path, homePath("Library")), parent != home,
+      DeveloperStorageScanner.isProjectArtifact(url)
     {
-      return (true, "Build output folder inside a project.")
+      return (true, "Build output folder next to its project file.")
     }
-    return (false, "Not a recognised developer cache or build folder.")
+    return (false, "Not a recognised developer cache or a build folder inside a project.")
   }
 
-  private func developerRoots() -> [URL] {
+  /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
+  public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    let path = canonical(url)
+    guard url.pathExtension.lowercased() == "app" else {
+      return (false, "Only application bundles can be uninstalled.")
+    }
+    guard inside(path, "/applications", strict: true) || inside(path, homePath("Applications"), strict: true)
+    else {
+      return (false, "This application path is not eligible for uninstall.")
+    }
+    if isSymlink(url) { return (false, "Symbolic links are not uninstalled.") }
+    return (true, "Application bundle is in an Applications folder.")
+  }
+
+  /// Explicit-review policy used by Large Files, Duplicates, and Storage. It permits personal
+  /// files, but still blocks system/support data, the Trash, and symlinks.
+  public func reviewedFileDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    let path = canonical(url)
+    if isSystemOwned(path) {
+      return (false, "System-owned locations cannot be removed from review tools.")
+    }
+    if inside(path, homePath("Library")) {
+      return (
+        false,
+        "~/Library is managed by dedicated cleanup and uninstaller modules, not generic file removal."
+      )
+    }
+    guard isUnderHomeCheck(path) else {
+      return (false, "Reviewed file removal is limited to files inside your home folder.")
+    }
+    if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
+    if isSymlink(url) { return (false, "Symbolic links are not removed by the review tools.") }
+    return (true, "Explicitly reviewed user file passes the safety policy.")
+  }
+
+  public func appLeftoverDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    let baseline = deletionDecision(for: url)
+    guard baseline.allowed else { return baseline }
+    guard inside(canonical(url), roots: appLeftoverRoots(), strict: true) else {
+      return (false, "App leftovers are limited to items inside known user Library locations.")
+    }
+    if isAppleData(url) { return (false, "macOS's own data is never removed as app leftovers.") }
+    return (true, "Related app data is inside an allowlisted user Library location.")
+  }
+
+  public func isKnownSafeCleanupPath(_ url: URL) -> Bool {
+    inside(
+      canonical(url),
+      roots: [
+        "Library/Caches", "Library/Logs", "Library/Developer/Xcode/DerivedData",
+        "Library/Developer/CoreSimulator/Caches", ".npm/_cacache", "Library/Caches/Homebrew",
+      ].map(homePath))
+  }
+
+  // MARK: Rules
+
+  private func personalRoots() -> [String] {
+    ["Desktop", "Documents", "Pictures", "Movies", "Music"].map(homePath)
+  }
+
+  private func catalogDeveloperRoots() -> [String] {
+    [
+      "Library/Developer/Xcode/DerivedData", "Library/Developer/Xcode/Archives",
+      "Library/Developer/Xcode/iOS DeviceSupport", "Library/Developer/CoreSimulator/Caches",
+      ".npm/_cacache", ".gradle/caches", "Library/Caches/Homebrew", "Library/Caches/pip",
+      "Library/Caches/CocoaPods", "Library/Caches/Yarn", "Library/Caches/org.swift.swiftpm",
+    ].map(homePath)
+  }
+
+  private func developerRoots() -> [String] {
     [
       "Library/Developer/Xcode/DerivedData", "Library/Developer/Xcode/Archives",
       "Library/Developer/Xcode/iOS DeviceSupport", "Library/Developer/Xcode/watchOS DeviceSupport",
@@ -139,113 +197,46 @@ public struct SafetyPolicy: Sendable {
       "Library/Caches/CocoaPods", "Library/Caches/org.swift.swiftpm", ".bun/install/cache",
       ".gradle/caches", ".m2/repository", ".cargo/registry/cache", ".lmstudio/models",
       ".cache/lm-studio/models", ".cache/huggingface/hub",
-    ].map { homeDirectory.appendingPathComponent($0) }
+    ].map(homePath)
   }
 
-  /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
-  public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let candidate = url.standardizedFileURL
-    let path = candidate.path
-    let homeApps = homeDirectory.appendingPathComponent("Applications").standardizedFileURL.path
-    guard candidate.pathExtension.lowercased() == "app" else {
-      return (false, "Only application bundles can be uninstalled.")
-    }
-    guard path.hasPrefix("/Applications/") || path.hasPrefix(homeApps + "/") else {
-      return (false, "This application path is not eligible for uninstall.")
-    }
-    if isSymlink(candidate) { return (false, "Symbolic links are not uninstalled.") }
-    return (true, "Application bundle is in an Applications folder.")
-  }
-
-  /// Explicit-review policy used by Large Files and Duplicates. It permits personal files,
-  /// but still blocks system/support data and symlinks.
-  public func reviewedFileDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let candidate = url.standardizedFileURL
-    let path = candidate.path
-    let home = homeDirectory.path
-
-    if isSystemOwned(candidate) {
-      return (false, "System-owned locations cannot be removed from review tools.")
-    }
-
-    let userLibrary = homeDirectory.appendingPathComponent("Library").standardizedFileURL.path
-    if path == userLibrary || path.hasPrefix(userLibrary + "/") {
-      return (
-        false,
-        "~/Library is managed by dedicated cleanup and uninstaller modules, not generic file removal."
-      )
-    }
-
-    guard path != home, path.hasPrefix(home + "/") else {
-      return (false, "Reviewed file removal is limited to files inside your home folder.")
-    }
-
-    if isSymlink(candidate) {
-      return (false, "Symbolic links are not removed by the review tools.")
-    }
-
-    return (true, "Explicitly reviewed user file passes the safety policy.")
-  }
-
-  public func appLeftoverDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let baseline = deletionDecision(for: url)
-    guard baseline.allowed else { return baseline }
-    guard isInside(url.standardizedFileURL, roots: appLeftoverRoots()) else {
-      return (false, "App leftovers are limited to known user Library support locations.")
-    }
-    return (true, "Related app data is inside an allowlisted user Library location.")
-  }
-
-  public func isKnownSafeCleanupPath(_ url: URL) -> Bool {
-    let roots = [
-      homeDirectory.appendingPathComponent("Library/Caches"),
-      homeDirectory.appendingPathComponent("Library/Logs"),
-      homeDirectory.appendingPathComponent("Library/Developer/Xcode/DerivedData"),
-      homeDirectory.appendingPathComponent("Library/Developer/CoreSimulator/Caches"),
-      homeDirectory.appendingPathComponent(".npm/_cacache"),
-      homeDirectory.appendingPathComponent("Library/Caches/Homebrew"),
-    ]
-    return isInside(url.standardizedFileURL, roots: roots)
-  }
-
-  private func appLeftoverRoots() -> [URL] {
+  private func appLeftoverRoots() -> [String] {
     [
-      "Library/Application Support",
-      "Library/Application Scripts",
-      "Library/Caches",
-      "Library/Preferences",
-      "Library/Logs",
-      "Library/Saved Application State",
-      "Library/WebKit",
-      "Library/Containers",
-      "Library/Group Containers",
-      "Library/HTTPStorages",
-      "Library/Cookies",
+      "Library/Application Support", "Library/Application Scripts", "Library/Caches",
+      "Library/Preferences", "Library/Logs", "Library/Saved Application State", "Library/WebKit",
+      "Library/Containers", "Library/Group Containers", "Library/HTTPStorages", "Library/Cookies",
       "Library/LaunchAgents",
-    ].map { homeDirectory.appendingPathComponent($0) }
+    ].map(homePath)
   }
 
-  private func isReviewedInstaller(_ url: URL) -> Bool {
-    let downloads = homeDirectory.appendingPathComponent("Downloads")
-    guard FileSystem.path(url, isInsideOrEqual: downloads),
-      url.standardizedFileURL != downloads.standardizedFileURL
-    else {
-      return false
-    }
+  /// Apple's own per-app data (com.apple.*, group.com.apple.*, <TEAM>.com.apple.*).
+  private func isAppleData(_ url: URL) -> Bool {
+    let name = url.lastPathComponent.lowercased()
+    return name.hasPrefix("com.apple.") || name.hasPrefix("group.com.apple.")
+      || name.range(of: #"^[a-z0-9]{10}\.com\.apple\."#, options: .regularExpression) != nil
+  }
+
+  private func isReviewedInstaller(_ url: URL, path: String) -> Bool {
+    guard inside(path, homePath("Downloads"), strict: true) else { return false }
     return ["dmg", "pkg", "iso", "zip", "xip"].contains(url.pathExtension.lowercased())
   }
 
-  private func isInside(_ candidate: URL, roots: [URL]) -> Bool {
-    roots.contains { root in FileSystem.path(candidate, isInsideOrEqual: root.standardizedFileURL) }
+  private func isTrash(_ path: String) -> Bool {
+    inside(path, homePath(".Trash")) || path.contains("/.trashes/")
   }
 
-  private func isSystemOwned(_ url: URL) -> Bool {
-    let path = url.path
-    let hardBlocked = ["/System", "/bin", "/sbin", "/usr", "/private", "/Library"]
-    return hardBlocked.contains(where: { path == $0 || path.hasPrefix($0 + "/") })
+  /// System locations are blocked even when reached through a symlink. The home folder is
+  /// exempt so a home that itself lives under /private/var (test fixtures) still works.
+  private func isSystemOwned(_ path: String) -> Bool {
+    if path == home || path.hasPrefix(home + "/") { return false }
+    let blocked = [
+      "/system", "/bin", "/sbin", "/usr", "/private", "/library", "/etc", "/var", "/tmp", "/opt",
+      "/cores", "/dev",
+    ]
+    return blocked.contains { inside(path, $0) } || path == "/"
   }
 
   private func isSymlink(_ url: URL) -> Bool {
-    (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    (try? FileSystem.fresh(url).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
   }
 }

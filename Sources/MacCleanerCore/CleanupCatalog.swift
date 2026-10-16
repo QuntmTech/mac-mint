@@ -145,7 +145,8 @@ public struct CleanupCatalog: Sendable {
       .init(
         category: .deviceBackups, name: "iPhone & iPad backups",
         url: h.appendingPathComponent("Library/Application Support/MobileSync/Backup"),
-        risk: .review, reason: "Local device backups may be valuable. Review before removal."),
+        risk: .review, reason: "Local device backups may be valuable. Review before removal.",
+        expandChildren: true),
 
       .init(
         category: .installers, name: "Downloads installers",

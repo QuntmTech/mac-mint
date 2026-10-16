@@ -75,10 +75,14 @@ final class DeveloperStorageTests: XCTestCase {
     XCTAssertTrue(item.canTrash)
   }
 
-  func testDeveloperSafetyRule() {
-    let home = URL(fileURLWithPath: "/Users/dev")
+  func testDeveloperSafetyRule() throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
     let policy = SafetyPolicy(homeDirectory: home)
     let allow: (String) -> Bool = { policy.developerArtifactDecision(for: home.appendingPathComponent($0)).allowed }
+    try write(home, "Documents/Projects/site/package.json", 10)
+    try write(home, "Documents/Projects/site/node_modules/x.js")
+    try write(home, "node_modules/x.js")
 
     XCTAssertTrue(allow("Library/Developer/Xcode/DerivedData/App-1"))
     XCTAssertTrue(allow(".cache/huggingface/hub/models--a--b"))
@@ -87,6 +91,7 @@ final class DeveloperStorageTests: XCTestCase {
     XCTAssertFalse(allow("Documents/Projects/site"), "the project itself is never a target")
     XCTAssertFalse(allow("Library/Application Support/target"), "Library needs a known cache root")
     XCTAssertFalse(policy.developerArtifactDecision(for: URL(fileURLWithPath: "/usr/local/node_modules")).allowed)
+    _ = home
   }
 
   func testExecutorMovesDeveloperArtifactThroughItsRule() async throws {

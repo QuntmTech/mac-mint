@@ -61,7 +61,8 @@ public actor CleanupScanner {
             risk: rule.risk,
             reason: rule.reason,
             isSelected: rule.risk == .safe,
-            ownerBundleID: rule.ownerBundleID
+            ownerBundleID: rule.ownerBundleID,
+            identity: FileSystem.fileIdentity(at: piece)
           ))
       }
     }
@@ -106,7 +107,8 @@ public actor CleanupScanner {
               risk: rule.risk,
               reason: rule.reason,
               isSelected: rule.risk == .safe,
-              ownerBundleID: rule.ownerBundleID
+              ownerBundleID: rule.ownerBundleID,
+              identity: FileSystem.fileIdentity(at: piece)
             ))
         }
       }
@@ -152,7 +154,8 @@ public actor CleanupScanner {
           size: size,
           risk: .review,
           reason: "Likely one-time-use installer or archive in Downloads.",
-          isSelected: false
+          isSelected: false,
+          identity: FileSystem.fileIdentity(at: url)
         )
       }
       return (items, [])
