@@ -93,7 +93,11 @@ public actor OrganizationStore {
     let root = root.resolvingSymlinksInPath().standardizedFileURL
     try validateRoot(root)
     guard !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) else { throw OrganizationError("This folder is excluded from inspection.") }
-    guard let children = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants, .skipsPackageDescendants]) else { throw OrganizationError("This folder could not be inspected.") }
+    let failures = IssueCollector()
+    guard let children = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants, .skipsPackageDescendants], errorHandler: { url, _ in
+      failures.append(ScanIssue(area: "Organization", path: url.path, message: "A location could not be inspected."))
+      return false
+    }) else { throw OrganizationError("This folder could not be inspected.") }
     guard let identity = FileSystem.fileIdentity(at: root) else { throw OrganizationError("The selected folder could not be identified.") }
     var files: [OrganizationFile] = [], folders = [OrganizationFolder(id: "root", name: "This folder", identity: identity)], omitted = 0
     // Enumeration is shallow. Even directories with millions of descendants are never traversed.
@@ -113,6 +117,7 @@ public actor OrganizationStore {
           bytes: Int64(values.fileSize ?? 0), modified: modified))
       } else { omitted += 1 }
     }
+    guard failures.issues.isEmpty else { throw OrganizationError("Folder access failed. Check permissions and choose the folder again; an unreadable folder is not an empty inventory.") }
     return OrganizationInventory(id: UUID(), root: root.standardizedFileURL, rootIdentity: identity,
       files: files, folders: folders, omitted: omitted, wasLimited: limited)
   }

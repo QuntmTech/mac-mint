@@ -84,6 +84,15 @@ final class OrganizationTests: XCTestCase {
     let partial = try await restarted.historyReport()
     XCTAssertEqual(partial.records.count, 1); XCTAssertEqual(partial.warnings.count, 1)
   }
+  func testUnreadableFolderCannotAppearAsAnEmptyInventory() async throws {
+    let (home, root) = try fixture()
+    defer { try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path); try? fm.removeItem(at: home) }
+    try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: root.path)
+    if fm.isReadableFile(atPath: root.path) { throw XCTSkip("This account can bypass the fixture's directory permissions") }
+    let store = OrganizationStore(directory: home.appendingPathComponent("receipts"), home: home)
+    do { _ = try await store.inspect(root); XCTFail("Unreadable must not mean empty") } catch {}
+  }
+
   func testLastMomentCollisionAndSourceChangeCannotBypassFinalChecks() async throws {
     for race in ["collision", "replacement"] {
       let (home, root) = try fixture(); defer { try? fm.removeItem(at: home) }
