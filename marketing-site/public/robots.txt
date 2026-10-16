@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://macmint.amplycoindustries.chatgpt.site/sitemap.xml
