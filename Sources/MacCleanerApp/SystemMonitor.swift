@@ -157,8 +157,10 @@ actor ResourceSampler {
   private func cpuUsage() -> Double? {
     var size = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride)
     var info = host_cpu_load_info_data_t()
+    let host = mach_host_self()
+    defer { _ = mach_port_deallocate(mach_task_self_, host) }
     let result = withUnsafeMutablePointer(to: &info) { pointer in
-      pointer.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &size) }
+      pointer.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { host_statistics(host, HOST_CPU_LOAD_INFO, $0, &size) }
     }
     guard result == KERN_SUCCESS else { return nil }
     let busy = UInt64(info.cpu_ticks.0) + UInt64(info.cpu_ticks.1) + UInt64(info.cpu_ticks.3)
@@ -170,8 +172,10 @@ actor ResourceSampler {
   private func memoryUsed() -> Int64? {
     var size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
     var stats = vm_statistics64_data_t()
+    let host = mach_host_self()
+    defer { _ = mach_port_deallocate(mach_task_self_, host) }
     let result = withUnsafeMutablePointer(to: &stats) { pointer in
-      pointer.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &size) }
+      pointer.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { host_statistics64(host, HOST_VM_INFO64, $0, &size) }
     }
     guard result == KERN_SUCCESS else { return nil }
     let pages = Int64(stats.internal_page_count) - Int64(stats.purgeable_count) + Int64(stats.wire_count) + Int64(stats.compressor_page_count)

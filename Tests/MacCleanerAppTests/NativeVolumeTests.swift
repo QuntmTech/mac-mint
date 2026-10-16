@@ -69,6 +69,17 @@ final class NativeVolumeTests: XCTestCase {
     XCTAssertEqual(count, 0)
     XCTAssertTrue(fm.fileExists(atPath: personal.path))
 
+    let externalOrganizer = OrganizationStore(directory: root.appendingPathComponent("Organization"), home: root)
+    do { _ = try await externalOrganizer.inspect(owner); XCTFail("Organization must not adopt a mounted volume below home") } catch {}
+    let organizationRoot = owner.appendingPathComponent("Documents")
+    try fm.createDirectory(at: organizationRoot, withIntermediateDirectories: true)
+    let organizationSource = organizationRoot.appendingPathComponent("report.txt")
+    try Data("fixture".utf8).write(to: organizationSource)
+    let organizer = OrganizationStore(directory: owner.appendingPathComponent("Organization"), home: owner)
+    let inventory = try await organizer.inspect(organizationRoot)
+    let organizationFile = try XCTUnwrap(inventory.files.first)
+    let proposal = OrganizationProposal(fileID: organizationFile.id, folderID: "root", name: "renamed.txt", reason: "Test fixture")
+
     let trashItem = root.appendingPathComponent(".Trash/restore.txt")
     try fm.createDirectory(at: trashItem.deletingLastPathComponent(), withIntermediateDirectories: true)
     try Data("restore".utf8).write(to: trashItem)
@@ -116,6 +127,9 @@ final class NativeVolumeTests: XCTestCase {
     XCTAssertNotNil(full.persistenceError, "Full storage must fail closed before the first move")
     XCTAssertTrue(full.moved.isEmpty)
     XCTAssertTrue(fm.fileExists(atPath: personal.path))
+    do { _ = try await organizer.apply(inventory, proposals: [proposal]); XCTFail("Actual full storage must block organization before movement") } catch {}
+    XCTAssertTrue(fm.fileExists(atPath: organizationSource.path))
+    XCTAssertFalse(fm.fileExists(atPath: organizationRoot.appendingPathComponent("renamed.txt").path))
     let callsAfterFullDisk = await trash.calls
     XCTAssertEqual(callsAfterFullDisk, 0)
     try handle.close()

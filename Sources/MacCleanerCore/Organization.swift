@@ -250,7 +250,8 @@ public actor OrganizationStore {
   }
   private func validateRoot(_ root: URL) throws {
     let literal = root.standardizedFileURL, resolved = root.resolvingSymlinksInPath().standardizedFileURL
-    guard literal == resolved, FileSystem.comparisonPath(literal).hasPrefix(FileSystem.comparisonPath(home) + "/"),
+    guard let homeVolume = FileSystem.volumeIdentity(at: home), FileSystem.volumeIdentity(at: root) == homeVolume,
+      literal == resolved, FileSystem.comparisonPath(literal).hasPrefix(FileSystem.comparisonPath(home) + "/"),
       !FileSystem.comparisonPath(literal).hasPrefix(FileSystem.comparisonPath(home.appendingPathComponent("Library")) + "/"),
       eligibleFolder(root) else { throw OrganizationError("Choose a local folder inside your home, outside app libraries, packages, and project repositories.") }
     var parent = root
