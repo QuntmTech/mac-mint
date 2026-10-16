@@ -66,7 +66,7 @@ enum SmokeTest {
       layoutProbe.frames = [:]
       let content = view
         .onPreferenceChange(WorkspaceLayoutFrames.self) { frames in
-          Task { @MainActor in layoutProbe.frames = frames }
+          MainActor.assumeIsolated { layoutProbe.frames = frames }
         }
         .environmentObject(model).environmentObject(account).environmentObject(monitor)
         .environmentObject(care).environmentObject(updates).environmentObject(appUpdates)
@@ -87,6 +87,9 @@ enum SmokeTest {
           window.orderFront(nil)
           RunLoop.current.run(until: Date().addingTimeInterval(0.12))
           hosting.layoutSubtreeIfNeeded()
+          if (name.contains("-Empty-") || name.contains("-Populated-") || name.contains("-Compact-")), layoutProbe.frames.count != 2 {
+            failures.append("Missing workspace layout evidence: " + name)
+          }
           for (element, frame) in layoutProbe.frames {
             if frame.minY < -1 || frame.maxY > height + 1 || frame.minX < -1 || frame.maxX > width + 1 {
               failures.append("Offscreen " + element + ": " + name)
