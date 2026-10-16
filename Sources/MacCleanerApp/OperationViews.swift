@@ -74,7 +74,7 @@ struct PlanItemRow: View {
         .help("Remove from review")
       }
     }
-    .padding(.vertical, 3)
+    .padding(.vertical, 10)
     .accessibilityElement(children: .contain)
   }
 
@@ -163,6 +163,7 @@ struct PlanReviewSheet: View {
     }
     .frame(width: 720)
     .frame(minHeight: 420, maxHeight: 680)
+    .scrollContentBackground(.hidden).background(AppTheme.canvas)
   }
 
   private func remove(_ item: PlanItem) {
@@ -177,28 +178,28 @@ struct PlanReviewSheet: View {
   }
 
   private var header: some View {
-    HStack(alignment: .top, spacing: 14) {
-      Image(systemName: "trash.circle.fill")
-        .font(.system(size: 38))
-        .foregroundStyle(AppTheme.accentText)
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Review: \(plan.title)").font(.title2.bold())
-        Text(
-          "\(plan.items.count) item\(plan.items.count == 1 ? "" : "s") • \(ByteFormatter.string(plan.totalBytes)) will be moved to the Trash."
-        )
-        .foregroundStyle(.secondary)
-        if !plan.attentionItems.isEmpty {
-          Label(
-            "\(plan.attentionItems.count) item\(plan.attentionItems.count == 1 ? " needs" : "s need") a closer look (\(ByteFormatter.string(plan.attentionBytes))) — personal files, backups, or data that may not be rebuilt.",
-            systemImage: "exclamationmark.triangle.fill"
-          )
-          .font(.callout)
-          .foregroundStyle(.orange)
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(alignment: .top, spacing: 14) {
+        IconTile(symbol: "checklist", size: 46)
+        VStack(alignment: .leading, spacing: 5) {
+          Text("One last look").font(.system(size: 25, weight: .semibold)).tracking(-0.5)
+          Text(plan.title).font(.callout).foregroundStyle(.secondary)
+        }
+        Spacer()
+        VStack(alignment: .trailing, spacing: 4) {
+          Text(ByteFormatter.string(plan.totalBytes)).font(.system(size: 25, weight: .semibold)).monospacedDigit()
+          Text("\(plan.items.count) items · to Trash").font(.caption).foregroundStyle(.secondary)
         }
       }
-      Spacer()
-    }
-    .padding(20)
+      if !plan.attentionItems.isEmpty {
+        Label("\(plan.attentionItems.count) items need a closer look: personal files, backups, or data that may not rebuild.", systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+          .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+      }
+      Text("Remove anything you want to keep. Only the items below will move.")
+        .font(.callout).foregroundStyle(.secondary)
+    }.padding(24)
   }
 
   private var notes: some View {
@@ -253,7 +254,7 @@ struct PlanReviewSheet: View {
       } label: {
         Text("Move \(plan.items.count) Item\(plan.items.count == 1 ? "" : "s") to Trash")
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(MintButtonStyle())
       .keyboardShortcut(.defaultAction)
       .disabled(plan.isEmpty)
     }
@@ -318,9 +319,9 @@ struct OperationReportSheet: View {
           Button {
             model.undo(report)
           } label: {
-            Label("Undo", systemImage: "arrow.uturn.backward")
+            Label("Restore items", systemImage: "arrow.uturn.backward")
           }
-          .help("Put every moved item back where it was")
+          .help("Attempt to restore moved items to their original locations without overwriting existing files")
         }
         Button("Show History") {
           model.selectedSection = .history
@@ -328,7 +329,7 @@ struct OperationReportSheet: View {
         }
         Spacer()
         Button("Done") { dismiss() }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MintButtonStyle())
           .keyboardShortcut(.defaultAction)
       }
       .padding(16)
@@ -352,26 +353,16 @@ struct ReviewQueueView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(alignment: .center, spacing: 14) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Review").font(.system(size: 29, weight: .semibold))
-          Text("Everything you've selected across Cleaner, Storage, Developer & AI, Duplicates, and Large Files — in one place.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        if model.queuedCount > 0 {
-          Button("Clear All") { model.clearQueue() }
-          Button {
-            model.reviewEverything()
-          } label: {
-            if model.isPreparingPlan {
-              ProgressView().controlSize(.small)
-            } else {
-              Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist")
-            }
+      PageHeader(title: "Your review queue", subtitle: "Selections from across MacMint, together in one place. Nothing has moved yet.") {
+        HStack(spacing: 8) {
+          if model.queuedCount > 0 {
+            Button("Clear selection") { model.clearQueue() }.buttonStyle(MintButtonStyle(prominent: false))
+            Button { model.reviewEverything() } label: {
+              if model.isPreparingPlan { ProgressView().controlSize(.small) }
+              else { Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist") }
+            }.buttonStyle(MintButtonStyle())
+              .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
           }
-          .buttonStyle(.borderedProminent)
-          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
         }
       }
       .padding(AppTheme.pagePadding)
@@ -380,7 +371,8 @@ struct ReviewQueueView: View {
       if model.queuedCount == 0 {
         EmptyState(
           icon: "checklist", title: "Nothing selected yet",
-          detail: "Select items in Cleaner, Storage, Developer & AI, Duplicates, or Large Files and they'll gather here for one final review.")
+          detail: "Select items in Cleanup, Storage, Developer, Duplicates, or Large Files. They’ll gather here for your final review.",
+          actionTitle: "Explore Cleanup", action: { model.selectedSection = .cleaner })
       } else {
         List {
           ForEach(grouped, id: \.0) { source, items in

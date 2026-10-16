@@ -44,12 +44,13 @@ struct OnboardingView: View {
             finish()
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .keyboardShortcut(.defaultAction)
       }
       .padding(16)
     }
-    .frame(width: 560, height: 440)
+    .frame(width: 600, height: 480)
+    .background(AppTheme.canvas)
     .onExitCommand {
       onboardingDone = true
       dismiss()

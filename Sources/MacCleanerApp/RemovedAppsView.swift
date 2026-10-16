@@ -20,13 +20,8 @@ struct RemovedAppsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Removed Apps").font(.system(size: 29, weight: .semibold))
-          Text("Settings, caches, and containers left behind by apps that are no longer installed.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Removed Apps", subtitle: "Settings, caches, and containers left behind by apps you’ve removed.") {
+        HStack(spacing: 8) {
         if !model.selectedOrphanIDs.isEmpty {
           Button("Deselect") { model.keepQueuedFiles(model.queuedOrphans.map(\.url)) }
           Button {
@@ -40,6 +35,7 @@ struct RemovedAppsView: View {
         Button(model.orphansScanned ? "Rescan" : "Scan") { model.scanOrphans() }
           .buttonStyle(.borderedProminent)
           .disabled(model.isScanning || model.isWorking)
+      }
       }
       .padding(AppTheme.pagePadding)
       Divider()

@@ -94,15 +94,19 @@ struct DuplicatesView: View {
   }
 
   private var controls: some View {
-    HStack(spacing: 10) {
+    VStack(spacing: 12) {
+      HStack(spacing: 10) {
       Label(model.duplicateRoot.path, systemImage: "folder")
         .font(.caption)
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: 360, alignment: .leading)
+      Spacer(minLength: 8)
       Button("Choose Folder…") { model.chooseDuplicateFolder() }
 
-      Divider().frame(height: 22)
+      }
+      HStack(spacing: 10) {
+
 
       Picker("Minimum size", selection: $model.duplicateMinimum) {
         Text("1 MB").tag(Int64(1_048_576))
@@ -139,6 +143,7 @@ struct DuplicatesView: View {
       Button(model.isScanning ? "Scanning…" : "Scan") { model.scanDuplicates() }
         .buttonStyle(.borderedProminent)
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)

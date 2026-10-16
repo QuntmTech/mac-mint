@@ -88,7 +88,7 @@ struct SearchField: View {
 struct MintButtonStyle: ButtonStyle {
   var prominent = true
   @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.accessibilityContrast) private var contrast
+  @Environment(\.colorSchemeContrast) private var contrast
   func makeBody(configuration: Configuration) -> some View {
     configuration.label.font(.system(size: 13, weight: .semibold))
       .padding(.horizontal, 16).padding(.vertical, 10)

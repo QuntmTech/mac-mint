@@ -127,7 +127,6 @@ struct DeveloperView: View {
         .padding(.vertical, 8)
         .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       }
-      Spacer()
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)

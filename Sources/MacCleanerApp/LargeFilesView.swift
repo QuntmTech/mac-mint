@@ -99,15 +99,19 @@ struct LargeFilesView: View {
   }
 
   private var controls: some View {
-    HStack(spacing: 10) {
+    VStack(spacing: 12) {
+      HStack(spacing: 10) {
       Label(model.largeFileRoot.path, systemImage: "folder")
         .font(.caption)
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: 360, alignment: .leading)
+      Spacer(minLength: 8)
       Button("Choose Folder…") { model.chooseLargeFileFolder() }
 
-      Divider().frame(height: 22)
+      }
+      HStack(spacing: 10) {
+
 
       Picker("Minimum size", selection: $model.largeFileMinimum) {
         Text("100 MB").tag(Int64(100 * 1_048_576))
@@ -127,6 +131,7 @@ struct LargeFilesView: View {
       Button(model.isScanning ? "Scanning…" : "Scan") { model.scanLargeFiles() }
         .buttonStyle(.borderedProminent)
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)

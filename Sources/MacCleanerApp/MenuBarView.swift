@@ -58,7 +58,7 @@ struct MenuBarView: View {
         Label(model.isScanning ? "Scanning…" : "Quick Scan", systemImage: "sparkles")
           .frame(maxWidth: .infinity)
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(MintButtonStyle())
       .disabled(model.isScanning || model.isWorking)
       HStack {
         Button("Storage") { open(.storage) }
@@ -77,6 +77,7 @@ struct MenuBarView: View {
     }
     .padding(16)
     .frame(width: 320)
+    .background(AppTheme.canvas)
     .onAppear { monitor.start(interval: 3) }
     .onDisappear { monitor.stop() }
   }
@@ -123,7 +124,7 @@ struct MetricTile: View {
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(8)
-    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .accessibilityElement(children: .combine)
   }
 }

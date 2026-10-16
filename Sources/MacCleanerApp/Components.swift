@@ -30,7 +30,7 @@ struct AppTheme {
 
 struct SurfaceCard<Content: View>: View {
   let content: Content
-  @Environment(\.accessibilityContrast) private var contrast
+  @Environment(\.colorSchemeContrast) private var contrast
   init(@ViewBuilder content: () -> Content) { self.content = content() }
   var body: some View {
     content.padding(AppTheme.cardPadding)

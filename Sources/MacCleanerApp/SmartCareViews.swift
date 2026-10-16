@@ -195,13 +195,8 @@ struct DownloadsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Downloads").font(.system(size: 29, weight: .semibold))
-          Text("Large items you haven't opened in at least 3 months, with what macOS knows about them.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Downloads", subtitle: "See what you downloaded, when it changed, and what macOS knows about its use.") {
+        HStack(spacing: 8) {
         if !model.selectedDownloadIDs.isEmpty {
           Button("Deselect") { model.keepQueuedFiles(model.queuedDownloads.map(\.url)) }
           Button {
@@ -215,6 +210,7 @@ struct DownloadsView: View {
         Button(model.downloadsScanned ? "Rescan" : "Scan") { model.scanDownloads() }
           .buttonStyle(.borderedProminent)
           .disabled(model.isScanning || model.isWorking)
+      }
       }
       .padding(AppTheme.pagePadding)
       Divider()
