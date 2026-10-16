@@ -13,6 +13,7 @@ extension AppViewModel {
       guard candidate.lastPathComponent.lowercased() == name else { return false }
       return FileSystem.comparisonPath(candidate) == path
     }
+    let photoCandidates = photoScan?.fileCandidates(named: url.lastPathComponent).filter { matches($0.url) } ?? []
     var choose = selected && (userChoice || !keptQueuePaths.contains(path))
     if choose {
       for group in duplicateGroups where group.files.contains(where: { matches($0.url) }) {
@@ -21,8 +22,10 @@ extension AppViewModel {
           choose = false; statusMessage = "Keep another duplicate copy before selecting this one"
         }
       }
-      if let group = photoScan?.similarGroups.first(where: { $0.photos.contains { !$0.isLibraryAsset && matches($0.url) } }),
-        matches(keeper(of: group).url) {
+      if photoCandidates.contains(where: { photo in
+        guard let group = group(containing: photo) else { return false }
+        return matches(keeper(of: group).url)
+      }) {
         choose = false; statusMessage = "Keep another photo before selecting this one"
       }
     }
@@ -41,7 +44,7 @@ extension AppViewModel {
     for item in devItems where item.url.map(matches) == true && item.canTrash {
       if choose { selectedDevIDs.insert(item.id) } else { selectedDevIDs.remove(item.id) }
     }
-    for photo in allScannedPhotos where !photo.isLibraryAsset && matches(photo.url) {
+    for photo in photoCandidates {
       if choose { selectedPhotoIDs.insert(photo.id) } else { selectedPhotoIDs.remove(photo.id) }
     }
     for item in orphans where matches(item.url) {

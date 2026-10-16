@@ -15,6 +15,7 @@ enum PhotoSource: Equatable {
 }
 
 enum PhotoTab: String, CaseIterable, Identifiable {
+  case deck = "Review deck"
   case similar = "Similar"
   case blurry = "Blurry"
   case screenshots = "Screenshots"
@@ -35,7 +36,7 @@ extension AppViewModel {
   }
 
   func group(containing photo: PhotoFingerprint) -> SimilarPhotoGroup? {
-    photoScan?.similarGroups.first { group in group.photos.contains { $0.id == photo.id } }
+    photoScan?.group(containing: photo.id)
   }
 
   var selectedPhotos: [PhotoFingerprint] { allScannedPhotos.filter { selectedPhotoIDs.contains($0.id) } }
@@ -59,7 +60,7 @@ extension AppViewModel {
       } else if photo.isScreenshot {
         reason = "Screenshot you chose to remove."
       } else {
-        reason = "Blurry photo you chose to remove."
+        reason = "Photo you chose to remove."
       }
       if let item = PlanItem.photo(photo, keeper: kept, reason: reason) { items.append(item) }
     }

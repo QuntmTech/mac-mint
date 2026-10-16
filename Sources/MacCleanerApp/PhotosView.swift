@@ -17,13 +17,13 @@ struct PhotosView: View {
         progress
       } else if let scan = model.photoScan {
         Picker("", selection: $tab) {
-          ForEach(isLibrary ? [PhotoTab.similar, .blurry] : PhotoTab.allCases) { tab in
+          ForEach(isLibrary ? [PhotoTab.deck, .similar, .blurry] : PhotoTab.allCases) { tab in
             Text(label(for: tab, scan: scan)).tag(tab)
           }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(maxWidth: 420)
+        .frame(maxWidth: 540)
         .padding(.vertical, 10)
         Divider()
         content(scan)
@@ -98,6 +98,7 @@ struct PhotosView: View {
 
   private func label(for tab: PhotoTab, scan: PhotoScanResult) -> String {
     switch tab {
+    case .deck: return "Review deck"
     case .similar: return "Similar (\(scan.similarGroups.reduce(0) { $0 + $1.others.count }))"
     case .blurry: return "Blurry (\(scan.blurry.count))"
     case .screenshots: return "Screenshots (\(scan.screenshots.count))"
@@ -109,6 +110,7 @@ struct PhotosView: View {
   @ViewBuilder
   private func content(_ scan: PhotoScanResult) -> some View {
     switch tab {
+    case .deck: PhotoReviewDeck(photos: scan.photos).id(scan.generation)
     case .similar:
       if scan.similarGroups.isEmpty {
         EmptyState(icon: "checkmark.seal", title: "No similar shots", detail: "Every photo here looks distinct.")
@@ -246,50 +248,49 @@ struct PhotoThumbnail: View {
   let photo: PhotoFingerprint
   let side: CGFloat
   var allowCloud = false
+  var fit = false
   @State private var finished = false
   @State private var image: NSImage?
 
-  private static let cache = NSCache<NSString, NSImage>()
+  private static let cache = PreviewImageCache(byteLimit: 32 * 1_024 * 1_024, countLimit: 64)
+  private var loadKey: String { "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#\(photo.identity ?? "unknown")#\(Int(side))#\(allowCloud)" }
 
   var body: some View {
     ZStack {
       Rectangle().fill(Color.primary.opacity(0.06))
       if let image {
-        Image(nsImage: image).resizable().scaledToFill()
+        Image(nsImage: image).resizable().aspectRatio(contentMode: fit ? .fit : .fill)
       } else if finished {
         Label("Preview unavailable locally", systemImage: "icloud").font(.caption).multilineTextAlignment(.center)
       } else {
         ProgressView().controlSize(.small)
       }
     }
-    .task(id: photo.id + String(allowCloud)) { finished = false; image = await load(); finished = true }
+    .task(id: loadKey) {
+      finished = false; image = nil
+      let loaded = await load()
+      guard !Task.isCancelled else { return }
+      image = loaded; finished = true
+    }
+    .onDisappear { image = nil; finished = false }
   }
 
   private func load() async -> NSImage? {
-    let key = "\(photo.id)#\(Int(side))#\(allowCloud)" as NSString
-    if let cached = Self.cache.object(forKey: key) { return cached }
+    let key = loadKey
+    if let cached = Self.cache.image(for: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
       loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side, allowNetwork: allowCloud)
         .flatMap(NSImage.init(data:))
     } else {
       let url = photo.url
-      let pixels = side * 2
-      let data: Data? = await Task.detached(priority: .utility) {
-        guard !FileSystem.isCloudPlaceholder(url), let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let cgImage = CGImageSourceCreateThumbnailAtIndex(
-            source, 0,
-            [
-              kCGImageSourceCreateThumbnailFromImageAlways: true,
-              kCGImageSourceCreateThumbnailWithTransform: true,
-              kCGImageSourceThumbnailMaxPixelSize: pixels,
-            ] as CFDictionary)
-        else { return nil }
-        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-      }.value
+      let pixels = min(1_400, max(64, Int(side * 2)))
+      let work = Task.detached(priority: .utility) { await LocalPreviewDecoder.shared.decode(url, pixels: pixels) }
+      let data = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
       loaded = data.flatMap(NSImage.init(data:))
     }
-    if let loaded { Self.cache.setObject(loaded, forKey: key) }
+    guard !Task.isCancelled else { return nil }
+    if let loaded { Self.cache.insert(loaded, for: key) }
     return loaded
   }
 }

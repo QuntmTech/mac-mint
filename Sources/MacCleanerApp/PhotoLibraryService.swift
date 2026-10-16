@@ -62,7 +62,7 @@ enum PhotoLibraryService {
             url: url(for: asset.localIdentifier), bytes: 0,
             hash: measured.hash, sharpness: measured.sharpness,
             pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-            captured: asset.creationDate, assetID: asset.localIdentifier))
+            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate))
       }
       progress(total, total)
       return FingerprintReport(photos: results, total: total)

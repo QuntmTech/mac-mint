@@ -140,6 +140,7 @@ enum SmokeTest {
         render(prefix + "-Populated-" + section.rawValue, RootView())
         render(prefix + "-Compact-" + section.rawValue, RootView(), width: 980, height: 660)
       }
+      render(prefix + "-Photo-deck", PhotoReviewDeck(photos: model.allScannedPhotos), width: 720, height: 480)
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
       render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 540)

@@ -158,3 +158,16 @@ final class PhotoPlanTests: XCTestCase {
     XCTAssertEqual(plan.excluded.map(\.url.lastPathComponent), ["b.jpg"])
   }
 }
+
+extension SimilarPhotosTests {
+  func testScanLookupPreservesCaseInsensitiveFilenameCandidatesAndKeeperGroup() {
+    let a = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/A.JPG"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let b = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/sub/a.jpg"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let group = SimilarPhotoGroup(id: "pair", photos: [a,b], keeperIndex: 0)
+    let scan = PhotoScanResult(photos: [a,b], similarGroups: [group], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
+    XCTAssertEqual(scan.group(containing: b.id)?.keeper.id, a.id)
+    XCTAssertNil(scan.group(containing: "absent"))
+    XCTAssertEqual(Set(scan.fileCandidates(named: "a.jpg").map(\.id)), [a.id,b.id])
+    XCTAssertTrue(scan.fileCandidates(named: "missing.jpg").isEmpty)
+  }
+}

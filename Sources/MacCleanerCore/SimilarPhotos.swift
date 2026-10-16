@@ -21,7 +21,7 @@ public struct PhotoFingerprint: Identifiable, Hashable, Sendable {
   public let identity: String?
   /// PhotoKit local identifier when this photo lives in the Photos library (url is then synthetic).
   public let assetID: String?
-  /// File modification time at scan time (nil for library assets).
+  /// File or PhotoKit asset modification time at scan time.
   public let modified: Date?
 
   public init(
@@ -244,6 +244,9 @@ public enum PhotoAnalysis {
 // MARK: - Scanner (macOS image decoding)
 
 public struct PhotoScanResult: Sendable {
+  public let generation = UUID()
+  private let groupIndex: [String: Int]
+  private let fileNameIndex: [String: [Int]]
   public let photos: [PhotoFingerprint]
   public let similarGroups: [SimilarPhotoGroup]
   public let blurry: [PhotoFingerprint]
@@ -257,6 +260,16 @@ public struct PhotoScanResult: Sendable {
     screenshots: [PhotoFingerprint], skippedLibraries: [String], issues: [ScanIssue],
     wasCancelled: Bool
   ) {
+    var index: [String: Int] = [:]
+    for (offset, group) in similarGroups.enumerated() {
+      for photo in group.photos where index[photo.id] == nil { index[photo.id] = offset }
+    }
+    self.groupIndex = index
+    var names: [String: [Int]] = [:]
+    for (offset, photo) in photos.enumerated() where !photo.isLibraryAsset {
+      names[photo.url.lastPathComponent.lowercased(), default: []].append(offset)
+    }
+    self.fileNameIndex = names
     self.photos = photos
     self.similarGroups = similarGroups
     self.blurry = blurry
@@ -264,6 +277,16 @@ public struct PhotoScanResult: Sendable {
     self.skippedLibraries = skippedLibraries
     self.issues = issues
     self.wasCancelled = wasCancelled
+  }
+
+  /// Repeated selection and review must not scan every group for every photo.
+  public func group(containing photoID: String) -> SimilarPhotoGroup? {
+    groupIndex[photoID].map { similarGroups[$0] }
+  }
+
+  /// Narrows alias-aware selection matching without traversing the full library per click.
+  public func fileCandidates(named name: String) -> [PhotoFingerprint] {
+    (fileNameIndex[name.lowercased()] ?? []).map { photos[$0] }
   }
 }
 
