@@ -224,6 +224,16 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(fm.fileExists(atPath: file.path))
   }
 
+  func testMissingActivityEvidenceDoesNotBecomeSafeDeveloperRecommendation() {
+    var inputs = RecommendationEngine.Inputs()
+    inputs.cleanupTargets = [CleanupTarget(category: .developerJunk,
+      url: URL(fileURLWithPath: "/Users/test/Library/Developer/Xcode/DerivedData"),
+      displayName: "DerivedData", size: 512000000, risk: .safe, reason: "Rebuildable")]
+    let recommendations = RecommendationEngine.recommend(inputs)
+    XCTAssertTrue(RecommendationEngine.safeItems(recommendations).isEmpty)
+    XCTAssertTrue(PlanItem.cleanup(inputs.cleanupTargets[0]).needsAttention)
+  }
+
   func testActiveDeveloperEvidenceCannotBeOverriddenByCleanerParent() {
     let home = URL(fileURLWithPath: "/Users/test")
     let root = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")

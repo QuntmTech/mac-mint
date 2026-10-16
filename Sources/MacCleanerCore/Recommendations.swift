@@ -109,15 +109,9 @@ public enum RecommendationEngine {
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
     let devTrash = inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }.compactMap(PlanItem.developer)
-    let devCleanup = inputs.cleanupTargets
-       .filter { target in
-        target.risk == .safe && target.category == .developerJunk
-          && target.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false
-          && !inputs.developer.contains { item in
-            item.url.map { FileSystem.path($0, isInsideOrEqual: target.url) || FileSystem.path(target.url, isInsideOrEqual: $0) } == true
-          }
-      }.map { PlanItem.cleanup($0) }
-    let devItems = take(devTrash + devCleanup)
+    // An aggregate with no detailed activity evidence is not a positive idle-data finding.
+    // Cleaner still inventories it for explicit review; recommendations use observed items.
+    let devItems = take(devTrash)
     if !devItems.isEmpty {
       let tools = Dictionary(grouping: inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }, by: \.tool)
         .map { ($0.key, $0.value.reduce(Int64(0)) { $0 + $1.bytes }) }

@@ -44,7 +44,7 @@ extension AppViewModel {
             cleanupTargets = report.cleanupTargets.map { target in
               var copy = target
               copy.isSelected = previousSelections[FileSystem.comparisonPath(target.url)] ?? target.isSelected
-              if target.ownerBundleID.map(running.contains) == true { copy.isSelected = false }
+              if target.category == .developerJunk || target.ownerBundleID.map(running.contains) == true { copy.isSelected = false }
               return copy
             }
             apps = report.apps

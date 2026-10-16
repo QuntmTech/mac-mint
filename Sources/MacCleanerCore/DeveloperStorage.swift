@@ -358,8 +358,8 @@ public actor DeveloperStorageScanner {
       let name = namespace == "library" ? "\(model):\(tag)" : "\(namespace)/\(model):\(tag)"
       return DevStorageItem(
         id: "ollama:\(name)", group: .aiModels, tool: "Ollama", title: name,
-        subtitle: "Stored in \(root.path.replacingOccurrences(of: home.path, with: "~")) — layers shared between models are freed only when unused",
-        url: manifest, bytes: size, lastUsed: modified(manifest), rebuild: .redownload,
+        subtitle: "Stored in \(root.path.replacingOccurrences(of: home.path, with: "~")) — origin is not verified; custom models may need manual recovery. Shared layers are freed only when unused",
+        url: manifest, bytes: size, lastUsed: modified(manifest), rebuild: .review,
         removal: ShellArgument.isToolIdentifier(name) ? .command("ollama rm -- \(ShellArgument.quote(name))") : .none("This model name needs review in Ollama; no shell command was generated."))
     }
   }
@@ -391,8 +391,8 @@ public actor DeveloperStorageScanner {
       let name = parts.dropFirst().joined(separator: "/")
       return item(
         repo, group: .aiModels, tool: "Hugging Face", title: name,
-        subtitle: "\(kind.dropLast()) cache — whole repository, all revisions",
-        rebuild: .redownload)
+        subtitle: "\(kind.dropLast()) cache — whole repository, all revisions. Private, modified or unavailable models may need manual recovery.",
+        rebuild: .review)
     }
   }
 

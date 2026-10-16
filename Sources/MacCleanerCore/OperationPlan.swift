@@ -107,8 +107,11 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
     PlanItem(
       url: target.url, displayName: target.displayName,
       kind: .cleanupTarget(category: target.category, risk: target.risk),
-      expectedBytes: target.size, reason: target.reason, source: source,
-      needsAttention: target.risk != .safe,
+      expectedBytes: target.size,
+      reason: target.category == .developerJunk
+        ? target.reason + " Activity may be incomplete for this aggregate target. Prefer individual Developer findings."
+        : target.reason, source: source,
+      needsAttention: target.risk != .safe || target.category == .developerJunk,
       identity: target.identity, ownerBundleID: target.ownerBundleID)
   }
 

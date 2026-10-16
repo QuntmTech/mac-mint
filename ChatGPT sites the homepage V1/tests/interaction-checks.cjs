@@ -27,14 +27,14 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  await click(home.root.findAllByType('a').find(n=>text(n).includes('Explore startup inventory')));
  ok(home.root.findByType(ProductDemo).props.module==='startup','Utility shortcut selects the controlled demo directly');
  await click(home.root.findAllByType('a').find(n=>text(n).includes('Explore the live demo')));
- ok(home.root.findByType(ProductDemo).props.module==='overview','Final demo action resets the module to Smart Scan');
+ ok(home.root.findByType(ProductDemo).props.module==='overview','Final demo action resets the module to Quick Scan');
 
  ok(!text(home.toJSON()).includes('No cloud account'),'No obsolete no-account promise');
  ok(!text(home.toJSON()).includes('No network calls'),'No obsolete no-network promise');
  ok(text(home.toJSON()).includes('Inspect locally before sign-in'),'Local inspection before sign-in is disclosed');
  ok(home.root.findAllByType('a').some(n=>n.props.href==='https://macmint.co/login'),'Sign-in uses the established account route');
  ok(!text(home.toJSON()).includes('Other cleaners'),'No unsupported competitor comparison');
- const prod=await mount(ProductDemo);await click(button(prod,'Run Smart Scan'));ok(text(prod.toJSON()).includes('Scanning…'),'Scan starts');await click(button(prod,'Cancel'));ok(text(prod.toJSON()).includes('Demo scan cancelled'),'Scan cancels');
+ const prod=await mount(ProductDemo);await click(button(prod,'Run Quick Scan'));ok(text(prod.toJSON()).includes('Scanning…'),'Scan starts');await click(button(prod,'Cancel'));ok(text(prod.toJSON()).includes('Demo scan cancelled'),'Scan cancels');
  const picker=prod.root.findAllByType('select').find(n=>n.props['aria-label']==='Choose a product demo');
  ok(picker.findAllByType('option').length===8,'Phone demo selector exposes all eight modules');
  await act(async()=>picker.props.onChange({target:{value:'cleaner'}}));

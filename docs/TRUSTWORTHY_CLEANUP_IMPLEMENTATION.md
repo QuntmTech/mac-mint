@@ -64,6 +64,8 @@ Before enabling checkout:
 
 SMTP credentials, sender-domain configuration and delivery were not available in this session. Configure the project's sender and secure credentials, then prove verification and password-reset delivery, expired-link behavior and rate limits in staging. The implementation does not claim that email delivery is complete.
 
+The main homepage exposes validated public downloads without account gating. The static `/home2` package intentionally has no consumer link yet; update its `productConfig.downloadUrl` and rebuild it only after the consumer artifact passes validation.
+
 Consumer signing needs all six GitHub secrets listed in [RELEASING.md](RELEASING.md). The workflow distinguishes an ad-hoc prerelease from a complete Developer ID/notarized build, smoke-tests the package, validates stapling and Gatekeeper on consumer builds, and never automatically publishes an unvalidated feed entry. A published feed record requires `validated=true`, `notarized=true`, a SHA-256 and an HTTPS download URL. Set these attestations only after testing the actual downloaded artifact.
 
 For a rollback, disable checkout and AI first, preserve journals/orders/reservations and back up the database. Do not restore older best-effort accounting routes while leaving AI enabled.
