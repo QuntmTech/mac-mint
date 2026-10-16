@@ -55,6 +55,13 @@ struct HistoryView: View {
           if isOpen { expanded.insert(entry.id) } else { expanded.remove(entry.id) }
         })
     ) {
+      if let unresolved = entry.unresolvedPaths, !unresolved.isEmpty {
+        Label("These interrupted moves could not be verified. Inspect their original locations and Trash in Finder.", systemImage: "exclamationmark.triangle")
+          .font(.caption).foregroundStyle(.orange)
+        ForEach(unresolved, id: \.self) { path in
+          Text(path).font(.caption2).textSelection(.enabled)
+        }
+      }
       if receipts.isEmpty {
         Text(
           entry.restoresThroughPhotos

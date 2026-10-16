@@ -96,7 +96,8 @@ public struct OperationReport: Identifiable, Codable, Hashable, Sendable {
     return HistoryEntry(
       id: id, date: finishedAt ?? startedAt, action: title,
       paths: outcomes.filter { $0.status == .moved || $0.status == .uncertain }.map { $0.item.url.path },
-      bytes: bytesMoved, notes: notes + (persistenceError.map { " " + $0 } ?? ""), receipts: receipts)
+      bytes: bytesMoved, notes: notes + (persistenceError.map { " " + $0 } ?? ""), receipts: receipts,
+      unresolvedPaths: outcomes.filter { $0.status == .uncertain }.map { $0.item.url.path })
   }
 }
 

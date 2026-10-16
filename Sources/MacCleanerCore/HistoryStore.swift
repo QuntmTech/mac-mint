@@ -15,13 +15,17 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
   public let restoredPaths: [String]?
   /// Physical destinations, including restores to another folder. Optional for old history.
   public let restoredLocations: [String: String]?
+  /// Interrupted moves whose destinations could not be proven. Retain this evidence even
+  /// when there is no Trash receipt and the operation is older than the normal History cap.
+  public let unresolvedPaths: [String]?
   public let recoveryKind: HistoryRecoveryKind?
   public var restoresThroughPhotos: Bool { recoveryKind == .photos || (recoveryKind == nil && action.hasPrefix("Photos:") && paths.isEmpty && receipts == nil) }
 
   public init(
     id: UUID = UUID(), date: Date = Date(), action: String, paths: [String], bytes: Int64,
     notes: String, receipts: [TrashReceipt]? = nil, restoredPaths: [String]? = nil,
-    recoveryKind: HistoryRecoveryKind? = nil, restoredLocations: [String: String]? = nil
+    recoveryKind: HistoryRecoveryKind? = nil, restoredLocations: [String: String]? = nil,
+    unresolvedPaths: [String]? = nil
   ) {
     self.id = id
     self.date = date
@@ -32,6 +36,7 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
     self.receipts = receipts
     self.restoredPaths = restoredPaths
     self.restoredLocations = restoredLocations
+    self.unresolvedPaths = unresolvedPaths
     self.recoveryKind = recoveryKind
   }
 
@@ -47,7 +52,7 @@ public struct HistoryEntry: Identifiable, Codable, Hashable, Sendable {
     return HistoryEntry(
       id: id, date: date, action: action, paths: self.paths, bytes: bytes, notes: notes,
       receipts: receipts, restoredPaths: merged, recoveryKind: recoveryKind,
-      restoredLocations: destinations.isEmpty ? nil : destinations)
+      restoredLocations: destinations.isEmpty ? nil : destinations, unresolvedPaths: unresolvedPaths)
   }
 }
 
@@ -102,7 +107,9 @@ public actor HistoryStore {
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     let ordered = items.sorted { $0.date > $1.date }
     // Never evict live recovery receipts merely because 200 newer operations exist.
-    let retained = ordered.enumerated().filter { $0.offset < 200 || !$0.element.pendingReceipts.isEmpty }.map(\.element)
+    let retained = ordered.enumerated().filter {
+      $0.offset < 200 || !$0.element.pendingReceipts.isEmpty || !($0.element.unresolvedPaths ?? []).isEmpty
+    }.map(\.element)
     try writer(encoder.encode(retained), url)
   }
 }

@@ -113,4 +113,25 @@ final class RestoreDurabilityTests: XCTestCase {
     XCTAssertThrowsError(try RecoveryService().restore(receipt))
     XCTAssertTrue(fm.fileExists(atPath: other.appendingPathComponent("file").path))
   }
+
+  func testUncertainMoveEvidenceSurvivesHistoryRetentionWithoutAReceipt() async throws {
+    let (root, receipt, _) = try fixture()
+    defer { try? fm.removeItem(at: root) }
+    let url = root.appendingPathComponent("history.json")
+    let item = PlanItem(url: URL(fileURLWithPath: receipt.originalPath), displayName: "uncertain",
+      kind: .reviewedFile, expectedBytes: 8, reason: "Test", source: "Test")
+    let report = OperationReport(id: UUID(), title: "Interrupted", startedAt: .distantPast,
+      outcomes: [ItemOutcome(item: item, status: .uncertain)], wasInterrupted: true)
+    let uncertain = report.historyEntry()
+    let newer = (0..<201).map { HistoryEntry(date: Date(timeIntervalSince1970: Double($0)),
+      action: "Fixture", paths: [], bytes: 0, notes: "Complete") }
+    try JSONEncoder().encode(newer + [uncertain]).write(to: url)
+    let history = HistoryStore(url: url)
+    try await history.append(HistoryEntry(action: "Newest", paths: [], bytes: 0, notes: "Complete"))
+    let entries = try await history.loadChecked()
+    let saved = try XCTUnwrap(entries.first { $0.id == uncertain.id })
+    XCTAssertEqual(saved.unresolvedPaths, [receipt.originalPath])
+    XCTAssertTrue(saved.pendingReceipts.isEmpty)
+    XCTAssertEqual(entries.count, 201)
+  }
 }
