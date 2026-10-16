@@ -1,8 +1,10 @@
 import MacCleanerCore
+import QuickLook
 import SwiftUI
 
 struct DuplicatesView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var previewURL: URL?
 
   private var totalReclaimable: Int64 {
     model.duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -56,6 +58,7 @@ struct DuplicatesView: View {
         .listStyle(.inset)
       }
     }
+    .quickLookPreview($previewURL, in: model.duplicateGroups.flatMap { $0.files.map(\.url) })
   }
 
   private var header: some View {
@@ -109,6 +112,27 @@ struct DuplicatesView: View {
       .frame(width: 150)
 
       Spacer()
+      Menu {
+        ForEach(DuplicateKeeperRule.allCases) { rule in
+          Button(rule.rawValue) { model.autoSelectDuplicates(rule) }
+        }
+        Divider()
+        Button("Add Preferred Folder…") { model.choosePreferredDuplicateFolder() }
+        if !model.duplicatePreferredFolders.isEmpty {
+          Menu("Preferred Folders") {
+            ForEach(model.duplicatePreferredFolders, id: \.self) { folder in
+              Button("Remove \(folder.lastPathComponent)") {
+                model.duplicatePreferredFolders.removeAll { $0 == folder }
+              }
+            }
+          }
+        }
+      } label: {
+        Label("Auto-select", systemImage: "wand.and.stars")
+      }
+      .fixedSize()
+      .disabled(model.duplicateGroups.isEmpty)
+      .help("Pick which copy to keep in every group; you still review before anything moves")
       Button("Clear selection") { model.clearDuplicateSelection() }
         .disabled(model.selectedDuplicateIDs.isEmpty)
       Button(model.isScanning ? "Scanning…" : "Scan") { model.scanDuplicates() }
@@ -132,9 +156,14 @@ struct DuplicatesView: View {
       )
       .labelsHidden()
 
-      Image(systemName: selected ? "trash.circle.fill" : "doc.circle")
-        .foregroundStyle(selected ? .red : AppTheme.accent)
-        .font(.title3)
+      FileThumbnail(url: file.url, size: 46)
+        .overlay(alignment: .bottomTrailing) {
+          Image(systemName: selected ? "trash.circle.fill" : "checkmark.circle.fill")
+            .foregroundStyle(.white, selected ? Color.red : Color.green)
+            .font(.system(size: 14))
+            .offset(x: 4, y: 4)
+        }
+        .onTapGesture(count: 2) { previewURL = file.url }
 
       VStack(alignment: .leading, spacing: 3) {
         Text(file.url.lastPathComponent).fontWeight(.medium)
@@ -150,7 +179,16 @@ struct DuplicatesView: View {
       Text(ByteFormatter.string(file.size))
         .font(.callout.monospacedDigit())
         .frame(width: 92, alignment: .trailing)
+      Button {
+        previewURL = file.url
+      } label: {
+        Image(systemName: "eye")
+      }
+      .buttonStyle(.borderless)
+      .help("Quick Look")
+      .accessibilityLabel("Quick Look \(file.url.lastPathComponent)")
       Menu {
+        Button("Quick Look") { previewURL = file.url }
         Button("Reveal in Finder") { model.reveal(file.url) }
         Button("Exclude from future scans") { model.ignore(file.url) }
       } label: {

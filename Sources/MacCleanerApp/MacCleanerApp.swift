@@ -8,6 +8,7 @@ struct MacCleanerDesktopApp: App {
   @StateObject private var monitor = SystemMonitor()
   @StateObject private var care = CareService()
   @StateObject private var updates = UpdateService()
+  @StateObject private var appUpdates = AppUpdatesStore()
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
 
   var body: some Scene {
@@ -18,6 +19,7 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(monitor)
         .environmentObject(care)
         .environmentObject(updates)
+        .environmentObject(appUpdates)
         .tint(AppTheme.accent)
         .frame(minWidth: 1040, minHeight: 700)
         .task {
