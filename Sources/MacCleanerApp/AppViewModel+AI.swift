@@ -47,6 +47,8 @@ extension AppViewModel {
     aiReviewBusy = false
     assistantBusy = false
     reviewAIError = nil
+    pendingAIAction = nil
+    aiConsentPending = false
   }
 
   func resetAIState() {
@@ -164,15 +166,15 @@ extension AppViewModel {
 
   func runAIReview(account: AccountStore) {
     guard !recommendations.isEmpty, !aiReviewBusy, !isScanning, !isWorking else { return }
-    aiPayloadPreview = previewPayload(AIContextBuilder.reviewRequest(recommendations: recommendations, totalBytes: volumeStats.total, freeBytes: volumeStats.free, growth: storageGrowth, home: FileManager.default.homeDirectoryForCurrentUser))
+    let generation = aiGeneration
+    let request = AIContextBuilder.reviewRequest(recommendations: recommendations,
+      totalBytes: volumeStats.total, freeBytes: volumeStats.free, growth: storageGrowth,
+      home: FileManager.default.homeDirectoryForCurrentUser)
+    aiPayloadPreview = previewPayload(request)
     withAIConsent { [self] in
+      guard generation == aiGeneration, !aiReviewBusy, !isScanning, !isWorking else { return }
       aiReviewBusy = true
       reviewAIError = nil
-      let generation = aiGeneration
-      let stats = volumeStats
-      let request = AIContextBuilder.reviewRequest(
-        recommendations: recommendations, totalBytes: stats.total, freeBytes: stats.free,
-        growth: storageGrowth, home: FileManager.default.homeDirectoryForCurrentUser)
       aiReviewTask = Task {
         do {
           let response = try await account.aiReview(request)
@@ -217,19 +219,18 @@ extension AppViewModel {
   func ask(_ question: String, account: AccountStore) {
     let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !assistantBusy, !isScanning, !isWorking else { return }
-    aiPayloadPreview = previewPayload(AIAskRequest(question: trimmed, history: assistantTurns, context: aiContext))
+    let generation = aiGeneration
+    let request = AIAskRequest(question: trimmed, history: assistantTurns, context: aiContext)
+    aiPayloadPreview = previewPayload(request)
     withAIConsent { [self] in
-      guard !assistantBusy, !isScanning, !isWorking else { return }
-      let generation = aiGeneration
-      let history = assistantTurns
+      guard generation == aiGeneration, !assistantBusy, !isScanning, !isWorking else { return }
       assistantDraft = ""
       assistantTurns.append(AITurn(role: .user, text: trimmed))
       assistantBusy = true
       aiError = nil
-      let context = aiContext
       assistantTask = Task {
         do {
-          let answer = try await account.aiAsk(question: trimmed, history: history, context: context)
+          let answer = try await account.aiAsk(question: request.question, history: request.history, context: request.context)
           guard !Task.isCancelled, aiEnabled, aiGeneration == generation else { return }
           assistantTurns.append(AITurn(role: .assistant, text: answer.answer, actions: answer.actions))
         } catch {

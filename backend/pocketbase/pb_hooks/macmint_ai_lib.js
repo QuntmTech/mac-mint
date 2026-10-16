@@ -303,7 +303,7 @@ function claude(app, model, system, data, schema, maxTokens) {
   if (res.statusCode === 429 || res.statusCode === 529) throw { status: 503, code: "ai_busy", noCharge: true }
   if (res.statusCode !== 200) throw { status: 502, code: "ai_upstream", noCharge: res.statusCode >= 400 && res.statusCode < 500 }
   const json = res.json || {}
-  const block = (json.content || []).find(function (b) { return b.type === "text" })
+  const block = (Array.isArray(json.content) ? json.content : []).find(function (b) { return b && b.type === "text" })
   if (!block) throw { status: 502, code: "ai_upstream", usage: json.usage }
   let parsed
   try {
@@ -311,6 +311,7 @@ function claude(app, model, system, data, schema, maxTokens) {
   } catch (err) {
     throw { status: 502, code: "ai_upstream", usage: json.usage }
   }
+  if (!validStructure(parsed, schema, 0)) throw { status: 502, code: "ai_upstream", usage: json.usage }
   return { output: parsed, usage: json.usage || {} }
 }
 
@@ -368,6 +369,24 @@ function storeExplanation(app, key, kind, result) {
 }
 
 // ---------- validation of model output ----------
+
+// Validate the structural subset used by our schemas before routes dereference the answer.
+// Routes still normalize advisory enum values through oneOf; unsupported destinations never
+// gain authority. Valid JSON (null, arrays or missing/wrong fields) is not a valid response.
+function validStructure(value, schema, depth) {
+  if (!schema || depth > 16) return false
+  if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false
+    if ((schema.required || []).some(key => !Object.prototype.hasOwnProperty.call(value, key))) return false
+    const properties = schema.properties || {}
+    return Object.keys(value).every(key => Object.prototype.hasOwnProperty.call(properties, key)
+      ? validStructure(value[key], properties[key], depth + 1) : schema.additionalProperties !== false)
+  }
+  if (schema.type === "array") return Array.isArray(value) && value.every(item => validStructure(item, schema.items, depth + 1))
+  if (schema.type === "string") return typeof value === "string" && value.trim().length > 0
+  if (schema.type === "integer") return Number.isSafeInteger(value)
+  return !schema.type
+}
 
 function oneOf(value, allowed, fallback) {
   return allowed.indexOf(value) >= 0 ? value : fallback

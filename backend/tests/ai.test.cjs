@@ -86,6 +86,17 @@ test('malformed paid responses still settle reported usage', () => {
   assert.throws(() => request(db), e => e.code === 'ai_upstream')
   assert.equal(db.rows('ai_requests')[0].get('actual_micro_usd'), 80)
 })
+test('valid JSON with an invalid answer shape fails cleanly and settles actual paid usage', () => {
+  for (const output of [null, [], {}, { answer: '', actions: [] }, { answer: 42, actions: [] },
+    { answer: 'Hello', actions: [{ label: 'Open', destination: null }] }]) {
+    const db = database()
+    upstream = () => ({ statusCode: 200, json: { content: [{ type: 'text', text: JSON.stringify(output) }],
+      usage: { input_tokens: 10, output_tokens: 2 } } })
+    assert.throws(() => ai.request(db, 'u1', 'ask', 'system', {}, ai.ASK_SCHEMA, 100), e => e.code === 'ai_upstream')
+    assert.equal(db.rows('ai_requests')[0].get('state'), 'settled')
+    assert.equal(db.rows('ai_requests')[0].get('actual_micro_usd'), 80)
+  }
+})
 test('missing provider usage remains uncertain and fails the response', () => {
   const db = database(); upstream = () => ({ statusCode: 200, json: { content: [{ type: 'text', text: '{}' }] } })
   assert.throws(() => request(db), e => e.code === 'ai_accounting')

@@ -59,6 +59,9 @@ class Provider(BaseHTTPRequestHandler):
         else:
             output = dict(summary='Rebuildable data', owner='Known tool', category='cache', verdict='review',
                 whatHappens='May require rebuilding', confidence='medium')
+        if mode == 'null': output = None
+        if mode == 'wrong-shape': output = dict(answer=42, actions=[])
+        if mode == 'empty-answer': output = dict(answer='', actions=[])
         response = dict(content=[dict(type='text', text='invalid JSON' if mode == 'malformed' else json.dumps(output))],
             usage=dict(input_tokens=100, output_tokens=20, cache_creation_input_tokens=50, cache_read_input_tokens=200))
         if mode == 'missing-usage': response.pop('usage')
@@ -171,6 +174,7 @@ with ExitStack() as stack:
     assert len(SENT) == count, 'Kill switch or exhausted budget reached provider'
     call('/__test/config', dict(ai=dict(enabled=True)))
     for mode, error, state in [('busy','ai_busy','released'),('malformed','ai_upstream','settled'),
+                               ('null','ai_upstream','settled'),('wrong-shape','ai_upstream','settled'),('empty-answer','ai_upstream','settled'),
                                ('missing-usage','ai_accounting','uncertain'),('timeout','ai_timeout','uncertain')]:
         Provider.mode = mode
         before = {row[0] for row in db.execute('SELECT id FROM ai_requests')}
