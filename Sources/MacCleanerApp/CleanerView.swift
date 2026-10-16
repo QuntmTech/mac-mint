@@ -3,7 +3,6 @@ import SwiftUI
 
 struct CleanerView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var confirmClean = false
   @State private var search = ""
   @State private var riskFilter: RiskFilter = .all
 
@@ -74,14 +73,6 @@ struct CleanerView: View {
         .listStyle(.inset)
       }
     }
-    .alert("Move selected items to Trash?", isPresented: $confirmClean) {
-      Button("Cancel", role: .cancel) {}
-      Button("Move to Trash") { model.cleanSelected() }
-    } message: {
-      Text(
-        "\(ByteFormatter.string(model.selectedCleanupBytes)) is selected. Review-risk items account for \(ByteFormatter.string(model.selectedReviewBytes)). Everything is moved to Trash, not permanently erased."
-      )
-    }
   }
 
   private var header: some View {
@@ -101,9 +92,9 @@ struct CleanerView: View {
         Button("Rescan") { model.runSmartScan() }
       }
       Button {
-        confirmClean = true
+        model.reviewCleanup()
       } label: {
-        Label("Clean \(ByteFormatter.string(model.selectedCleanupBytes))", systemImage: "trash")
+        Label("Review & Clean \(ByteFormatter.string(model.selectedCleanupBytes))", systemImage: "trash")
       }
       .buttonStyle(.borderedProminent)
       .disabled(model.selectedCleanupBytes == 0 || model.isWorking || model.isScanning)
