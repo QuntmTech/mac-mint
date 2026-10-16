@@ -48,6 +48,14 @@ public final class IssueCollector: @unchecked Sendable {
 }
 
 public enum FileSystem {
+  /// Unlike fileExists, a permission failure cannot be mistaken for an absent recovery item.
+  static func entryExists(at url: URL) throws -> Bool {
+    var info = stat()
+    if lstat(url.path, &info) == 0 { return true }
+    let failure = errno
+    if failure == ENOENT || failure == ENOTDIR { return false }
+    throw NSError(domain: NSPOSIXErrorDomain, code: Int(failure))
+  }
   /// Atomically replace a local recovery record and sync the file and directory before
   /// acknowledging it. A successful JSON encode alone is not a durable History commit.
   static func writeDurably(_ data: Data, to url: URL) throws {

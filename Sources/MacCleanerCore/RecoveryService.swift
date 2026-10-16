@@ -28,7 +28,8 @@ public struct RecoveryService: Sendable {
   public init() {}
 
   public func canRestore(_ receipt: TrashReceipt, fileManager: FileManager = .default) -> Bool {
-    guard let trashPath = receipt.trashPath, Self.isTrashLocation(trashPath) else { return false }
+    guard let trashPath = receipt.trashPath, Self.isTrashLocation(trashPath),
+      (try? FileSystem.entryExists(at: Self.destination(for: receipt, into: nil))) == false else { return false }
     return fileManager.fileExists(atPath: trashPath)
       && !fileManager.fileExists(atPath: receipt.originalPath)
       && Self.isSameItem(receipt, at: URL(fileURLWithPath: trashPath))
@@ -36,7 +37,15 @@ public struct RecoveryService: Sendable {
 
   /// Only items inside a Trash folder are ever moved back.
   static func isTrashLocation(_ path: String) -> Bool {
-    path.components(separatedBy: "/").contains { $0 == ".Trash" || $0 == ".Trashes" }
+    let url = URL(fileURLWithPath: path).standardizedFileURL
+    var root = url.deletingLastPathComponent()
+    while root.path != "/" {
+      if root.lastPathComponent == ".Trash" || root.lastPathComponent == ".Trashes" {
+        return FileSystem.path(url, isInsideOrEqual: root.resolvingSymlinksInPath())
+      }
+      root.deleteLastPathComponent()
+    }
+    return false
   }
 
   static func isSameItem(_ receipt: TrashReceipt, at url: URL) -> Bool {
@@ -49,6 +58,17 @@ public struct RecoveryService: Sendable {
   public func restore(
     _ receipt: TrashReceipt, into folder: URL? = nil, fileManager: FileManager = .default
   ) throws -> URL {
+    try restore(receipt, to: Self.destination(for: receipt, into: folder), fileManager: fileManager)
+  }
+
+  static func destination(for receipt: TrashReceipt, into folder: URL?) -> URL {
+    let original = URL(fileURLWithPath: receipt.originalPath)
+    let destination = folder?.appendingPathComponent(original.lastPathComponent) ?? original
+    return destination.deletingLastPathComponent().resolvingSymlinksInPath()
+      .appendingPathComponent(destination.lastPathComponent)
+  }
+
+  func restore(_ receipt: TrashReceipt, to destination: URL, fileManager: FileManager = .default) throws -> URL {
     guard let trashPath = receipt.trashPath, Self.isTrashLocation(trashPath) else {
       throw RestoreError.noTrashLocation
     }
@@ -59,7 +79,6 @@ public struct RecoveryService: Sendable {
     guard Self.isSameItem(receipt, at: URL(fileURLWithPath: trashPath)) else {
       throw RestoreError.notTheSameItem(original.lastPathComponent)
     }
-    let destination = folder?.appendingPathComponent(original.lastPathComponent) ?? original
     // lstat-based check so a dangling symlink at the destination also counts as occupied.
     if fileManager.fileExists(atPath: destination.path)
       || FileSystem.fileIdentity(at: destination) != nil
@@ -69,6 +88,11 @@ public struct RecoveryService: Sendable {
     do {
       try fileManager.createDirectory(
         at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+      // Repeat identity and parent checks after potentially expensive directory creation.
+      guard Self.isTrashLocation(trashPath),
+        Self.isSameItem(receipt, at: URL(fileURLWithPath: trashPath)),
+        destination.deletingLastPathComponent().resolvingSymlinksInPath().path == destination.deletingLastPathComponent().path
+      else { throw RestoreError.failed("A restore location changed. The item was left in Trash; review the locations again.") }
       try fileManager.moveItem(at: URL(fileURLWithPath: trashPath), to: destination)
     } catch {
       throw RestoreError.failed(error.localizedDescription)

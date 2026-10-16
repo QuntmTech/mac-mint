@@ -119,7 +119,7 @@ struct HistoryView: View {
     return HStack(spacing: 10) {
       VStack(alignment: .leading, spacing: 2) {
         Text(url.lastPathComponent).font(.callout.weight(.medium)).lineLimit(1)
-        Text(url.deletingLastPathComponent().path)
+        Text(entry.restoredLocations?[receipt.originalPath] ?? url.deletingLastPathComponent().path)
           .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
       }
       Spacer()
@@ -128,6 +128,9 @@ struct HistoryView: View {
         .foregroundStyle(.secondary)
       if restored {
         StatusPill(title: "Restored", icon: "checkmark", tint: .green)
+        if let destination = entry.restoredLocations?[receipt.originalPath] {
+          Button("Show") { model.reveal(URL(fileURLWithPath: destination)) }.controlSize(.small)
+        }
       } else if available {
         Button("Restore") { model.restore([receipt], entryID: entry.id) }
           .controlSize(.small)

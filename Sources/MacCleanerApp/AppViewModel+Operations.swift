@@ -316,6 +316,8 @@ extension AppViewModel {
 
   /// Called at launch: operations that never finished are recorded so nothing goes unexplained.
   func recoverInterruptedOperations() async {
+    recoveryWarnings += await RestoreCoordinator.recover(in: AppPaths.restoreJournalDirectory, history: historyStore)
+    history = await historyStore.load()
     recoveryWarnings += OperationJournal.unreadableJournals(in: AppPaths.journalDirectory).map {
       ScanIssue(area: "Recovery", path: $0.path, message: "An operation record could not be read. It has been preserved for diagnosis. Use Finder to inspect the original locations and Trash.")
     }
@@ -351,32 +353,26 @@ extension AppViewModel {
       guard let self else { return }
       var restored: [String] = []
       var conflicts: [RestoreConflict] = []
+      let recovery = RestoreCoordinator(journalDirectory: AppPaths.restoreJournalDirectory, history: historyStore)
       for (index, receipt) in receipts.enumerated() {
         if Task.isCancelled { break }
         operationProgress = OperationProgress(completed: index, total: receipts.count,
           currentName: URL(fileURLWithPath: receipt.originalPath).lastPathComponent, bytesMoved: 0)
-        let failure = await Task.detached(priority: .userInitiated) { () -> RestoreError? in
-          do { try RecoveryService().restore(receipt); return nil }
-          catch let error as RestoreError { return error }
-          catch { return .failed(error.localizedDescription) }
-        }.value
-        if let failure {
+        do {
+          try await recovery.restore(receipt, entryID: entryID)
+          restored.append(receipt.originalPath)
+        } catch {
           conflicts.append(RestoreConflict(entryID: entryID, receipt: receipt,
-            message: failure.errorDescription ?? "Could not restore this item."))
-        } else { restored.append(receipt.originalPath) }
+            message: error.localizedDescription))
+        }
       }
-      var historyError: String?
-      if !restored.isEmpty {
-        do { try await historyStore.markRestored(entryID: entryID, originalPaths: restored) }
-        catch { historyError = "Files were restored, but History could not be updated: \(error.localizedDescription)" }
-        history = await historyStore.load()
-      }
+      history = await historyStore.load()
       restoreConflicts.append(contentsOf: conflicts)
       isWorking = false
       operationTitle = nil
       operationProgress = nil
       currentTask = nil
-      statusMessage = historyError ?? "Restored \(restored.count) of \(receipts.count); \(conflicts.count) need attention"
+      statusMessage = "Restored \(restored.count) of \(receipts.count); \(conflicts.count) need attention"
       refreshTrashStatus()
     }
   }
@@ -386,7 +382,7 @@ extension AppViewModel {
   }
 
   func restoreElsewhere(_ conflict: RestoreConflict) {
-    guard !isWorking else { return }
+    guard !isWorking, !isScanning else { return }
     let panel = NSOpenPanel()
     panel.title = "Choose where to restore “\(URL(fileURLWithPath: conflict.receipt.originalPath).lastPathComponent)”"
     panel.canChooseDirectories = true
@@ -396,16 +392,12 @@ extension AppViewModel {
     panel.begin { [weak self] response in
       guard response == .OK, let folder = panel.url else { return }
       Task { @MainActor [weak self] in
-        guard let self else { return }
+        guard let self, !self.isWorking, !self.isScanning else { return }
         self.isWorking = true
         self.operationTitle = "Restoring from Trash"
         do {
-          let destination = try await Task.detached(priority: .userInitiated) {
-            try RecoveryService().restore(conflict.receipt, into: folder)
-          }.value
-          do { try await self.historyStore.markRestored(entryID: conflict.entryID,
-            originalPaths: [conflict.receipt.originalPath]) }
-          catch { self.statusMessage = "Restored, but History could not be updated: \(error.localizedDescription)" }
+          let recovery = RestoreCoordinator(journalDirectory: AppPaths.restoreJournalDirectory, history: self.historyStore)
+          let destination = try await recovery.restore(conflict.receipt, entryID: conflict.entryID, into: folder)
           self.history = await self.historyStore.load()
           self.skipRestoreConflict(conflict)
           self.reveal(destination)

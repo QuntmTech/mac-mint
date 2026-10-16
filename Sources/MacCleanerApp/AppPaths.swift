@@ -21,4 +21,5 @@ enum AppPaths {
 
   /// In-progress operation journals; anything left here after a crash is recovered at launch.
   static var journalDirectory: URL { supportDirectory.appendingPathComponent("Operations", isDirectory: true) }
+  static var restoreJournalDirectory: URL { supportDirectory.appendingPathComponent("Restores", isDirectory: true) }
 }
