@@ -4,7 +4,7 @@ import MacCleanerCore
 extension AppViewModel {
   /// Keep unrelated results and user choices; invalidate paths actually changed by organization.
   func reconcileOrganization(_ record: OrganizationRecord) {
-    let paths = Set(record.items.filter { [.moved, .undone, .uncertain].contains($0.state) }.flatMap { item -> [String] in
+    let paths = Set(record.items.filter { [.moved, .undone, .moving, .undoing, .uncertain].contains($0.state) }.flatMap { item -> [String] in
       guard let file = record.inventory.files.first(where: { $0.id == item.id }),
         let folder = record.inventory.folders.first(where: { $0.id == item.proposal.folderID }) else { return [] }
       let destination = folder.id == "root" ? record.inventory.root : record.inventory.root.appendingPathComponent(folder.name)
@@ -46,9 +46,16 @@ extension AppViewModel {
     guard authorizeRemoval() else { throw OrganizationAccessError.activation }
     isWorking = true; operationTitle = "Organization"
     defer { isWorking = false; operationTitle = nil }
-    let record = try await organizationStore.apply(inventory, proposals: proposals, ignoredPaths: ignoredPaths)
-    reconcileOrganization(record)
-    return record
+    do {
+      let record = try await organizationStore.apply(inventory, proposals: proposals, ignoredPaths: ignoredPaths)
+      reconcileOrganization(record)
+      return record
+    } catch {
+      if let history = try? await organizationStore.historyReport(), let record = history.records.first(where: { $0.id == inventory.id }) {
+        reconcileOrganization(record)
+      }
+      throw error
+    }
   }
 
   func undoOrganization(_ id: UUID) async throws -> OrganizationRecord {
@@ -56,8 +63,15 @@ extension AppViewModel {
     guard !isWorking, !isScanning else { throw OrganizationAccessError.busy }
     isWorking = true; operationTitle = "Undo organization"
     defer { isWorking = false; operationTitle = nil }
-    let record = try await organizationStore.undo(recordID: id)
-    reconcileOrganization(record)
-    return record
+    do {
+      let record = try await organizationStore.undo(recordID: id)
+      reconcileOrganization(record)
+      return record
+    } catch {
+      if let history = try? await organizationStore.historyReport(), let record = history.records.first(where: { $0.id == id }) {
+        reconcileOrganization(record)
+      }
+      throw error
+    }
   }
 }

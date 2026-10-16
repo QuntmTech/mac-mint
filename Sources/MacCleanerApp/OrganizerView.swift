@@ -145,9 +145,11 @@ struct OrganizerView: View {
               }
               ForEach(record.items) { item in
                 let original = record.inventory.files.first { $0.id == item.id }?.name ?? "Unknown file"
+                let folder = record.inventory.folders.first { $0.id == item.proposal.folderID }
+                let destination = (folder?.id == "root" ? "" : (folder?.name ?? "Unknown folder") + "/") + item.proposal.name
                 VStack(alignment: .leading, spacing: 3) {
-                  Text("\(original) → \(item.proposal.name)").font(.callout).textSelection(.enabled)
-                  Text("\(item.state.rawValue.capitalized)\(item.message.map { " · " + $0 } ?? "")")
+                  Text("\(original) → \(destination)").font(.callout).textSelection(.enabled)
+                  Text("\(stateLabel(item))\(item.message.map { " · " + $0 } ?? "")")
                     .font(.caption).foregroundStyle(item.message == nil ? .secondary : AppTheme.warning)
                 }
               }
@@ -155,6 +157,15 @@ struct OrganizerView: View {
           }
         }
       }.padding(20)
+    }
+  }
+
+  private func stateLabel(_ item: OrganizationRecord.Item) -> String {
+    switch item.state {
+    case .prepared, .failed: return "Not applied"
+    case .moving, .undoing, .uncertain: return "Needs verification"
+    case .moved: return item.message == nil ? "Undo available" : "Undo needs attention"
+    case .undone: return "Undone"
     }
   }
 
