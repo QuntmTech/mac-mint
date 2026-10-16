@@ -97,11 +97,14 @@ extension AppViewModel {
           finishScan(message: "MacMint needs access to Photos — allow it in System Settings ▸ Privacy & Security ▸ Photos")
           return
         }
-        let photos = await PhotoLibraryService.fingerprints(progress: report)
-        result = PhotoScanResult(
-          photos: photos, similarGroups: PhotoAnalysis.group(photos),
-          blurry: PhotoAnalysis.blurry(photos), screenshots: [], skippedLibraries: [], issues: [],
-          wasCancelled: Task.isCancelled)
+        let library = await PhotoLibraryService.fingerprints(progress: report)
+        let issues = library.total > library.photos.count ? [ScanIssue(area: "Photos", path: nil, severity: .info,
+          message: "\(library.total - library.photos.count) library assets could not be analyzed from local thumbnails. Cloud-only, unreadable or unsupported items may be omitted. No cloud downloads were requested.")] : []
+        result = await Task.detached(priority: .userInitiated) {
+          PhotoScanResult(photos: library.photos, similarGroups: PhotoAnalysis.group(library.photos),
+            blurry: PhotoAnalysis.blurry(library.photos), screenshots: [], skippedLibraries: [], issues: issues,
+            wasCancelled: Task.isCancelled)
+        }.value
       case .folder(let url):
         result = await PhotoScanner().scan([url], ignoredPaths: ignoredPaths, progress: report)
       }

@@ -287,6 +287,9 @@ extension AppViewModel {
 
   /// Called at launch: operations that never finished are recorded so nothing goes unexplained.
   func recoverInterruptedOperations() async {
+    recoveryWarnings = OperationJournal.unreadableJournals(in: AppPaths.journalDirectory).map {
+      ScanIssue(area: "Recovery", path: $0.path, message: "An operation record could not be read. It has been preserved for diagnosis. Use Finder to inspect the original locations and Trash.")
+    }
     let reports = OperationJournal.recoverInterrupted(in: AppPaths.journalDirectory)
     guard !reports.isEmpty else { return }
     for report in reports {
@@ -295,7 +298,7 @@ extension AppViewModel {
       }
     }
     statusMessage =
-      "Recovered \(reports.count) interrupted operation\(reports.count == 1 ? "" : "s") — see History"
+      "Reconciled \(reports.count) operation record\(reports.count == 1 ? "" : "s") — see History"
   }
 
   // MARK: Recovery

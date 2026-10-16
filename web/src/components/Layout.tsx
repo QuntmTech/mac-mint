@@ -2,6 +2,8 @@ import { Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { Logo } from './Logo'
 
+const copyrightYear = new Date().getFullYear()
+
 export const Layout = () => {
   const { isSignedIn } = useAuth()
 
@@ -35,7 +37,7 @@ export const Layout = () => {
 
       <footer className="border-t border-slate-200 py-8 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
         <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p>© {new Date().getFullYear()} MacMint. Made for macOS.</p>
+          <p>© {copyrightYear} MacMint. Made for macOS.</p>
           <a href="mailto:support@macmint.co" className="hover:text-slate-900 dark:hover:text-white">
             support@macmint.co
           </a>

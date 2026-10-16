@@ -111,10 +111,41 @@ function applyLicense(ent, lic) {
 
 function devices(app, userId) {
   try {
-    return app.findRecordsByFilter("devices", "user = {:u}", "-last_seen", 200, 0, { u: userId }) || []
+    return app.findRecordsByFilter("devices", "user = {:u} && deactivated = false", "-last_seen", 200, 0, { u: userId }) || []
   } catch (err) {
     return []
   }
+}
+
+// Count, reactivation decision, and write share one transaction so concurrent Macs cannot
+// both consume the last slot. Deactivated rows remain as tombstones for old clients.
+function activateDevice(app, user, data) {
+  let payload
+  app.runInTransaction((tx) => {
+    const ent = entitlementPayload(ensureEntitlement(tx, user.id))
+    if (!ent.active) throw { status: 402, error: "no_active_plan", message: "An active MacMint plan is required." }
+    let device
+    try { device = tx.findFirstRecordByFilter("devices", "user = {:u} && device_id = {:d}", { u: user.id, d: data.device_id }) } catch (_) {}
+    if (device && device.get("deactivated") && data.reactivate !== true) {
+      throw { status: 409, error: "device_deactivated", message: "This Mac was removed from your account. Sign in again to activate it explicitly." }
+    }
+    if (!device || device.get("deactivated")) {
+      const existing = devices(tx, user.id), limit = ent.max_devices > 0 ? ent.max_devices : DEFAULT_MAX_DEVICES
+      if (existing.length >= limit) throw { status: 409, error: "device_limit", message: "Remove another Mac from your account before activating this one.", limit, devices: existing.map(devicePayload) }
+    }
+    if (!device) {
+      device = new Record(tx.findCollectionByNameOrId("devices"))
+      device.set("user", user.id); device.set("device_id", data.device_id)
+    }
+    device.set("deactivated", false)
+    device.set("name", clean(data.name, 200) || "Mac")
+    device.set("model", clean(data.model, 100)); device.set("os_version", clean(data.os_version, 40))
+    device.set("app_version", clean(data.app_version, 40)); device.set("last_seen", new Date().toISOString())
+    tx.save(device)
+    logEvent(tx, "device_activated", user.id, { device_id: data.device_id })
+    payload = devicePayload(device)
+  })
+  return payload
 }
 
 function devicePayload(d) {
@@ -145,6 +176,7 @@ function mePayload(app, user) {
 }
 
 module.exports = {
+  activateDevice: activateDevice,
   DEFAULT_MAX_DEVICES: DEFAULT_MAX_DEVICES,
   body: body,
   noStore: noStore,

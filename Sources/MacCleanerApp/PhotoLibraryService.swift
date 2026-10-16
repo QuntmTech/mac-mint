@@ -25,8 +25,10 @@ enum PhotoLibraryService {
   }
 
   /// Fingerprints every still image in the library (videos and Live Photo motion are ignored).
-  static func fingerprints(progress: @escaping @Sendable (Int, Int) -> Void) async -> [PhotoFingerprint] {
-    await Task.detached(priority: .userInitiated) { () -> [PhotoFingerprint] in
+  struct FingerprintReport: Sendable { let photos: [PhotoFingerprint]; let total: Int }
+
+  static func fingerprints(progress: @escaping @Sendable (Int, Int) -> Void) async -> FingerprintReport {
+    let work = Task.detached(priority: .userInitiated) { () -> FingerprintReport in
       let options = PHFetchOptions()
       options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
       options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
@@ -61,8 +63,9 @@ enum PhotoLibraryService {
             captured: asset.creationDate, assetID: asset.localIdentifier))
       }
       progress(total, total)
-      return results
-    }.value
+      return FingerprintReport(photos: results, total: total)
+    }
+    return await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
   }
 
   /// Asks Photos to delete the assets. Photos shows its own confirmation; deleted items stay

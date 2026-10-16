@@ -94,6 +94,7 @@ final class AppViewModel: ObservableObject {
   @Published var history: [HistoryEntry] = []
   @Published var scanIssues: [ScanIssue] = []
   @Published var showingScanIssues = false
+  @Published var recoveryWarnings: [ScanIssue] = []
   @Published var ignoredPaths: Set<String> = []
   @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
@@ -189,7 +190,7 @@ final class AppViewModel: ObservableObject {
   }
 
   var reclaimableBytes: Int64 {
-    cleanupTargets.filter { $0.risk == .safe }.reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Rebuildable estimate", items: cleanupTargets.filter { $0.risk == .safe }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var reviewableBytes: Int64 {

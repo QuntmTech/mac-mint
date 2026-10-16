@@ -11,7 +11,7 @@
 (function () {
   'use strict'
   var SPLIT_ENABLED = false
-  var TRACKING_ENABLED = true
+  var TRACKING_ENABLED = false
   var PB_URL = 'https://macmint.cloudpod.pro'
   var VARIANTS = { home: '/', home2: '/home2' }
   var KEY_VARIANT = 'mm_lp_variant'
@@ -19,8 +19,8 @@
   var KEY_UTM = 'mm_utm'
 
   var store = {
-    get: function (k) { try { return window.localStorage.getItem(k) } catch (e) { return null } },
-    set: function (k, v) { try { window.localStorage.setItem(k, v) } catch (e) { /* private mode */ } }
+    get: function (k) { try { return window.localStorage.getItem(k) } catch { return null } },
+    set: function (k, v) { try { window.localStorage.setItem(k, v) } catch { /* private mode */ } }
   }
 
   var randomId = function () {
@@ -28,8 +28,12 @@
     return 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12)
   }
 
-  var visitor = store.get(KEY_VISITOR)
-  if (!visitor) { visitor = randomId(); store.set(KEY_VISITOR, visitor) }
+  // Tracking is disabled. Do not create persistent visitor identifiers when no events are sent.
+  var visitor = null
+  if (TRACKING_ENABLED) {
+    visitor = store.get(KEY_VISITOR)
+    if (!visitor) { visitor = randomId(); store.set(KEY_VISITOR, visitor) }
+  }
 
   var params = new URLSearchParams(window.location.search)
   if (params.get('mm_qa') === '1') store.set('mm_qa', '1')
@@ -40,7 +44,7 @@
   Object.keys(VARIANTS).forEach(function (name) { if (VARIANTS[name] === path) pageVariant = name })
 
   // First-touch UTM tags are kept so a later sign-up is attributed to the original campaign.
-  if (!store.get(KEY_UTM) && (params.get('utm_source') || params.get('utm_campaign'))) {
+  if (TRACKING_ENABLED && !store.get(KEY_UTM) && (params.get('utm_source') || params.get('utm_campaign'))) {
     store.set(KEY_UTM, JSON.stringify({
       utm_source: (params.get('utm_source') || '').slice(0, 100),
       utm_medium: (params.get('utm_medium') || '').slice(0, 100),
@@ -67,7 +71,7 @@
   var track = function (event, extra) {
     if (!TRACKING_ENABLED || isQA) return
     var utm = {}
-    try { utm = JSON.parse(store.get(KEY_UTM) || '{}') } catch (e) { utm = {} }
+    try { utm = JSON.parse(store.get(KEY_UTM) || '{}') } catch { utm = {} }
     var body = {
       event: event,
       variant: store.get(KEY_VARIANT) || 'none',
@@ -86,7 +90,7 @@
         body: JSON.stringify(body),
         keepalive: true
       }).catch(function () { /* ignore */ })
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   }
 
   window.MacMintLP = { track: track, variant: function () { return store.get(KEY_VARIANT) }, visitor: visitor }

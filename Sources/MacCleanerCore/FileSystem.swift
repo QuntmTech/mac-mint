@@ -69,7 +69,7 @@ public enum FileSystem {
     let failures = IssueCollector()
     guard let enumerator = fileManager.enumerator(at: url,
       includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
-      options: [.skipsPackageDescendants], errorHandler: { path, _ in
+      options: [], errorHandler: { path, _ in
         failures.append(ScanIssue(area: "Safety", path: path.path, message: "Could not inspect folder contents."))
         return false
       }) else { return "Folder contents could not be checked for managed photo libraries." }

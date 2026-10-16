@@ -27,7 +27,7 @@ public actor AppScanner {
     await installedAppsReport(extraRoots: extraRoots).value
   }
 
-  public func installedAppsReport(extraRoots: [URL] = []) async -> ScanReport<[AppRecord]> {
+  public func installedAppsReport(extraRoots: [URL] = [], ignoredPaths: Set<String> = []) async -> ScanReport<[AppRecord]> {
     let started = Date()
     var records: [AppRecord] = []
     let collector = IssueCollector()
@@ -39,7 +39,7 @@ public actor AppScanner {
           value: sort(records), issues: collector.issues,
           duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
-      guard fileManager.fileExists(atPath: root.path) else { continue }
+      guard !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths), fileManager.fileExists(atPath: root.path) else { continue }
 
       guard
         let enumerator = fileManager.enumerator(
@@ -65,13 +65,14 @@ public actor AppScanner {
       var apps: [URL] = []
       FileSystem.walk(enumerator) { url in
         if Task.isCancelled { return .stop }
+        if FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) { return .skipDescendants }
         guard url.pathExtension.lowercased() == "app" else { return .continue }
         if seen.insert(url.standardizedFileURL.path).inserted { apps.append(url) }
         return .skipDescendants
       }
       for url in apps {
         if Task.isCancelled { break }
-        records.append(record(for: url))
+        if !FileSystem.containsIgnoredDescendant(url, ignoredPaths: ignoredPaths) { records.append(record(for: url)) }
       }
     }
 

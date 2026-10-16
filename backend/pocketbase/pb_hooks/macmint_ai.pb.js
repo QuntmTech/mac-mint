@@ -15,12 +15,13 @@
 
 routerAdd("POST", "/api/macmint/ai/explain", (e) => {
   const ai = require(`${__hooks}/macmint_ai_lib.js`)
+  const privacy = require(`${__hooks}/macmint_ai_context.js`)
   try { e.response.header().set("Cache-Control", "no-store") } catch (err) { /* ignore */ }
   if (!ai.requirePlan(e)) return ai.fail(e, 402, "no_active_plan", "AI features need an active MacMint plan.")
 
   const data = ai.body(e)
   const kind = ai.oneOf(data.kind, ai.KINDS, "")
-  const identifier = ai.clip(data.identifier, 200)
+  const identifier = privacy.identifier(kind, ai.clip(data.identifier, 200))
   const location = ai.oneOf(data.location, ai.LOCATIONS, "Other")
   if (!kind || identifier.length < 2) return ai.fail(e, 400, "bad_request", "Nothing to explain.")
 
@@ -31,17 +32,14 @@ routerAdd("POST", "/api/macmint/ai/explain", (e) => {
   const key = ai.cacheKey(kind, location, identifier)
   if (cacheable) {
     const hit = ai.cachedExplanation(e.app, key)
-    if (hit) return e.json(200, { explanation: hit, cached: true, model: ai.MODELS.explain })
+    if (hit) return e.json(200, { explanation: hit, cached: true, model: "cached" })
   }
 
-  const blocked = ai.gate(e.app, e.auth.id, "explain")
-  if (blocked) return ai.fail(e, blocked[0], blocked[1], blocked[2])
 
   try {
-    const result = ai.claude(
-      e.app, ai.MODELS.explain, ai.EXPLAIN_SYSTEM,
+    const result = ai.request(
+      e.app, e.auth.id, "explain", ai.EXPLAIN_SYSTEM,
       { kind: kind, location: location, name: identifier }, ai.EXPLAIN_SCHEMA, 600)
-    ai.recordUsage(e.app, e.auth.id, "explain", result.usage)
     const o = result.output
     const explanation = {
       summary: ai.clip(o.summary, 600),
@@ -52,7 +50,7 @@ routerAdd("POST", "/api/macmint/ai/explain", (e) => {
       confidence: ai.oneOf(o.confidence, ["low", "medium", "high"], "low"),
     }
     if (cacheable) ai.storeExplanation(e.app, key, kind, explanation)
-    return e.json(200, { explanation: explanation, cached: false, model: ai.MODELS.explain })
+    return e.json(200, { explanation: explanation, cached: false, model: result.model })
   } catch (err) {
     return ai.handleError(e, err)
   }
@@ -60,34 +58,22 @@ routerAdd("POST", "/api/macmint/ai/explain", (e) => {
 
 routerAdd("POST", "/api/macmint/ai/review", (e) => {
   const ai = require(`${__hooks}/macmint_ai_lib.js`)
+  const privacy = require(`${__hooks}/macmint_ai_context.js`)
   try { e.response.header().set("Cache-Control", "no-store") } catch (err) { /* ignore */ }
   if (!ai.requirePlan(e)) return ai.fail(e, 402, "no_active_plan", "AI features need an active MacMint plan.")
 
   const data = ai.body(e)
-  const recs = (Array.isArray(data.recommendations) ? data.recommendations : []).slice(0, 15).map(function (r) {
-    return {
-      id: ai.clip(r && r.id, 40),
-      title: ai.clip(r && r.title, 120),
-      bytes: Math.max(0, Math.floor(Number(r && r.bytes) || 0)),
-      confidence: ai.oneOf(r && r.confidence, ["safe", "likely", "review"], "review"),
-      count: Math.max(0, Math.floor(Number(r && r.count) || 0)),
-      evidence: ai.clip(r && r.detail, 300),
-    }
-  }).filter(function (r) { return r.id && r.title })
-  if (recs.length === 0) return ai.fail(e, 400, "bad_request", "Run Smart Care first.")
+  const recs = privacy.recommendations(data.recommendations)
+  if (recs.length === 0) return ai.fail(e, 400, "bad_request", "Run Quick Scan first.")
   const disk = data.disk || {}
-  const growth = (Array.isArray(data.growth) ? data.growth : []).slice(0, 5).map(function (g) {
-    return { folder: ai.clip(g && g.path, 200), grewBytes: Math.max(0, Math.floor(Number(g && g.delta) || 0)) }
-  })
+  const growth = privacy.growth(data.growth)
 
-  const blocked = ai.gate(e.app, e.auth.id, "review")
-  if (blocked) return ai.fail(e, blocked[0], blocked[1], blocked[2])
 
   const schema = JSON.parse(JSON.stringify(ai.REVIEW_SCHEMA))
   schema.properties.insights.items.properties.destination.enum = ai.DESTINATIONS
   try {
-    const result = ai.claude(
-      e.app, ai.MODELS.review, ai.REVIEW_SYSTEM,
+    const result = ai.request(
+      e.app, e.auth.id, "review", ai.REVIEW_SYSTEM,
       {
         disk: {
           totalBytes: Math.max(0, Math.floor(Number(disk.totalBytes) || 0)),
@@ -97,7 +83,6 @@ routerAdd("POST", "/api/macmint/ai/review", (e) => {
         recommendations: recs,
       },
       schema, 1400)
-    ai.recordUsage(e.app, e.auth.id, "review", result.usage)
     const o = result.output
     const known = recs.map(function (r) { return r.id })
     const notes = (Array.isArray(o.notes) ? o.notes : [])
@@ -114,7 +99,7 @@ routerAdd("POST", "/api/macmint/ai/review", (e) => {
         }
       }),
       cautions: (Array.isArray(o.cautions) ? o.cautions : []).slice(0, 3).map(function (c) { return ai.clip(c, 240) }),
-      model: ai.MODELS.review,
+      model: result.model,
     })
   } catch (err) {
     return ai.handleError(e, err)
@@ -123,6 +108,7 @@ routerAdd("POST", "/api/macmint/ai/review", (e) => {
 
 routerAdd("POST", "/api/macmint/ai/ask", (e) => {
   const ai = require(`${__hooks}/macmint_ai_lib.js`)
+  const privacy = require(`${__hooks}/macmint_ai_context.js`)
   try { e.response.header().set("Cache-Control", "no-store") } catch (err) { /* ignore */ }
   if (!ai.requirePlan(e)) return ai.fail(e, 402, "no_active_plan", "AI features need an active MacMint plan.")
 
@@ -132,24 +118,19 @@ routerAdd("POST", "/api/macmint/ai/ask", (e) => {
   const history = (Array.isArray(data.history) ? data.history : []).slice(-6).map(function (t) {
     return { role: t && t.role === "assistant" ? "assistant" : "user", text: ai.clip(t && t.text, 1500) }
   })
-  let context = data.context && typeof data.context === "object" ? data.context : {}
-  if (JSON.stringify(context).length > 16000) {
-    return ai.fail(e, 413, "context_too_large", "That summary is too large to send.")
-  }
+  if (JSON.stringify(data.context || {}).length > 16000) return ai.fail(e, 413, "context_too_large", "That summary is too large to send.")
+  const context = privacy.context(data.context)
 
-  const blocked = ai.gate(e.app, e.auth.id, "ask")
-  if (blocked) return ai.fail(e, blocked[0], blocked[1], blocked[2])
 
   const schema = JSON.parse(JSON.stringify(ai.ASK_SCHEMA))
   schema.properties.actions.items.properties.destination.enum = ai.DESTINATIONS
   try {
-    const result = ai.claude(
-      e.app, ai.MODELS.ask, ai.ASK_SYSTEM, { question: question, earlierTurns: history, mac: context }, schema, 1200)
-    ai.recordUsage(e.app, e.auth.id, "ask", result.usage)
+    const result = ai.request(
+      e.app, e.auth.id, "ask", ai.ASK_SYSTEM, { question: question, earlierTurns: history, mac: context }, schema, 1200)
     return e.json(200, {
       answer: ai.clip(result.output.answer, 4000),
       actions: ai.cleanActions(result.output.actions).slice(0, 3),
-      model: ai.MODELS.ask,
+      model: result.model,
     })
   } catch (err) {
     return ai.handleError(e, err)
@@ -168,4 +149,16 @@ routerAdd("POST", "/api/macmint/admin/ai-cache/purge", (e) => {
     }
   } catch (err) { /* nothing cached */ }
   return e.json(200, { removed: removed })
+}, $apis.requireSuperuserAuth())
+
+// Operator reconciliation for timed-out requests. Supply verified provider usage; a release
+// without charge requires explicit confirmation. Counts as an attempt either way.
+routerAdd("POST", "/api/macmint/admin/ai-reconcile", (e) => {
+  const ai = require(`${__hooks}/macmint_ai_lib.js`)
+  const data = ai.body(e)
+  try {
+    if (!data.request_id || (!data.usage && data.confirm_no_charge !== true)) return ai.fail(e, 400, "bad_request", "Verified usage or a no-charge confirmation is required.")
+    ai.settle(e.app, String(data.request_id), data.usage, data.confirm_no_charge === true)
+    return e.json(200, { ok: true })
+  } catch (err) { return ai.handleError(e, err) }
 }, $apis.requireSuperuserAuth())

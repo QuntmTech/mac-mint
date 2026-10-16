@@ -3,8 +3,8 @@ import { LogoMark } from '../components/Logo'
 
 // Placeholder landing page. The full marketing homepage (Claude Design) replaces this component.
 const features = [
-  { title: 'Trash-first, always', body: 'Every cleanup goes to the Trash with a receipt, so anything can be restored.' },
-  { title: 'Knows what’s safe', body: 'Caches and logs are cleaned automatically; personal files always need your review.' },
+  { title: 'Trash-first, always', body: 'Reviewed files go to Trash with receipts. Restore verified items while they remain there; library photos use Photos recovery.' },
+  { title: 'Explains the consequences', body: 'Review rebuildable caches and logs before they move. Personal files need your explicit choice.' },
   { title: 'Complete uninstalls', body: 'Removes apps with their leftovers — without touching data shared with other apps.' },
   { title: 'Exact duplicates', body: 'Finds byte-for-byte copies and re-checks them before anything moves.' },
 ]
@@ -17,7 +17,7 @@ export const Home = () => (
         A cleaner Mac, without the guesswork.
       </h1>
       <p className="mx-auto mt-6 max-w-2xl text-lg text-pretty text-slate-600 dark:text-slate-300">
-        MacMint finds the junk slowing your Mac down, explains every item, and only ever moves things to the Trash.
+        See what uses your storage, inspect recommendations, and review what moves to Trash. Useful local scanning works before sign-in; AI is optional.
       </p>
       <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
         <a href="#pricing" className="w-full rounded-lg bg-emerald-600 px-6 py-3 font-semibold text-white hover:bg-emerald-500 sm:w-auto">

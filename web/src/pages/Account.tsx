@@ -16,6 +16,7 @@ import {
 } from '../lib/account'
 import { errorMessage, pb } from '../lib/pb'
 import { track } from '../lib/track'
+import { Checkout } from '../components/Checkout'
 
 const Card = ({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -61,6 +62,7 @@ const PlanCard = ({ account }: { account: AccountSnapshot }) => {
           </p>
         )}
       </div>
+      {!account.entitlement.active && <Checkout userId={account.user.id} verified={account.user.verified} />}
     </Card>
   )
 }
@@ -123,7 +125,7 @@ const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
   )
 }
 
-const DownloadCard = ({ release, enabled }: { release: Release | null; enabled: boolean }) => (
+const DownloadCard = ({ release }: { release: Release | null }) => (
   <Card title="Download MacMint">
     {release?.download_url ? (
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -134,10 +136,10 @@ const DownloadCard = ({ release, enabled }: { release: Release | null; enabled: 
           </p>
         </div>
         <a
-          href={enabled ? release.download_url : undefined}
-          aria-disabled={!enabled}
+          href={release.download_url}
+
           className={`inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold text-white ${
-            enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'pointer-events-none bg-slate-400'
+            'bg-emerald-600 hover:bg-emerald-500'
           }`}
         >
           Download for Mac
@@ -145,12 +147,10 @@ const DownloadCard = ({ release, enabled }: { release: Release | null; enabled: 
       </div>
     ) : (
       <p className="text-sm text-slate-500 dark:text-slate-400">
-        The public download is almost ready. We’ll email you as soon as it’s available.
+        A validated consumer build is not available yet. Check back here for the download.
       </p>
     )}
-    {!enabled && release?.download_url && (
-      <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Redeem a code to unlock the download.</p>
-    )}
+    <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Scanning, exclusions, History and Restore remain available without paid access.</p>
   </Card>
 )
 
@@ -273,11 +273,23 @@ export const Account = () => {
     }
   }, [signOut])
 
+  const checkoutResult = params.get('checkout')
   useEffect(() => {
     if (!isSignedIn) return
-    load()
-    fetchLatestRelease().then(setRelease)
-  }, [isSignedIn, load])
+    let active = true
+    // Start independent requests together. State changes follow their asynchronous responses.
+    fetchAccount().then(snapshot => {
+      if (active) { setAccount(snapshot); setError(null) }
+    }).catch(err => {
+      if (!active) return
+      if ((err as { status?: number })?.status === 401) signOut()
+      else setError(errorMessage(err, 'Could not load your account.'))
+    })
+    fetchLatestRelease().then(value => { if (active) setRelease(value) })
+    if (checkoutResult === 'cancelled' && pb.authStore.record?.id) sessionStorage.removeItem(`mm_checkout_${pb.authStore.record.id}`)
+    return () => { active = false }
+  }, [isSignedIn, signOut, checkoutResult])
+
 
   if (!isSignedIn) {
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />
@@ -314,9 +326,11 @@ export const Account = () => {
         </div>
       ) : account ? (
         <div className="space-y-6">
+          {params.get('checkout') === 'processing' && <Alert tone="success">Payment confirmation is processing. Your plan is granted by the server after Stripe confirms payment. <button className="underline" onClick={load}>Refresh account</button></Alert>}
+          {params.get('checkout') === 'cancelled' && <Alert>Checkout was closed. No access is granted until a payment is confirmed.</Alert>}
           <PlanCard account={account} />
           <RedeemCard initialCode={params.get('code') ?? ''} hasPlan={account.entitlement.active} onRedeemed={setAccount} />
-          <DownloadCard release={release} enabled={account.entitlement.active} />
+          <DownloadCard release={release} />
           <DevicesCard devices={account.devices} onRemoved={load} />
           <PasswordCard email={account.user.email} />
         </div>

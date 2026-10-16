@@ -13,7 +13,7 @@ public actor StartupItemScanner {
     await scanReport().value
   }
 
-  public func scanReport() async -> ScanReport<[StartupItem]> {
+  public func scanReport(ignoredPaths: Set<String> = []) async -> ScanReport<[StartupItem]> {
     let started = Date()
     let roots: [(URL, String)] = [
       (homeDirectory.appendingPathComponent("Library/LaunchAgents"), "User LaunchAgent"),
@@ -29,11 +29,12 @@ public actor StartupItemScanner {
           value: sort(items), issues: issues, duration: Date().timeIntervalSince(started),
           wasCancelled: true)
       }
-      guard fileManager.fileExists(atPath: root.path) else { continue }
+      guard !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths), fileManager.fileExists(atPath: root.path) else { continue }
       do {
         let entries = try fileManager.contentsOfDirectory(
           at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
         for url in entries where url.pathExtension.lowercased() == "plist" {
+          if FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) { continue }
           guard let data = try? Data(contentsOf: url),
             let object = try? PropertyListSerialization.propertyList(
               from: data, options: [], format: nil),

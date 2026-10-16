@@ -110,6 +110,7 @@ public actor OperationExecutor {
   private let safetyPolicy: SafetyPolicy
   private let fileManager: FileManager
   private let journalDirectory: URL?
+  private let journalWriter: @Sendable (Data, URL) throws -> Void
   /// Custom model/cache locations configured through environment variables (e.g. HF_HUB_CACHE).
   private let developerRoots: [URL]
   private let isAppRunning: @Sendable (String) -> Bool
@@ -119,6 +120,7 @@ public actor OperationExecutor {
     safetyPolicy: SafetyPolicy = SafetyPolicy(),
     fileManager: FileManager = .default,
     journalDirectory: URL? = nil,
+    journalWriter: (@Sendable (Data, URL) throws -> Void)? = nil,
     developerRoots: [URL] = DeveloperStorageScanner.configuredRoots(),
     isAppRunning: @escaping @Sendable (String) -> Bool = { _ in false }
   ) {
@@ -127,6 +129,7 @@ public actor OperationExecutor {
     self.safetyPolicy = safetyPolicy
     self.fileManager = fileManager
     self.journalDirectory = journalDirectory
+    self.journalWriter = journalWriter ?? { try FileSystem.writeDurably($0, to: $1) }
     self.developerRoots = developerRoots
   }
 
@@ -332,7 +335,7 @@ public actor OperationExecutor {
     guard let url = journalURL(report.id) else { return }
     try fileManager.createDirectory(
       at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    try FileSystem.writeDurably(OperationJournal.encoder.encode(report), to: url)
+    try journalWriter(OperationJournal.encoder.encode(report), url)
   }
 }
 
@@ -374,6 +377,15 @@ public enum OperationJournal {
       report.wasInterrupted = report.finishedAt == nil || report.outcomes.contains { $0.status == .uncertain }
       report.finishedAt = report.finishedAt ?? Date()
       return report
+    }
+  }
+
+  public static func unreadableJournals(in directory: URL, fileManager: FileManager = .default) -> [URL] {
+    let files = (try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+    return files.filter { url in
+      guard url.lastPathComponent.hasPrefix("operation-") else { return false }
+      guard let data = try? Data(contentsOf: url) else { return true }
+      return (try? decoder.decode(OperationReport.self, from: data)) == nil
     }
   }
 

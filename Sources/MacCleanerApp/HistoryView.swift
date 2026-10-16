@@ -24,6 +24,13 @@ struct HistoryView: View {
       }
       .padding(AppTheme.pagePadding)
       Divider()
+      if !model.recoveryWarnings.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+          Label("\(model.recoveryWarnings.count) recovery records could not be read", systemImage: "exclamationmark.triangle")
+          Text("The records are retained. Inspect original folders and Finder’s Trash before making further changes.").font(.caption)
+          Button("Show Recovery Records") { model.reveal(AppPaths.journalDirectory) }
+        }.padding(16).foregroundStyle(.orange)
+      }
 
       if model.history.isEmpty {
         EmptyState(

@@ -53,12 +53,12 @@ public struct DownloadItem: Identifiable, Hashable, Sendable {
     self.idleDays = idleDays
   }
 
-  /// Plain-English evidence, e.g. "Downloaded 8 months ago from github.com and never opened".
+  /// Plain-English evidence, e.g. "Downloaded 8 months ago from github.com with no recorded opens".
   public var evidence: String {
     let age = RelativeAge.describe(days: idleDays)
     let from = usage.source.map { " from \($0)" } ?? ""
     if usage.neverOpened {
-      return "Downloaded \(age) ago\(from) and never opened"
+      return "Downloaded \(age) ago\(from) with no recorded opens"
     }
     if usage.lastUsed != nil {
       return "Last opened \(age) ago\(from.isEmpty ? "" : " · came\(from)")"

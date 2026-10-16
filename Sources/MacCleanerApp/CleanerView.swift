@@ -3,7 +3,7 @@ import SwiftUI
 
 struct CleanerView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var search = ""
+  @SceneStorage("cleanup.search") private var search = ""
   @State private var riskFilter: RiskFilter = .all
 
   enum RiskFilter: String, CaseIterable, Identifiable {

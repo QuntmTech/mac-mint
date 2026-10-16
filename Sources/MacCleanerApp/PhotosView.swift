@@ -5,7 +5,7 @@ import SwiftUI
 struct PhotosView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var comparing: SimilarPhotoGroup?
-  @State private var tab: PhotoTab = .similar
+  @SceneStorage("photos.tab") private var tab: PhotoTab = .similar
 
   private var isLibrary: Bool { model.photoSource == .library }
 

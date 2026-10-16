@@ -13,7 +13,7 @@ Add these repository secrets (Settings → Secrets and variables → Actions):
 | `APPLE_TEAM_ID` | 10-character team ID |
 | `APPLE_APP_PASSWORD` | app-specific password from appleid.apple.com |
 
-Without these secrets the release workflow still runs, producing an ad-hoc signed build (fine for testing, blocked by Gatekeeper for customers).
+All signing and notarization secrets must be present to publish a consumer release. Without the complete set the workflow produces an explicitly marked ad-hoc prerelease. Both paths run package smoke rendering; only the consumer path can enter the public app feed.
 
 ## Cutting a release
 
@@ -21,7 +21,7 @@ Without these secrets the release workflow still runs, producing an ad-hoc signe
 2. Merge to `main`, then tag: `git tag v0.6.0 && git push origin v0.6.0`.
 3. The **Release** workflow builds, signs, notarizes, staples, and publishes a GitHub release with `MacMint.zip` and its SHA-256.
 4. Publish it to the app's update feed — create an `app_releases` record in PocketBase (`macmint` project):
-   `version`, `build`, `channel=stable`, `min_os=14.0`, `download_url` (the GitHub release asset URL), `sha256`, `size_bytes`, `notes`, `published=true`, `published_at=now`.
+   `version`, `build`, `channel=stable`, `min_os=14.0`, `download_url` (the GitHub release asset URL), `sha256`, `size_bytes`, `notes`, `validated=true`, `notarized=true`, `published=true`, `published_at=now`. Record these attestations only after testing the downloaded artifact, quarantine/Gatekeeper installation, local scanning, cleanup and restore on a disposable Mac. The feed rules reject unvalidated artifacts.
    Installed apps see the update within a day (or immediately via Settings → Check Now); the website's account page shows the download.
 5. To force older versions to update, raise `min_version` in the `app_config` record with key `client`.
 

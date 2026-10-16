@@ -101,51 +101,16 @@ routerAdd("POST", "/api/macmint/devices/activate", (e) => {
     return e.json(400, { error: "bad_request", message: "Missing or malformed device_id." })
   }
 
-  const ent = lib.entitlementPayload(lib.ensureEntitlement(e.app, user.id))
-  if (!ent.active) {
-    return e.json(402, {
-      error: "no_active_plan",
-      message: "This account doesn't have an active MacMint plan. Redeem a code or purchase at macmint.co.",
-      entitlement: ent
-    })
-  }
-
-  let device = null
   try {
-    device = e.app.findFirstRecordByFilter("devices", "user = {:u} && device_id = {:d}", { u: user.id, d: deviceId })
+    data.device_id = deviceId
+    const device = lib.activateDevice(e.app, user, data)
+    const payload = lib.mePayload(e.app, user)
+    payload.device = device
+    return e.json(200, payload)
   } catch (err) {
-    device = null
+    if (err.status) return e.json(err.status, { error: err.error, message: err.message, limit: err.limit, devices: err.devices })
+    return e.json(503, { error: "activation_unavailable", message: "Activation could not be saved. Please try again." })
   }
-
-  if (!device) {
-    const existing = lib.devices(e.app, user.id)
-    const limit = ent.max_devices > 0 ? ent.max_devices : lib.DEFAULT_MAX_DEVICES
-    if (existing.length >= limit) {
-      lib.logEvent(e.app, "device_limit", user.id, { limit: limit })
-      return e.json(409, {
-        error: "device_limit",
-        message: "MacMint is already active on " + existing.length + " Mac" + (existing.length === 1 ? "" : "s") +
-          ". Remove one from your account at macmint.co/account, then try again.",
-        limit: limit,
-        devices: existing.map(lib.devicePayload)
-      })
-    }
-    device = new Record(e.app.findCollectionByNameOrId("devices"))
-    device.set("user", user.id)
-    device.set("device_id", deviceId)
-    lib.logEvent(e.app, "device_activated", user.id, { device_id: deviceId })
-  }
-
-  device.set("name", lib.clean(data.name, 200) || "Mac")
-  device.set("model", lib.clean(data.model, 100))
-  device.set("os_version", lib.clean(data.os_version, 40))
-  device.set("app_version", lib.clean(data.app_version, 40))
-  device.set("last_seen", new Date().toISOString())
-  e.app.save(device)
-
-  const payload = lib.mePayload(e.app, user)
-  payload.device = lib.devicePayload(device)
-  return e.json(200, payload)
 }, $apis.requireAuth("users"))
 
 routerAdd("POST", "/api/macmint/devices/deactivate", (e) => {
@@ -161,8 +126,12 @@ routerAdd("POST", "/api/macmint/devices/deactivate", (e) => {
     device = null
   }
   if (device) {
-    e.app.delete(device)
-    lib.logEvent(e.app, "device_deactivated", user.id, { device_id: deviceId })
+    e.app.runInTransaction((tx) => {
+      const current = tx.findRecordById("devices", device.id)
+      current.set("deactivated", true)
+      tx.save(current)
+      lib.logEvent(tx, "device_deactivated", user.id, { device_id: deviceId })
+    })
   }
   return e.json(200, { ok: true })
 }, $apis.requireAuth("users"))

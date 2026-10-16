@@ -63,6 +63,48 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(fm.fileExists(atPath: source.path))
   }
 
+  func testFullDiskBeforeIntentStopsMovementAndFullDiskAfterMoveRetainsUncertainty() async throws {
+    for failedWrite in [2, 3] {
+      let home = try temporaryHome()
+      defer { try? fm.removeItem(at: home) }
+      let source = try write(home, "Docs/a")
+      let writer = FailingJournal(failAt: failedWrite)
+      let journals = home.appendingPathComponent("operations")
+      let executor = OperationExecutor(trashService: FixtureTrash(home: home),
+        safetyPolicy: SafetyPolicy(homeDirectory: home), journalDirectory: journals,
+        journalWriter: { try writer.write($0, to: $1) })
+      let report = await executor.run(OperationPlan(title: "full disk", items: [item(source)]))
+      XCTAssertNotNil(report.persistenceError)
+      if failedWrite == 2 {
+        XCTAssertTrue(report.moved.isEmpty)
+        XCTAssertTrue(fm.fileExists(atPath: source.path))
+      } else {
+        XCTAssertEqual(report.receipts.count, 1)
+        let recovered = try XCTUnwrap(OperationJournal.recoverInterrupted(in: journals).first)
+        XCTAssertEqual(recovered.outcomes.first?.status, .uncertain)
+        XCTAssertTrue(recovered.receipts.isEmpty)
+      }
+      XCTAssertFalse(OperationJournal.recoverInterrupted(in: journals).isEmpty)
+    }
+  }
+
+  func testCoveredChildStillProtectsRunningOwnerAndReplacement() async throws {
+    let home = try temporaryHome()
+    defer { try? fm.removeItem(at: home) }
+    let child = try write(home, "Docs/cache")
+    let owned = PlanItem(url: child, displayName: "cache", kind: .reviewedFile, expectedBytes: 16384,
+      reason: "Owned cache", source: "Test", identity: FileSystem.fileIdentity(at: child), ownerBundleID: "com.example.tool")
+    let plan = OperationPlanner.plan(title: "parent", items: [owned, item(child.deletingLastPathComponent())])
+    let report = await OperationExecutor(trashService: FixtureTrash(home: home), safetyPolicy: SafetyPolicy(homeDirectory: home),
+      isAppRunning: { $0 == "com.example.tool" }).run(plan)
+    XCTAssertTrue(report.moved.isEmpty)
+    let replacement = try write(home, "replacement")
+    try fm.removeItem(at: child)
+    try fm.moveItem(at: replacement, to: child)
+    let replaced = await OperationExecutor(trashService: FixtureTrash(home: home), safetyPolicy: SafetyPolicy(homeDirectory: home)).run(plan)
+    XCTAssertTrue(replaced.moved.isEmpty)
+  }
+
   func testJournalRemainsUntilIdempotentHistoryCommitIsAcknowledged() async throws {
     let home = try temporaryHome()
     defer { try? fm.removeItem(at: home) }
@@ -95,6 +137,7 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(recovered.receipts.isEmpty)
     XCTAssertTrue(fm.fileExists(atPath: journal.path))
     XCTAssertTrue(fm.fileExists(atPath: corrupt.path))
+    XCTAssertEqual(OperationJournal.unreadableJournals(in: home), [corrupt])
   }
 
   func testManagedLibraryRootsAndContentsAreNeverGenericTargets() async throws {
@@ -168,5 +211,18 @@ private actor FixtureTrash: TrashService {
     let destination = folder.appendingPathComponent(UUID().uuidString)
     try FileManager.default.moveItem(at: url, to: destination)
     return destination
+  }
+}
+
+private final class FailingJournal: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+  let failAt: Int
+  init(failAt: Int) { self.failAt = failAt }
+  func write(_ data: Data, to url: URL) throws {
+    lock.lock(); defer { lock.unlock() }
+    count += 1
+    if count >= failAt { throw NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC)) }
+    try FileSystem.writeDurably(data, to: url)
   }
 }

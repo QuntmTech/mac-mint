@@ -14,6 +14,13 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
+if [[ "${REQUIRE_NOTARIZATION:-0}" == "1" ]]; then
+  [[ -n "${SIGN_IDENTITY:-}" ]] || { echo "Consumer builds require Developer ID signing." >&2; exit 1; }
+  [[ -n "${NOTARY_PROFILE:-}" || ( -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ) ]] || {
+    echo "Consumer builds require complete notarization credentials." >&2; exit 1;
+  }
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 

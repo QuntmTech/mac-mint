@@ -87,7 +87,7 @@ public actor OrphanScanner {
     -> ScanReport<[OrphanedItem]>
   {
     let started = Date()
-    let installed = installedBundleIDs().union(knownBundleIDs.map { $0.lowercased() })
+    let installed = installedBundleIDs(ignoredPaths: ignoredPaths).union(knownBundleIDs.map { $0.lowercased() })
     let vendors = Set(installed.compactMap(Self.vendor))
     var items: [OrphanedItem] = []
     var issues: [ScanIssue] = []
@@ -114,7 +114,7 @@ public actor OrphanScanner {
         let recent = modified.map { Date().timeIntervalSince($0) < recentWindow } ?? false
         let sameVendor = Self.vendor(candidate).map(vendors.contains) ?? false
         let confidence: MatchConfidence = recent || sameVendor ? .low : .medium
-        var reason = "No installed app uses the identifier \(candidate)."
+        var reason = "No matching owner was found in the inspected app locations for \(candidate)."
         if sameVendor { reason += " Another app from the same developer is installed and may share it." }
         if recent { reason += " Changed recently — something may still use it." }
 
@@ -135,49 +135,53 @@ public actor OrphanScanner {
 
   // MARK: Installed apps
 
-  func installedBundleIDs() -> Set<String> {
+  func installedBundleIDs(ignoredPaths: Set<String> = []) -> Set<String> {
     var ids: Set<String> = []
     for root in applicationRoots {
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) { continue }
       guard
         let enumerator = fileManager.enumerator(
           at: root, includingPropertiesForKeys: [.isDirectoryKey],
           options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true })
       else { continue }
       FileSystem.walk(enumerator) { url in
+        if FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) { return .skipDescendants }
         guard url.pathExtension.lowercased() == "app" else { return .continue }
-        ids.formUnion(bundleIDs(inApp: url))
+        ids.formUnion(bundleIDs(inApp: url, ignoredPaths: ignoredPaths))
         return .skipDescendants
       }
     }
-    for root in helperRoots { ids.formUnion(helperBundleIDs(in: root, depth: 6)) }
+    for root in helperRoots { ids.formUnion(helperBundleIDs(in: root, depth: 6, ignoredPaths: ignoredPaths)) }
     return ids
   }
 
   /// Vendor-installed apps and helpers outside Applications (updaters, Toolbox-managed IDEs,
   /// privileged helpers), searched to a shallow depth so this stays fast.
-  private func helperBundleIDs(in folder: URL, depth: Int) -> Set<String> {
-    guard depth > 0,
+  private func helperBundleIDs(in folder: URL, depth: Int, ignoredPaths: Set<String>) -> Set<String> {
+    guard depth > 0, !FileSystem.isIgnored(folder, ignoredPaths: ignoredPaths),
       let children = try? fileManager.contentsOfDirectory(
         at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
     else { return [] }
     var ids: Set<String> = []
     let isPrivilegedHelpers = folder.lastPathComponent == "PrivilegedHelperTools"
     for child in children {
+      if FileSystem.isIgnored(child, ignoredPaths: ignoredPaths) { continue }
       let ext = child.pathExtension.lowercased()
       if ["app", "bundle", "xpc", "appex"].contains(ext) {
-        ids.formUnion(bundleIDs(inApp: child))
+        ids.formUnion(bundleIDs(inApp: child, ignoredPaths: ignoredPaths))
       } else if isPrivilegedHelpers {
         // Privileged helper tools are bare executables named by their bundle identifier.
         ids.insert(child.lastPathComponent.lowercased())
       } else if (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-        ids.formUnion(helperBundleIDs(in: child, depth: depth - 1))
+        ids.formUnion(helperBundleIDs(in: child, depth: depth - 1, ignoredPaths: ignoredPaths))
       }
     }
     return ids
   }
 
   /// The app's own identifier plus those of its embedded helpers, login items, and extensions.
-  private func bundleIDs(inApp app: URL) -> Set<String> {
+  private func bundleIDs(inApp app: URL, ignoredPaths: Set<String>) -> Set<String> {
+    guard !FileSystem.isIgnored(app, ignoredPaths: ignoredPaths), !FileSystem.containsIgnoredDescendant(app, ignoredPaths: ignoredPaths) else { return [] }
     var ids: Set<String> = []
     if let id = Self.readBundleID(app) { ids.insert(id) }
     let contents = app.appendingPathComponent("Contents")
