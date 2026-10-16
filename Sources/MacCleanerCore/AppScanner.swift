@@ -175,7 +175,8 @@ public actor AppScanner {
       bundleIdentifier: bundle?.bundleIdentifier,
       version: version,
       bundleSize: FileSystem.itemSize(at: url, fileManager: fileManager),
-      lastModified: modified
+      lastModified: modified,
+      identity: FileSystem.fileIdentity(at: url)
     )
   }
 
@@ -246,9 +247,17 @@ public actor AppScanner {
     }
   }
 
+  /// com.apple.*, group.com.apple.*, and team-prefixed Apple containers.
+  static func isAppleOwned(_ stem: String) -> Bool {
+    let id = groupContainerID(stem) ?? stem
+    return id.hasPrefix("com.apple.") || stem.hasPrefix("com.apple.")
+  }
+
   private func match(_ url: URL, root: URL, context: MatchContext) -> AppLeftover? {
     let stem = Self.stem(of: url.lastPathComponent)
     let inGroupContainers = root.lastPathComponent == "Group Containers"
+    // macOS's own data is never offered as a third-party app's leftovers.
+    if Self.isAppleOwned(stem), context.bundleID?.hasPrefix("com.apple.") != true { return nil }
 
     if let bundleID = context.bundleID {
       let candidateID = inGroupContainers ? (Self.groupContainerID(stem) ?? stem) : stem
@@ -303,7 +312,8 @@ public actor AppScanner {
       size: FileSystem.itemSize(at: url, fileManager: fileManager),
       confidence: confidence,
       reason: reason,
-      isShared: isShared
+      isShared: isShared,
+      identity: FileSystem.fileIdentity(at: url)
     )
   }
 

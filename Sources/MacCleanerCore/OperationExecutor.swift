@@ -5,6 +5,8 @@ public enum ItemOutcomeStatus: String, Codable, Hashable, Sendable {
   case skipped
   case failed
   case notAttempted
+  /// Journal-only: the move had started when the app stopped. Resolved on recovery.
+  case inFlight
 }
 
 public struct ItemOutcome: Identifiable, Codable, Hashable, Sendable {
@@ -131,6 +133,7 @@ public actor OperationExecutor {
     writeJournal(report)
 
     var movedIDs: Set<UUID> = []
+    var movedPaths: [String] = []
     var bytesMoved: Int64 = 0
     for (index, item) in plan.items.enumerated() {
       if Task.isCancelled {
@@ -142,9 +145,20 @@ public actor OperationExecutor {
           completed: index, total: plan.items.count, currentName: item.displayName,
           bytesMoved: bytesMoved))
 
-      let outcome = await execute(item, movedIDs: movedIDs, ignoredPaths: ignoredPaths)
+      let outcome: ItemOutcome
+      if let rejection = validate(
+        item, movedIDs: movedIDs, movedPaths: movedPaths, ignoredPaths: ignoredPaths)
+      {
+        outcome = rejection
+      } else {
+        // Record intent first, so a crash mid-move still leaves an explanation behind.
+        report.outcomes[index] = ItemOutcome(item: item, status: .inFlight)
+        writeJournal(report)
+        outcome = await move(item)
+      }
       if outcome.status == .moved {
         movedIDs.insert(item.id)
+        movedPaths.append(item.url.standardizedFileURL.path)
         bytesMoved += outcome.receipt?.bytes ?? 0
       }
       report.outcomes[index] = outcome
@@ -160,51 +174,76 @@ public actor OperationExecutor {
     return report
   }
 
-  private func execute(_ item: PlanItem, movedIDs: Set<UUID>, ignoredPaths: Set<String>) async
-    -> ItemOutcome
-  {
+  /// Returns a skip outcome when the item must not be moved, or nil when it may proceed.
+  private func validate(
+    _ item: PlanItem, movedIDs: Set<UUID>, movedPaths: [String], ignoredPaths: Set<String>
+  ) -> ItemOutcome? {
+    let skip: (String) -> ItemOutcome = { ItemOutcome(item: item, status: .skipped, message: $0) }
     if let dependency = item.dependsOn, !movedIDs.contains(dependency) {
-      return ItemOutcome(
-        item: item, status: .skipped,
-        message: "Left untouched because the item it belongs to was not moved.")
+      return skip("Left untouched because the item it belongs to was not moved.")
     }
     if let owner = item.ownerBundleID, isAppRunning(owner) {
-      return ItemOutcome(
-        item: item, status: .skipped,
-        message: "The app that uses this data is open. Quit it and try again.")
+      return skip("The app that uses this data is open. Quit it and try again.")
     }
     guard fileManager.fileExists(atPath: item.url.path) || isSymlink(item.url) else {
-      return ItemOutcome(
-        item: item, status: .skipped, message: "No longer exists; it may already have been removed."
-      )
+      return skip("No longer exists; it may already have been removed.")
     }
     if let expected = item.identity, let current = FileSystem.fileIdentity(at: item.url),
       expected != current
     {
-      return ItemOutcome(
-        item: item, status: .skipped,
-        message: "A different item now exists at this location. Rescan before removing it.")
+      return skip("A different item now exists at this location. Rescan before removing it.")
+    }
+    if let expected = item.snapshot, let current = FileSnapshot.current(item.url),
+      !expected.matches(current)
+    {
+      return skip("This file changed since it was scanned. Rescan to review it again.")
+    }
+    if let keeper = item.keeper, let problem = keeperProblem(keeper, movedPaths: movedPaths) {
+      return skip(problem)
     }
     if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
-      return ItemOutcome(item: item, status: .skipped, message: "Item is on your exclusion list.")
+      return skip("Item is on your exclusion list.")
     }
     if FileSystem.containsIgnoredDescendant(item.url, ignoredPaths: ignoredPaths) {
-      return ItemOutcome(
-        item: item, status: .skipped,
-        message: "Folder contains an excluded item. Rescan to clean around it.")
+      return skip("Folder contains an excluded item. Rescan to clean around it.")
     }
-
     let decision = decision(for: item)
-    guard decision.allowed else {
-      return ItemOutcome(item: item, status: .skipped, message: decision.reason)
-    }
+    return decision.allowed ? nil : skip(decision.reason)
+  }
 
+  /// The copy being kept must still be there, be the same file, be unchanged, and not have
+  /// been moved earlier in this run.
+  private func keeperProblem(_ keeper: KeeperSnapshot, movedPaths: [String]) -> String? {
+    let url = URL(fileURLWithPath: keeper.path)
+    let name = url.lastPathComponent
+    if movedPaths.contains(where: { keeper.path == $0 || keeper.path.hasPrefix($0 + "/") }) {
+      return "The copy you're keeping (\(name)) was moved in this same operation."
+    }
+    guard fileManager.fileExists(atPath: keeper.path) else {
+      return "The copy you're keeping (\(name)) is gone, so this one is kept too."
+    }
+    if let expected = keeper.identity, let current = FileSystem.fileIdentity(at: url),
+      expected != current
+    {
+      return "The copy you're keeping (\(name)) was replaced. Rescan before removing duplicates."
+    }
+    if let expected = keeper.snapshot, let current = FileSnapshot.current(url),
+      !expected.matches(current)
+    {
+      return "The copy you're keeping (\(name)) changed. Rescan before removing duplicates."
+    }
+    return nil
+  }
+
+  private func move(_ item: PlanItem) async -> ItemOutcome {
     let size = FileSystem.itemSize(at: item.url, fileManager: fileManager)
+    let identity = FileSystem.fileIdentity(at: item.url)
     do {
       let trashURL = try await trashService.trash(item.url)
       return ItemOutcome(
         item: item, status: .moved,
-        receipt: TrashReceipt(originalPath: item.url.path, trashPath: trashURL?.path, bytes: size))
+        receipt: TrashReceipt(
+          originalPath: item.url.path, trashPath: trashURL?.path, bytes: size, identity: identity))
     } catch {
       return ItemOutcome(item: item, status: .failed, message: error.localizedDescription)
     }
@@ -280,6 +319,18 @@ public enum OperationJournal {
       guard let data = try? Data(contentsOf: url),
         var report = try? decoder.decode(OperationReport.self, from: data)
       else { return nil }
+      report.outcomes = report.outcomes.map { outcome in
+        guard outcome.status == .inFlight else { return outcome }
+        // The app stopped mid-move: if the item left its place it reached the Trash.
+        let path = outcome.item.url.path
+        let gone = !fileManager.fileExists(atPath: path) && FileSystem.fileIdentity(at: outcome.item.url) == nil
+        return gone
+          ? ItemOutcome(
+            item: outcome.item, status: .moved,
+            message: "Moved to the Trash while MacMint was quitting; find it there to restore.",
+            receipt: TrashReceipt(originalPath: path, trashPath: nil, bytes: outcome.item.expectedBytes))
+          : ItemOutcome(item: outcome.item, status: .notAttempted)
+      }
       report.wasInterrupted = true
       report.finishedAt = report.finishedAt ?? Date()
       return report

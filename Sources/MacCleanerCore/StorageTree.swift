@@ -30,12 +30,15 @@ public struct StorageNode: Identifiable, Hashable, Sendable {
   public let cloudOnlyCount: Int
   public let modified: Date?
   public let children: [StorageNode]
+  /// "device:inode" observed at scan time (nil for synthetic nodes).
+  public let identity: String?
 
   public init(
     url: URL, name: String? = nil, kind: Kind, allocatedBytes: Int64, logicalBytes: Int64,
     itemCount: Int, cloudOnlyCount: Int = 0, modified: Date? = nil, children: [StorageNode] = [],
-    id: String? = nil
+    id: String? = nil, identity: String? = nil
   ) {
+    self.identity = identity
     self.id = id ?? url.standardizedFileURL.path
     self.url = url
     self.name = name ?? url.lastPathComponent
@@ -67,7 +70,7 @@ public struct StorageNode: Identifiable, Hashable, Sendable {
       logicalBytes: kept.reduce(0) { $0 + $1.logicalBytes },
       itemCount: kept.reduce(0) { $0 + $1.itemCount },
       cloudOnlyCount: kept.reduce(0) { $0 + $1.cloudOnlyCount },
-      modified: modified, children: kept, id: id)
+      modified: modified, children: kept, id: id, identity: identity)
   }
 
   /// Nodes from this one down to `path`, for breadcrumbs.
@@ -218,7 +221,7 @@ public actor StorageTreeScanner {
           StorageNode(
             url: entry, kind: .file, allocatedBytes: allocated, logicalBytes: logical,
             itemCount: 1, cloudOnlyCount: cloudOnly ? 1 : 0,
-            modified: values.contentModificationDate))
+            modified: values.contentModificationDate, identity: FileSystem.fileIdentity(at: entry)))
       } else {
         small.allocated += allocated
         small.logical += logical
@@ -266,7 +269,7 @@ public actor StorageTreeScanner {
       logicalBytes: kept.reduce(0) { $0 + $1.logicalBytes },
       itemCount: kept.reduce(0) { $0 + $1.itemCount },
       cloudOnlyCount: kept.reduce(0) { $0 + $1.cloudOnlyCount },
-      modified: modified, children: kept)
+      modified: modified, children: kept, identity: FileSystem.fileIdentity(at: url))
   }
 
   private func measurePackage(_ url: URL, modified: Date?, state: inout ScanState) -> StorageNode {
@@ -274,7 +277,7 @@ public actor StorageTreeScanner {
     if !measurement.isComplete { state.coverage.inaccessiblePaths.append(url.path) }
     return StorageNode(
       url: url, kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,
-      itemCount: 1, modified: modified)
+      itemCount: 1, modified: modified, identity: FileSystem.fileIdentity(at: url))
   }
 
   /// Cloud placeholders (iCloud, Dropbox, OneDrive via File Provider) carry SF_DATALESS.

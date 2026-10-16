@@ -72,6 +72,8 @@ public struct CleanupTarget: Identifiable, Codable, Hashable, Sendable {
   public var isSelected: Bool
   /// App that writes this data; cleanup is skipped while it is running.
   public let ownerBundleID: String?
+  /// "device:inode" observed at scan time.
+  public let identity: String?
 
   public init(
     id: UUID = UUID(),
@@ -83,9 +85,11 @@ public struct CleanupTarget: Identifiable, Codable, Hashable, Sendable {
     risk: CleanupRisk,
     reason: String,
     isSelected: Bool = true,
-    ownerBundleID: String? = nil
+    ownerBundleID: String? = nil,
+    identity: String? = nil
   ) {
     self.ownerBundleID = ownerBundleID
+    self.identity = identity
     self.id = id
     self.category = category
     self.url = url
@@ -171,11 +175,13 @@ public struct AppRecord: Identifiable, Codable, Hashable, Sendable {
   public let version: String?
   public let bundleSize: Int64
   public let lastModified: Date?
+  public let identity: String?
 
   public init(
     id: UUID = UUID(), url: URL, name: String, bundleIdentifier: String?, version: String?,
-    bundleSize: Int64, lastModified: Date?
+    bundleSize: Int64, lastModified: Date?, identity: String? = nil
   ) {
+    self.identity = identity
     self.id = id
     self.url = url
     self.name = name
@@ -194,11 +200,13 @@ public struct AppLeftover: Identifiable, Codable, Hashable, Sendable {
   public let reason: String
   /// Shared containers (e.g. app groups) may also be used by other apps from the same developer.
   public let isShared: Bool
+  public let identity: String?
 
   public init(
     id: UUID = UUID(), url: URL, size: Int64, confidence: MatchConfidence, reason: String,
-    isShared: Bool = false
+    isShared: Bool = false, identity: String? = nil
   ) {
+    self.identity = identity
     self.id = id
     self.url = url
     self.size = size
@@ -292,12 +300,19 @@ public struct TrashReceipt: Codable, Hashable, Sendable {
   public let trashPath: String?
   public let bytes: Int64
   public let movedAt: Date
+  /// "device:inode" of the moved item; a move to the Trash keeps it, so restore can verify
+  /// that what's in the Trash now is the same item.
+  public let identity: String?
 
-  public init(originalPath: String, trashPath: String?, bytes: Int64, movedAt: Date = Date()) {
+  public init(
+    originalPath: String, trashPath: String?, bytes: Int64, movedAt: Date = Date(),
+    identity: String? = nil
+  ) {
     self.originalPath = originalPath
     self.trashPath = trashPath
     self.bytes = bytes
     self.movedAt = movedAt
+    self.identity = identity
   }
 }
 

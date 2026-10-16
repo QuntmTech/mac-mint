@@ -48,12 +48,18 @@ public struct DevStorageItem: Identifiable, Hashable, Sendable {
   public let removal: DevRemoval
   /// Touched recently, so probably in active use; never preselected.
   public let isActive: Bool
+  /// App that uses this data while running (e.g. Xcode); removal waits until it quits.
+  public let ownerBundleID: String?
+  /// "device:inode" observed at scan time.
+  public let identity: String?
 
   public init(
     id: String? = nil, group: DevGroup, tool: String, title: String, subtitle: String = "",
     url: URL?, bytes: Int64, lastUsed: Date? = nil, rebuild: RebuildCost, removal: DevRemoval,
-    isActive: Bool = false
+    isActive: Bool = false, ownerBundleID: String? = nil, identity: String? = nil
   ) {
+    self.ownerBundleID = ownerBundleID
+    self.identity = identity ?? url.flatMap { FileSystem.fileIdentity(at: $0) }
     self.id = id ?? url?.standardizedFileURL.path ?? "\(tool):\(title)"
     self.group = group
     self.tool = tool
@@ -101,12 +107,31 @@ public actor DeveloperStorageScanner {
 
   /// Model/cache locations moved through environment variables, so removal rules follow them.
   public static func configuredRoots(
-    environment: [String: String] = ProcessInfo.processInfo.environment
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    home: URL = FileManager.default.homeDirectoryForCurrentUser
   ) -> [URL] {
-    [
+    let roots = [
       environment["HF_HUB_CACHE"],
       environment["HF_HOME"].map { $0 + "/hub" },
     ].compactMap { $0 }.map { URL(fileURLWithPath: $0) }
+    return validatedRoots(roots, home: home)
+  }
+
+  /// A custom cache root is only trusted when it is a dedicated folder: not the home folder,
+  /// not a personal folder (or inside one), not an ancestor of home, and not a system path.
+  public static func validatedRoots(_ roots: [URL], home: URL) -> [URL] {
+    let homePath = SafetyPolicy.canonicalPath(of: home.resolvingSymlinksInPath())
+    let personal = ["Desktop", "Documents", "Pictures", "Movies", "Music", "Downloads", "Library"]
+      .map { (homePath + "/" + $0).lowercased() }
+    return roots.filter { root in
+      let path = SafetyPolicy.canonicalPath(of: root)
+      guard path.hasPrefix(homePath + "/") else { return false }
+      if personal.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return false }
+      // At least two levels below home (e.g. ~/models/hub), so a top-level folder of
+      // arbitrary files is never treated as a cache.
+      let depth = path.dropFirst(homePath.count).split(separator: "/").count
+      return depth >= 2
+    }
   }
 
   public func scan(projectRoots: [URL] = []) async -> ScanReport<[DevStorageItem]> {
@@ -211,13 +236,15 @@ public actor DeveloperStorageScanner {
       ("CocoaPods", "Library/Caches/CocoaPods", "Pod downloads"),
       ("SwiftPM", "Library/Caches/org.swift.swiftpm", "Swift package checkouts"),
       ("Gradle", ".gradle/caches", "Gradle dependency and build cache"),
-      ("Maven", ".m2/repository", "Maven artifacts"),
+      ("Maven", ".m2/repository", "Maven artifacts — may include libraries you installed locally"),
       ("Cargo", ".cargo/registry/cache", "Downloaded crates"),
     ]
     var items = caches.compactMap { tool, relative, detail -> DevStorageItem? in
       let url = home.appendingPathComponent(relative)
       guard exists(url) else { return nil }
-      return item(url, group: .packageCaches, tool: tool, title: tool, subtitle: detail, rebuild: .redownload)
+      // `mvn install` puts locally built artifacts here, so it isn't purely re-downloadable.
+      let cost: RebuildCost = tool == "Maven" ? .review : .redownload
+      return item(url, group: .packageCaches, tool: tool, title: tool, subtitle: detail, rebuild: cost)
     }
     let goModules = goPath.appendingPathComponent("pkg/mod")
     if exists(goModules) {
@@ -249,7 +276,7 @@ public actor DeveloperStorageScanner {
         (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
       else { return .continue }
       let name = url.lastPathComponent
-      if Self.projectArtifactNames.contains(name), isProjectArtifact(url) {
+      if Self.projectArtifactNames.contains(name), Self.isProjectArtifact(url) {
         found.append(url)
         return .skipDescendants
       }
@@ -267,10 +294,15 @@ public actor DeveloperStorageScanner {
   }
 
   /// Requires the build tool's marker next to the folder, so a personal folder that happens
-  /// to be called "target" or "Pods" is never offered.
-  private func isProjectArtifact(_ url: URL) -> Bool {
+  /// to be called "target" or "Pods" is never offered — or accepted by the safety rule.
+  public static func isProjectArtifact(_ url: URL) -> Bool {
+    let fm = FileManager.default
+    var isDirectory: ObjCBool = false
+    guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
+      (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
+    else { return false }
     let project = url.deletingLastPathComponent()
-    let has: (String) -> Bool = { self.exists(project.appendingPathComponent($0)) }
+    let has: (String) -> Bool = { fm.fileExists(atPath: project.appendingPathComponent($0).path) }
     switch url.lastPathComponent {
     case "node_modules", ".next", ".nuxt", ".turbo", ".parcel-cache", ".svelte-kit":
       return has("package.json")
@@ -278,10 +310,16 @@ public actor DeveloperStorageScanner {
     case "target": return has("Cargo.toml") || has("pom.xml")
     case ".gradle": return has("build.gradle") || has("build.gradle.kts") || has("settings.gradle")
     case "Pods": return has("Podfile")
-    case "__pycache__": return true
-    case "DerivedData": return true
+    case "__pycache__":
+      return (try? fm.contentsOfDirectory(atPath: url.path))?.allSatisfy { $0.hasSuffix(".pyc") } ?? false
+    case "DerivedData": return has("Package.swift") || hasXcodeProject(project)
     default: return false
     }
+  }
+
+  private static func hasXcodeProject(_ folder: URL) -> Bool {
+    let entries = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+    return entries.contains { $0.hasSuffix(".xcodeproj") || $0.hasSuffix(".xcworkspace") }
   }
 
   // MARK: AI models
@@ -327,18 +365,16 @@ public actor DeveloperStorageScanner {
         children(of: publisher).map { model in
           item(
             model, group: .aiModels, tool: "LM Studio", title: model.lastPathComponent,
-            subtitle: "\(publisher.lastPathComponent) • remove it in LM Studio's My Models, or move it to the Trash here",
-            rebuild: .redownload)
+            subtitle: "\(publisher.lastPathComponent) • may be a model you added yourself — remove it in LM Studio's My Models, or move it to the Trash here",
+            rebuild: .review)
         }
       }
     }
   }
 
   private func huggingFaceModels() -> [DevStorageItem] {
-    let hubRoot =
-      environment["HF_HUB_CACHE"].map { URL(fileURLWithPath: $0) }
-      ?? environment["HF_HOME"].map { URL(fileURLWithPath: $0).appendingPathComponent("hub") }
-      ?? home.appendingPathComponent(".cache/huggingface/hub")
+    let configured = Self.configuredRoots(environment: environment, home: home)
+    let hubRoot = configured.first ?? home.appendingPathComponent(".cache/huggingface/hub")
     return children(of: hubRoot).filter { $0.lastPathComponent.contains("--") }.map { repo in
       // models--org--name / datasets--org--name; each repo folder owns all of its blobs.
       let parts = repo.lastPathComponent.components(separatedBy: "--")
@@ -375,7 +411,17 @@ public actor DeveloperStorageScanner {
     return DevStorageItem(
       group: group, tool: tool, title: title, subtitle: subtitle, url: url,
       bytes: FileSystem.itemSize(at: url, fileManager: fileManager), lastUsed: lastUsed,
-      rebuild: rebuild, removal: .trash, isActive: forceActive || recent)
+      rebuild: rebuild, removal: .trash, isActive: forceActive || recent,
+      ownerBundleID: Self.owner(for: group))
+  }
+
+  /// Build data and simulator caches are written by Xcode/Simulator while they run.
+  private static func owner(for group: DevGroup) -> String? {
+    switch group {
+    case .xcode: return "com.apple.dt.Xcode"
+    case .simulators: return "com.apple.iphonesimulator"
+    default: return nil
+    }
   }
 
   private func children(of url: URL) -> [URL] {

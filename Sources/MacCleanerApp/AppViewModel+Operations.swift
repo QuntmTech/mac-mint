@@ -16,9 +16,9 @@ extension AppViewModel {
 
   var queuedCleanupTargets: [CleanupTarget] { cleanupTargets.filter(\.isSelected) }
 
-  var queuedDuplicateFiles: [(file: LargeFile, keeper: URL?)] {
+  var queuedDuplicateFiles: [(file: LargeFile, keeper: LargeFile?)] {
     duplicateGroups.flatMap { group in
-      let keeper = group.files.first { !selectedDuplicateIDs.contains($0.id) }?.url
+      let keeper = group.files.first { !selectedDuplicateIDs.contains($0.id) }
       return group.files.filter { selectedDuplicateIDs.contains($0.id) }.map { ($0, keeper) }
     }
   }
@@ -117,13 +117,13 @@ extension AppViewModel {
     let bundle = PlanItem(
       url: app.url, displayName: app.name, kind: .appBundle, expectedBytes: app.bundleSize,
       reason: app.version.map { "\(app.name) \($0)" } ?? app.name, source: source,
-      identity: FileSystem.fileIdentity(at: app.url))
+      identity: app.identity, ownerBundleID: app.bundleIdentifier)
     let leftovers = appLeftovers.filter { selectedLeftoverIDs.contains($0.id) }.map { leftover in
       PlanItem(
         url: leftover.url, displayName: leftover.url.lastPathComponent, kind: .appLeftover,
         expectedBytes: leftover.size, reason: leftover.reason, source: source,
         needsAttention: !leftover.isSuggested, dependsOn: bundle.id,
-        identity: FileSystem.fileIdentity(at: leftover.url))
+        identity: leftover.identity, ownerBundleID: app.bundleIdentifier)
     }
     presentPlan(
       OperationPlanner.plan(
@@ -163,7 +163,7 @@ extension AppViewModel {
       groups: groups, selectedIDs: selection, ignoredPaths: ignoredPaths)
     let approvedIDs = Set(verified.approved.map(\.id))
     let items = groups.flatMap { group -> [PlanItem] in
-      let keeper = group.files.first { !selection.contains($0.id) }?.url
+      let keeper = group.files.first { !selection.contains($0.id) }
       return group.files.filter { approvedIDs.contains($0.id) }.map {
         PlanItem.duplicate($0, keeper: keeper)
       }
