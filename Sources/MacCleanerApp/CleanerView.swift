@@ -145,21 +145,17 @@ struct CleanerView: View {
       .accessibilityLabel("Clean \(item.displayName), \(ByteFormatter.string(item.size))")
       .disabled(item.risk == .restricted)
 
-      ZStack {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
-          .fill(AppTheme.accent.opacity(0.08))
-          .frame(width: 34, height: 34)
-        Image(systemName: icon(for: item.category))
-          .foregroundStyle(AppTheme.accentText)
-          .accessibilityHidden(true)
-      }
+      let owner = OwnerResolver.hint(for: item.url, explicitBundleID: item.ownerBundleID)
+      OwnerIcon(hint: owner, fallbackSymbol: icon(for: item.category))
 
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 7) {
           Text(item.displayName).fontWeight(.medium)
           RiskBadge(risk: item.risk)
         }
-        Text(item.reason)
+        Text(
+          OwnerDirectory.owner(for: owner).map { "Used by \($0.name) — \(item.reason)" } ?? item.reason
+        )
           .font(.caption)
           .foregroundStyle(.secondary)
           .lineLimit(1)

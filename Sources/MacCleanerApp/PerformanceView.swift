@@ -5,6 +5,7 @@ struct PerformanceView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var monitor: SystemMonitor
   @State private var pendingQuit: SystemMonitor.AppUsage?
+  @State private var insights: DiskInsights?
 
   var body: some View {
     ScrollView {
@@ -30,6 +31,8 @@ struct PerformanceView: View {
             detail: "of \(ByteFormatter.string(monitor.snapshot.totalBytes))", icon: "internaldrive",
             tint: monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accentText)
         }
+
+        diskInsightsCard
 
         SurfaceCard {
           VStack(alignment: .leading, spacing: 10) {
@@ -74,6 +77,7 @@ struct PerformanceView: View {
       .padding(AppTheme.pagePadding)
     }
     .onAppear { monitor.start() }
+    .task { insights = await DiskInsightsService.load() }
     .onDisappear { monitor.stop() }
     .alert(
       "Quit \(pendingQuit?.name ?? "app")?",
@@ -90,6 +94,53 @@ struct PerformanceView: View {
     } message: { _ in
       Text("The app is asked to quit normally, so it can prompt you to save any unsaved work.")
     }
+  }
+
+  private var diskInsightsCard: some View {
+    SurfaceCard {
+      VStack(alignment: .leading, spacing: 10) {
+        Label("Disk insights", systemImage: "internaldrive").font(.headline)
+        if let insights {
+          insightRow(
+            "Drive health",
+            value: insights.health?.rawValue ?? "Unknown",
+            detail: insights.health == .failing
+              ? "The drive reports it may fail soon. Back up now with Time Machine."
+              : "Reported by the drive's self-monitoring (SMART).",
+            tint: insights.health == .failing ? .red : insights.health == .verified ? .green : .secondary)
+          if let fs = insights.fileSystem {
+            insightRow("File system", value: fs, detail: "Copies of a file on APFS can share space, so freed space may be less than a file's size.", tint: .secondary)
+          }
+          if let purgeable = insights.purgeableBytes {
+            insightRow(
+              "Purgeable", value: ByteFormatter.string(purgeable),
+              detail: "macOS frees this automatically when an app needs room — no cleaning needed.",
+              tint: AppTheme.accentText)
+          }
+          insightRow(
+            "Local snapshots",
+            value: insights.snapshotsReadable ? "\(insights.localSnapshots.count)" : "Unavailable",
+            detail: insights.localSnapshots.first.map {
+              "Time Machine keeps these hourly copies on this disk and removes them by itself as space is needed (oldest \($0.formatted(date: .abbreviated, time: .shortened)))."
+            } ?? "Time Machine snapshots stored on this disk, managed by macOS.",
+            tint: .secondary)
+        } else {
+          ProgressView().controlSize(.small)
+        }
+      }
+    }
+  }
+
+  private func insightRow(_ title: String, value: String, detail: String, tint: Color) -> some View {
+    HStack(alignment: .firstTextBaseline, spacing: 12) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).font(.callout.weight(.medium))
+        Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer()
+      Text(value).font(.callout.weight(.semibold)).foregroundStyle(tint)
+    }
+    .accessibilityElement(children: .combine)
   }
 
   private var memoryDetail: String {

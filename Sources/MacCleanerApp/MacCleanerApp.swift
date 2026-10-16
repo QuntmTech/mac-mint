@@ -40,6 +40,9 @@ struct MacCleanerDesktopApp: App {
           .disabled(!account.isUnlocked)
       }
       CommandGroup(after: .sidebar) {
+        Button("Go To…") { model.showingCommandPalette = true }
+          .keyboardShortcut("k", modifiers: [.command])
+          .disabled(!account.isUnlocked)
         Divider()
         ForEach(Array(AppViewModel.Section.allCases.prefix(9).enumerated()), id: \.element) { index, section in
           Button(section.rawValue) { model.selectedSection = section }

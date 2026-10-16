@@ -51,11 +51,12 @@ enum SmokeTest {
     }
     render("Menu bar", MenuBarView())
     render("Onboarding", OnboardingView())
+    render("Command palette", CommandPalette())
 
     let seconds = Date().timeIntervalSince(started)
     print(
       failures.isEmpty
-        ? "Smoke test passed: \(AppViewModel.Section.allCases.count + 3) screens in \(String(format: "%.1f", seconds))s"
+        ? "Smoke test passed: \(AppViewModel.Section.allCases.count + 4) screens in \(String(format: "%.1f", seconds))s"
         : "Smoke test FAILED: \(failures.joined(separator: ", "))")
     try? FileManager.default.removeItem(at: support)
     exit(failures.isEmpty ? 0 : 1)
