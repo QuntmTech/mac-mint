@@ -4,8 +4,16 @@ import SwiftUI
 
 struct ApplicationsView: View {
   @EnvironmentObject private var model: AppViewModel
+  @EnvironmentObject private var updates: AppUpdatesStore
   @State private var search = ""
   @State private var sort: AppSort = .name
+  @State private var mode: Mode = .uninstall
+
+  enum Mode: String, CaseIterable, Identifiable {
+    case uninstall = "Uninstall"
+    case updates = "Updates"
+    var id: String { rawValue }
+  }
 
   enum AppSort: String, CaseIterable, Identifiable {
     case name = "Name"
@@ -43,6 +51,30 @@ struct ApplicationsView: View {
   }
 
   var body: some View {
+    VStack(spacing: 0) {
+      Picker("Mode", selection: $mode) {
+        ForEach(Mode.allCases) { item in
+          if item == .updates, !updates.available.isEmpty {
+            Text("Updates (\(updates.available.count))").tag(item)
+          } else {
+            Text(item.rawValue).tag(item)
+          }
+        }
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .frame(width: 260)
+      .padding(.vertical, 10)
+      Divider()
+      if mode == .updates {
+        AppUpdatesView()
+      } else {
+        uninstaller
+      }
+    }
+  }
+
+  private var uninstaller: some View {
     HSplitView {
       VStack(spacing: 0) {
         HStack {

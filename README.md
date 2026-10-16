@@ -82,12 +82,18 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Explicit review before moving a file to Trash.
 - Per-file Finder reveal and scan exclusion.
 
+### App updates
+- The **Updates** tab under Applications checks App Store apps (via Apple's public lookup), apps that update themselves (their Sparkle appcast, ignoring beta channels), and Homebrew casks (offers `brew upgrade --cask`).
+- It only runs when you click "Check for Updates", and only app identifiers and feed URLs are requested. MacMint never downloads or installs anything.
+
 ### Duplicate Finder
 - Candidate grouping by logical file size.
 - 64 KB sample SHA-256 stage.
 - Full **streaming** SHA-256 verification for exact matches without loading multi-GB files into memory.
 - Configurable minimum size.
 - Bulk reviewed selection with an invariant that at least one copy remains in every duplicate group.
+- Thumbnails and Quick Look for every copy.
+- **Auto-select** with keeper rules: newest, oldest, shortest path, or preferred folders. Hard links of the kept copy are never selected.
 - Nothing is selected automatically.
 
 ### Startup Items
