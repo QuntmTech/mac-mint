@@ -7,10 +7,8 @@ struct LargeFilesView: View {
   private var selectedBytes: Int64 { model.queuedLargeFiles.reduce(0) { $0 + $1.size } }
 
   private func selection(_ file: LargeFile) -> Binding<Bool> {
-    Binding(
-      get: { model.selectedLargeFileIDs.contains(file.id) },
-      set: { model.setFileSelection(file.url, selected: $0) }
-      })
+    Binding(get: { model.selectedLargeFileIDs.contains(file.id) },
+      set: { model.setFileSelection(file.url, selected: $0) })
   }
 
   var body: some View {
