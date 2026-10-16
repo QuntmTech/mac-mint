@@ -16,5 +16,7 @@
   <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 2026 MacMint</string>
+  <key>NSPhotoLibraryUsageDescription</key><string>MacMint looks for similar and blurry photos in your library. Photos are analysed on this Mac and are only removed when you confirm in Photos.</string>
+  <key>NSAppleEventsUsageDescription</key><string>MacMint asks Finder to empty the Trash when you choose Empty Trash.</string>
 </dict>
 </plist>

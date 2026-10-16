@@ -50,7 +50,9 @@ struct HistoryView: View {
     ) {
       if receipts.isEmpty {
         Text(
-          "Recorded before MacMint tracked Trash locations. Use Finder to restore these items from the Trash."
+          entry.receipts == nil
+            ? "Recorded before MacMint tracked Trash locations. Use Finder to restore these items from the Trash."
+            : entry.notes
         )
         .font(.caption)
         .foregroundStyle(.secondary)
