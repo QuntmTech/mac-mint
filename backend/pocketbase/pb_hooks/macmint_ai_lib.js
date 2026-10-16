@@ -35,7 +35,8 @@ const LOCATIONS = [
 const KINDS = ["library-item", "launch-agent", "developer-tool"]
 
 const BUNDLE_ID = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9_-]+){2,}$/i
-const LAUNCHD_LABEL = /^[A-Za-z0-9._-]{3,200}$/
+// Reverse-DNS-like labels only (at least one dot), so free-form names never reach the shared cache.
+const LAUNCHD_LABEL = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/
 
 // ---------- small utilities ----------
 
@@ -109,11 +110,18 @@ function globalTokensToday(app) {
 }
 
 /// Returns null when the call may proceed, or [status, code, message].
-function gate(app, userId, feature) {
+function disabled(app, feature) {
   const cfg = config(app)
   if (cfg.enabled !== true || (cfg.features && cfg.features[feature] === false)) {
     return [503, "ai_disabled", "AI features are turned off right now."]
   }
+  return null
+}
+
+function gate(app, userId, feature) {
+  const off = disabled(app, feature)
+  if (off) return off
+  const cfg = config(app)
   const budget = Number($os.getenv("AI_DAILY_TOKEN_BUDGET") || cfg.daily_token_budget || DEFAULT_GLOBAL_TOKEN_BUDGET)
   if (globalTokensToday(app) >= budget) {
     return [503, "ai_busy", "AI features have reached today's capacity. Please try again tomorrow."]
@@ -366,7 +374,7 @@ function requirePlan(e) {
 
 module.exports = {
   PROMPT_VERSION, MODELS, DESTINATIONS, LOCATIONS, KINDS, DAILY_LIMITS,
-  today, clip, body, fail, gate, recordUsage, claude, handleError,
+  today, clip, body, fail, disabled, gate, recordUsage, claude, handleError,
   cacheKey, isCacheable, cachedExplanation, storeExplanation, oneOf, cleanActions, requirePlan,
   EXPLAIN_SYSTEM, EXPLAIN_SCHEMA, REVIEW_SYSTEM, REVIEW_SCHEMA, ASK_SYSTEM, ASK_SCHEMA,
 }

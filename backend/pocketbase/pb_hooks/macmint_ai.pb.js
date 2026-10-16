@@ -24,6 +24,9 @@ routerAdd("POST", "/api/macmint/ai/explain", (e) => {
   const location = ai.oneOf(data.location, ai.LOCATIONS, "Other")
   if (!kind || identifier.length < 2) return ai.fail(e, 400, "bad_request", "Nothing to explain.")
 
+  const off = ai.disabled(e.app, "explain")
+  if (off) return ai.fail(e, off[0], off[1], off[2])
+
   const cacheable = ai.isCacheable(kind, identifier)
   const key = ai.cacheKey(kind, location, identifier)
   if (cacheable) {
