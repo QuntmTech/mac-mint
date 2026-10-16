@@ -9,6 +9,8 @@ struct MenuBarView: View {
   @EnvironmentObject private var monitor: SystemMonitor
   @Environment(\.openWindow) private var openWindow
 
+  @State private var monitoringLease = UUID()
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
@@ -78,8 +80,8 @@ struct MenuBarView: View {
     .padding(16)
     .frame(width: 320)
     .background(AppTheme.canvas)
-    .onAppear { monitor.start(interval: 3) }
-    .onDisappear { monitor.stop() }
+    .onAppear { monitor.start(lease: monitoringLease, interval: 4) }
+    .onDisappear { monitor.stop(lease: monitoringLease) }
   }
 
   private var monitorSummary: String {
