@@ -177,7 +177,7 @@ struct ApplicationsView: View {
             .interpolation(.high)
             .frame(width: 68, height: 68)
           VStack(alignment: .leading, spacing: 4) {
-            Text(app.name).font(.system(size: 28, weight: .bold, design: .rounded))
+            Text(app.name).font(.system(size: 27, weight: .semibold))
             Text(app.bundleIdentifier ?? "No bundle identifier")
               .font(.callout)
               .foregroundStyle(.secondary)

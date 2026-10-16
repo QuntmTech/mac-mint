@@ -263,7 +263,7 @@ struct AssistantView: View {
     VStack(spacing: 0) {
       HStack(alignment: .firstTextBaseline) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Ask MacMint").font(.system(size: 30, weight: .bold, design: .rounded))
+          Text("Ask MacMint").font(.system(size: 29, weight: .semibold))
           Text("Answers from category-level scan summaries. Your questions are sent as written.")
             .foregroundStyle(.secondary)
         }
@@ -393,7 +393,7 @@ struct AssistantView: View {
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
-    .background(.bar)
+    .background(AppTheme.surface)
     .overlay(alignment: .top) { Divider() }
   }
 

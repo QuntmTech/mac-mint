@@ -7,11 +7,8 @@ struct SettingsView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Settings").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Safety, exclusions, permissions, and local privacy controls.")
-            .foregroundStyle(.secondary)
-        }
+        PageHeader("Settings", subtitle: "Your workspace, your preferences. Safety and privacy stay in your control.")
+        AppearanceSettingsCard()
 
         AccountSettingsCard()
 

@@ -67,13 +67,8 @@ struct DuplicatesView: View {
   }
 
   private var header: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Duplicates").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("Exact content matching, with no filename-based deletion guesses.").foregroundStyle(
-          .secondary)
-      }
-      Spacer()
+    PageHeader(title: "Duplicates", subtitle: "Compare exact copies. Choose a keeper before reviewing the rest.") {
+      HStack(spacing: 8) {
       if totalReclaimable > 0 {
         StatusPill(
           title: ByteFormatter.string(totalReclaimable) + " possible", icon: "square.on.square",
@@ -86,13 +81,14 @@ struct DuplicatesView: View {
           if model.isPreparingPlan {
             ProgressView().controlSize(.small)
           } else {
-            Label("Review \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "trash")
+            Label("Review \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "checklist")
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
         .help("Each kept copy is re-verified before anything moves")
       }
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -146,7 +142,7 @@ struct DuplicatesView: View {
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 
   private func duplicateRow(_ file: LargeFile, group: DuplicateGroup) -> some View {

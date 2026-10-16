@@ -10,13 +10,8 @@ struct PerformanceView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Performance").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Live readings, refreshed every few seconds while this screen is open.")
-            .foregroundStyle(.secondary)
-        }
-
-        HStack(spacing: 14) {
+        PageHeader("Performance", subtitle: "Live readings, with context that helps you decide when to act.")
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
           gauge(
             "Memory pressure", value: monitor.snapshot.pressure.rawValue,
             detail: memoryDetail, icon: "memorychip", tint: pressureTint)

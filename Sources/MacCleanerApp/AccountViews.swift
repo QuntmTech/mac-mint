@@ -68,7 +68,7 @@ private struct GateScaffold<Content: View>: View {
       VStack(spacing: 22) {
         VStack(spacing: 10) {
           BrandMark(size: 56)
-          Text("MacMint").font(.system(size: 28, weight: .bold, design: .rounded))
+          Text("MacMint").font(.system(size: 27, weight: .semibold))
         }
         SurfaceCard { content }
           .frame(width: 420)

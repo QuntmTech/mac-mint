@@ -9,6 +9,7 @@ struct MacCleanerDesktopApp: App {
   @StateObject private var care = CareService()
   @StateObject private var updates = UpdateService()
   @StateObject private var appUpdates = AppUpdatesStore()
+  @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .system
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
 
   init() {
@@ -25,6 +26,7 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(updates)
         .environmentObject(appUpdates)
         .tint(AppTheme.accent)
+        .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 980, minHeight: 620)
         .task {
           care.start()
@@ -33,6 +35,7 @@ struct MacCleanerDesktopApp: App {
           await account.refreshAIStatus()
         }
     }
+    .defaultSize(width: 1240, height: 820)
     .windowStyle(.automatic)
     .commands {
       CommandGroup(replacing: .appSettings) {
@@ -49,6 +52,11 @@ struct MacCleanerDesktopApp: App {
           Button(section.rawValue) { model.selectedSection = section }
             .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
 
+        }
+      }
+      CommandMenu("Appearance") {
+        Picker("Appearance", selection: $appearance) {
+          ForEach(AppAppearance.allCases) { option in Text(option.title).tag(option) }
         }
       }
       CommandMenu("Scan") {
@@ -76,6 +84,7 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(account)
         .environmentObject(monitor)
         .tint(AppTheme.accent)
+        .preferredColorScheme(appearance.colorScheme)
     }
     .menuBarExtraStyle(.window)
   }

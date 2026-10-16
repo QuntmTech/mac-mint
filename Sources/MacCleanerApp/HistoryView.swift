@@ -9,17 +9,9 @@ struct HistoryView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("History").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Recorded operations and recovery status. Restore verified Trash items here; recover library photos through Photos.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "History", subtitle: "Every operation, with its recovery status. Restore Trash items here and library photos in Photos.") {
         if !model.history.isEmpty {
-          StatusPill(
-            title: ByteFormatter.string(totalBytes) + " handled", icon: "clock.arrow.circlepath",
-            tint: AppTheme.accentText)
+          StatusPill(title: ByteFormatter.string(totalBytes) + " handled", icon: "clock.arrow.circlepath", tint: AppTheme.accentText)
         }
       }
       .padding(AppTheme.pagePadding)
@@ -34,8 +26,9 @@ struct HistoryView: View {
 
       if model.history.isEmpty {
         EmptyState(
-          icon: "clock.arrow.circlepath", title: "No cleanup history",
-          detail: "Trash and uninstall actions appear here after they complete.")
+          icon: "clock.arrow.circlepath", title: "A fresh start",
+          detail: "Your reviewed changes will appear here, along with their results and recovery options.",
+          actionTitle: "Go to Overview", action: { model.selectedSection = .dashboard })
       } else {
         List(model.history) { entry in
           entryRow(entry)

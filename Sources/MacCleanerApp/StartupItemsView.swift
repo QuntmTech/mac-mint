@@ -20,7 +20,7 @@ struct StartupItemsView: View {
     VStack(spacing: 0) {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Startup Items").font(.system(size: 30, weight: .bold, design: .rounded))
+          Text("Startup Items").font(.system(size: 29, weight: .semibold))
           Text(
             "Declared launch agent and daemon settings. These files do not establish whether a job is currently running."
           )
@@ -49,7 +49,7 @@ struct StartupItemsView: View {
       }
       .padding(.horizontal, AppTheme.pagePadding)
       .padding(.vertical, 12)
-      .background(.bar)
+      .background(AppTheme.surface)
 
       Divider()
 

@@ -16,7 +16,7 @@ enum SmokeTest {
     let started = Date()
     let support = FileManager.default.temporaryDirectory
       .appendingPathComponent("macmint-smoke-\(ProcessInfo.processInfo.processIdentifier)")
-    let model = AppViewModel()
+    let model = AppViewModel(supportDirectory: support.appendingPathComponent("model"))
     let account = AccountStore(supportDirectory: support)
     let monitor = SystemMonitor()
     let care = CareService()
@@ -56,39 +56,70 @@ enum SmokeTest {
     model.assistantDraft = ""
     model.clearQueue(); model.largeFiles = []; model.downloadItems = []; model.duplicateGroups = []
 
+    let screenshotDirectory = ProcessInfo.processInfo.environment["MACMINT_SCREENSHOT_DIR"].map { URL(fileURLWithPath: $0) }
+    if let screenshotDirectory { try? FileManager.default.createDirectory(at: screenshotDirectory, withIntermediateDirectories: true) }
+    var scheme: ColorScheme = .light
+
     func render<V: View>(_ name: String, _ view: V, width: CGFloat = 1200, height: CGFloat = 800) {
       rendered += 1
       let content = view
-        .environmentObject(model)
-        .environmentObject(account)
-        .environmentObject(monitor)
-        .environmentObject(care)
-        .environmentObject(updates)
-        .environmentObject(appUpdates)
-        .tint(AppTheme.accent)
-        .frame(width: width, height: height)
+        .environmentObject(model).environmentObject(account).environmentObject(monitor)
+        .environmentObject(care).environmentObject(updates).environmentObject(appUpdates)
+        .environment(\.colorScheme, scheme).tint(AppTheme.accent)
+        .frame(width: width, height: height).background(AppTheme.canvas)
       let renderer = ImageRenderer(content: content)
-      if renderer.nsImage == nil {
-        failures.append(name)
-        print("✗ \(name)")
-      } else {
-        print("✓ \(name)")
+      guard renderer.nsImage != nil else { failures.append(name); print("✗ \(name)"); return }
+      if let screenshotDirectory {
+        // ImageRenderer omits some AppKit-backed views (including lists). Capture a real
+        // hosting window so the visual evidence contains those controls as well.
+        let hosting = NSHostingView(rootView: content)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        window.contentView = hosting
+        window.orderFront(nil)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.16))
+        hosting.layoutSubtreeIfNeeded()
+        if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
+          hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+          if let png = bitmap.representation(using: .png, properties: [:]) {
+            let filename = name.replacingOccurrences(of: " ", with: "-").replacingOccurrences(of: "/", with: "-")
+            do { try png.write(to: screenshotDirectory.appendingPathComponent(filename + ".png")) }
+            catch { failures.append("Screenshot write: " + name) }
+          } else { failures.append("Screenshot encoding: " + name) }
+        } else { failures.append("Screenshot layout: " + name) }
+        window.orderOut(nil)
+        window.close()
       }
+      print("✓ \(name)")
     }
 
-    render("Account gate", AccountGateView())
-    for section in AppViewModel.Section.allCases {
-      model.selectedSection = section
-      render(section.rawValue, RootView())
+    for appearance in [ColorScheme.light, .dark] {
+      scheme = appearance
+      let prefix = appearance == .dark ? "Dark" : "Light"
+      for section in AppViewModel.Section.allCases {
+        model.selectedSection = section
+        render(prefix + "-Empty-" + section.rawValue, RootView())
+      }
     }
-    model.selectedSection = .dashboard
-    render("Dark overview", RootView().environment(\.colorScheme, .dark))
-    render("Compact overview", RootView(), width: 980, height: 660)
+    seedDesignFixtures(model, root: support.appendingPathComponent("Fixtures"))
+    let review = OperationPlan(title: "Selected items", items: model.cleanupTargets.filter(\.isSelected).map { PlanItem.cleanup($0) })
+    for appearance in [ColorScheme.light, .dark] {
+      scheme = appearance
+      let prefix = appearance == .dark ? "Dark" : "Light"
+      for section in AppViewModel.Section.primary + [.review, .duplicates, .settings] {
+        model.selectedSection = section
+        render(prefix + "-Populated-" + section.rawValue, RootView())
+        render(prefix + "-Compact-" + section.rawValue, RootView(), width: 980, height: 660)
+      }
+      render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
+      render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
+      render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 540)
+    }
+    scheme = .light
     render("Help", HelpView())
     render("Account access", AccountAccessSheet())
-    render("Empty final review", PlanReviewSheet(plan: OperationPlan(title: "Review", items: [])))
-    render("Menu bar", MenuBarView())
-    render("Onboarding", OnboardingView())
     render("Command palette", CommandPalette())
 
     let seconds = Date().timeIntervalSince(started)

@@ -48,9 +48,10 @@ struct CleanerView: View {
       if filteredTargets.isEmpty && !model.isScanning {
         EmptyState(
           icon: search.isEmpty ? "checkmark.seal" : "magnifyingglass",
-          title: search.isEmpty ? "Nothing reclaimable found" : "No matching cleanup items",
-          detail: search.isEmpty
-            ? "Run a scan again after using apps for a while." : "Try a different search or filter."
+          title: !search.isEmpty || riskFilter != .all ? "No matching cleanup items" : model.lastScanDate == nil ? "Start with a Quick Scan" : "Nothing found in this scan",
+          detail: !search.isEmpty || riskFilter != .all ? "Try a different search or filter." : model.lastScanDate == nil ? "Find caches, logs, and generated data. Nothing moves until you review it." : "Check scan coverage for any locations that could not be inspected.",
+          actionTitle: model.lastScanDate == nil ? "Run Quick Scan" : "Scan again",
+          action: { model.runSmartScan() }
         )
       } else {
         List {
@@ -76,60 +77,38 @@ struct CleanerView: View {
   }
 
   private var header: some View {
-    HStack(alignment: .center, spacing: 14) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Cleaner")
-          .font(.system(size: 30, weight: .bold, design: .rounded))
-        Text(
-          "Rebuildable caches are suggested. Anything with possible long-term value requires an explicit opt-in."
-        )
-        .foregroundStyle(.secondary)
+    PageHeader(title: "Cleanup", subtitle: "Inspect caches and generated data. Keep anything you still need.") {
+      HStack(spacing: 8) {
+        Button(model.isScanning ? "Cancel" : "Rescan", systemImage: model.isScanning ? "xmark" : "arrow.clockwise") {
+          if model.isScanning { model.cancelCurrentOperation() } else { model.runSmartScan() }
+        }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking)
+        Button { model.reviewCleanup() } label: {
+          Label("Review \(ByteFormatter.string(model.selectedCleanupBytes))", systemImage: "checklist")
+        }.buttonStyle(MintButtonStyle())
+          .disabled(model.selectedCleanupBytes == 0 || model.isWorking || model.isScanning)
       }
-      Spacer()
-      if model.isScanning {
-        Button("Cancel") { model.cancelCurrentOperation() }
-      } else {
-        Button("Rescan") { model.runSmartScan() }
-      }
-      Button {
-        model.reviewCleanup()
-      } label: {
-        Label("Review & Clean \(ByteFormatter.string(model.selectedCleanupBytes))", systemImage: "trash")
-      }
-      .buttonStyle(.borderedProminent)
-      .disabled(model.selectedCleanupBytes == 0 || model.isWorking || model.isScanning)
-    }
-    .padding(AppTheme.pagePadding)
+    }.padding(AppTheme.pagePadding)
   }
 
   private var filterBar: some View {
-    HStack(spacing: 10) {
-      TextField("Search cleanup items", text: $search)
-        .textFieldStyle(.roundedBorder)
-        .frame(maxWidth: 320)
-
-      Picker("Risk", selection: $riskFilter) {
-        ForEach(RiskFilter.allCases) { filter in
-          Text(filter.rawValue).tag(filter)
-        }
+    VStack(spacing: 12) {
+      HStack(spacing: 14) {
+        SearchField(prompt: "Search cleanup items", text: $search)
+        Picker("Risk", selection: $riskFilter) {
+          ForEach(RiskFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
+        }.pickerStyle(.segmented).frame(width: 230)
       }
-      .pickerStyle(.segmented)
-      .frame(width: 220)
-
-      Spacer()
-
-      Button("Rebuildable only") { model.selectSafeCleanupOnly() }
-      Button("Deselect all") { model.deselectAllCleanup() }
-
-      StatusPill(
-        title: "\(model.cleanupTargets.filter(\.isSelected).count) selected",
-        icon: "checkmark.circle",
-        tint: model.selectedCleanupBytes > 0 ? AppTheme.accentText : .gray
-      )
-    }
-    .padding(.horizontal, AppTheme.pagePadding)
-    .padding(.vertical, 12)
-    .background(.bar)
+      HStack {
+        Text("\(filteredTargets.count) items").font(.caption).foregroundStyle(.secondary)
+        Spacer()
+        Text("\(model.cleanupTargets.filter(\.isSelected).count) selected · \(ByteFormatter.string(model.selectedCleanupBytes))")
+          .font(.caption.weight(.medium)).foregroundStyle(AppTheme.accentText)
+        Menu("Select") {
+          Button("Rebuildable items") { model.selectSafeCleanupOnly() }
+          Button("Deselect all") { model.deselectAllCleanup() }
+        }.fixedSize().menuStyle(.borderlessButton)
+      }
+    }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 14)
   }
 
   private func cleanupRow(_ item: CleanupTarget) -> some View {
@@ -161,8 +140,8 @@ struct CleanerView: View {
           .lineLimit(1)
         Text(item.url.path)
           .font(.caption2)
-          .foregroundStyle(.tertiary)
-          .lineLimit(1)
+          .foregroundStyle(.secondary)
+          .lineLimit(1).truncationMode(.middle)
       }
 
       Spacer()
@@ -182,7 +161,8 @@ struct CleanerView: View {
       .menuStyle(.borderlessButton)
       .frame(width: 28)
     }
-    .padding(.vertical, 5)
+    .padding(.vertical, 10)
+    .listRowBackground(item.isSelected ? AppTheme.selection.opacity(0.45) : AppTheme.surface)
   }
 
   private func icon(for category: CleanupCategory) -> String {

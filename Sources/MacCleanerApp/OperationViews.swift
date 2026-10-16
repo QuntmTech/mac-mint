@@ -354,7 +354,7 @@ struct ReviewQueueView: View {
     VStack(spacing: 0) {
       HStack(alignment: .center, spacing: 14) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Review").font(.system(size: 30, weight: .bold, design: .rounded))
+          Text("Review").font(.system(size: 29, weight: .semibold))
           Text("Everything you've selected across Cleaner, Storage, Developer & AI, Duplicates, and Large Files — in one place.")
             .foregroundStyle(.secondary)
         }

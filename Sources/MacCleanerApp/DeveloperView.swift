@@ -28,7 +28,8 @@ struct DeveloperView: View {
       } else if model.devItems.isEmpty {
         EmptyState(
           icon: "hammer", title: "Find developer and AI clutter",
-          detail: "Xcode build data, simulators, package caches, project build folders, and local AI models — each with what it costs to remove.")
+          detail: "Xcode build data, simulators, package caches, project build folders, and local AI models — each with what it costs to remove.",
+          actionTitle: "Scan developer data", action: { model.scanDeveloper() })
       } else {
         summary
         List {
@@ -50,31 +51,27 @@ struct DeveloperView: View {
   }
 
   private var header: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Developer & AI").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("Rebuildable build data is suggested; anything in use or hard to recreate needs your call.")
-          .foregroundStyle(.secondary)
-      }
-      Spacer()
+    PageHeader(title: "Developer", subtitle: "Build output, package caches, and local models. See the cost of rebuilding before you decide.") {
+      HStack(spacing: 8) {
       if !model.selectedDevIDs.isEmpty {
         Button("Deselect") { model.keepQueuedFiles(model.queuedDevItems.compactMap(\.url)) }
         Button {
           model.reviewDeveloper()
         } label: {
-          Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "trash")
+          Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "checklist")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning || selectedBytes == 0)
       }
       if model.devItems.isEmpty {
         Button("Scan") { model.scanDeveloper() }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MintButtonStyle())
           .disabled(model.isScanning || model.isWorking)
       } else {
         Button("Rescan") { model.scanDeveloper() }
           .disabled(model.isScanning || model.isWorking)
       }
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -114,11 +111,11 @@ struct DeveloperView: View {
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 10)
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 
   private var summary: some View {
-    HStack(spacing: 10) {
+    LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 12)], spacing: 12) {
       ForEach(grouped, id: \.0) { group, items in
         VStack(alignment: .leading, spacing: 2) {
           Text(ByteFormatter.string(items.reduce(0) { $0 + $1.bytes }))

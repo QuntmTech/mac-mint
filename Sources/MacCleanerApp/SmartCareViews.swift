@@ -197,7 +197,7 @@ struct DownloadsView: View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Downloads").font(.system(size: 30, weight: .bold, design: .rounded))
+          Text("Downloads").font(.system(size: 29, weight: .semibold))
           Text("Large items you haven't opened in at least 3 months, with what macOS knows about them.")
             .foregroundStyle(.secondary)
         }
@@ -245,7 +245,7 @@ struct DownloadsView: View {
         }
         .padding(.horizontal, AppTheme.pagePadding)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(AppTheme.surface)
         Divider()
         List(visible) { item in row(item) }
           .listStyle(.inset)

@@ -29,9 +29,10 @@ struct PhotosView: View {
         content(scan)
       } else {
         EmptyState(
-          icon: "photo.on.rectangle.angled", title: "Find similar shots, blurry photos, and old screenshots",
+          icon: "photo.on.rectangle.angled", title: "Make room for your best shots",
           detail:
-            "Check your Photos library or any folder. Nothing is selected for you. Compare each set and choose the copy to keep.")
+            "Check your Photos library or any folder. Nothing is selected for you. Compare each set and choose the copy to keep.",
+          actionTitle: "Scan photos", action: { model.scanPhotos() })
       }
     }
     .sheet(item: $comparing) { group in PhotoComparisonSheet(group: group) }
@@ -40,17 +41,10 @@ struct PhotosView: View {
   // MARK: Header
 
   private var header: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Photos").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text(
-          isLibrary
-            ? "Deleting in Photos also deletes from iCloud and synced devices. Recover through Photos while available in Recently Deleted."
-            : "Folder photos go to the Trash and can be restored from History."
-        )
-        .foregroundStyle(.secondary)
-      }
-      Spacer()
+    PageHeader(title: "Photos", subtitle: isLibrary
+      ? "Compare your library. Deletion syncs to iCloud and other devices; recovery is through Photos."
+      : "Compare folder photos. Reviewed removals go to Trash, with recovery in History.") {
+      HStack(spacing: 8) {
       if !model.selectedPhotoIDs.isEmpty {
         Button("Deselect") { model.keepQueuedFiles(model.selectedPhotos.filter { !$0.isLibraryAsset }.map(\.url)); model.selectedPhotoIDs = [] }
         Button {
@@ -58,11 +52,11 @@ struct PhotosView: View {
         } label: {
           Label(
             isLibrary
-              ? "Delete \(model.selectedPhotoIDs.count) in Photos"
+              ? "Review \(model.selectedPhotoIDs.count) photos"
               : "Review \(model.selectedPhotoIDs.count) (\(ByteFormatter.string(model.selectedPhotoBytes)))",
-            systemImage: "trash")
+            systemImage: "checklist")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning)
       }
       Menu {
@@ -76,8 +70,9 @@ struct PhotosView: View {
       }
       .fixedSize()
       Button(model.photoScan == nil ? "Scan" : "Rescan") { model.scanPhotos() }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(AppTheme.pagePadding)
   }

@@ -22,7 +22,7 @@ struct RemovedAppsView: View {
     VStack(spacing: 0) {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 4) {
-          Text("Removed Apps").font(.system(size: 30, weight: .bold, design: .rounded))
+          Text("Removed Apps").font(.system(size: 29, weight: .semibold))
           Text("Settings, caches, and containers left behind by apps that are no longer installed.")
             .foregroundStyle(.secondary)
         }

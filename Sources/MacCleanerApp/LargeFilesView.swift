@@ -75,13 +75,8 @@ struct LargeFilesView: View {
   }
 
   private var header: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Large Files").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("Find space-hungry personal files without scanning protected Library data.")
-          .foregroundStyle(.secondary)
-      }
-      Spacer()
+    PageHeader(title: "Large Files", subtitle: "Find the files taking up room. What stays is always your decision.") {
+      HStack(spacing: 8) {
       if !model.largeFiles.isEmpty {
         StatusPill(
           title: "\(model.largeFiles.count) found", icon: "doc.on.doc", tint: AppTheme.accentText)
@@ -92,12 +87,13 @@ struct LargeFilesView: View {
           Button {
             model.reviewLargeFiles()
           } label: {
-            Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "trash")
+            Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "checklist")
           }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MintButtonStyle())
           .disabled(model.isWorking || model.isScanning)
         }
       }
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -134,6 +130,6 @@ struct LargeFilesView: View {
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 }

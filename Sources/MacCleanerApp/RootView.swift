@@ -17,29 +17,40 @@ struct RootView: View {
           .padding(.top, 12)
           .padding(.bottom, 8)
 
-        List(
-          AppViewModel.Section.primary,
-          selection: Binding(
-            get: { Optional(model.selectedSection.parent) },
-            set: { if let section = $0 { model.selectedSection = section } }
-          )
-        ) { section in
-          Label(section.rawValue, systemImage: section.icon)
-            .font(.callout.weight(.medium))
-            .padding(.vertical, 4)
-            .badge(section == .review ? model.queuedCount : 0)
-            .tag(section)
-        }
-        .listStyle(.sidebar)
+        VStack(alignment: .leading, spacing: 5) {
+          Text("WORKSPACE").font(.system(size: 9, weight: .semibold)).tracking(1.6)
+            .foregroundStyle(.secondary).padding(.leading, 12).padding(.bottom, 7)
+          ForEach(AppViewModel.Section.primary) { section in
+            sidebarDestination(section)
+          }
+        }.padding(.horizontal, 12).padding(.top, 22)
 
-        HStack {
-          Button { model.selectedSection = .settings } label: { Label("Settings", systemImage: "gearshape") }
+        Spacer(minLength: 16)
+
+        Button { model.showingCommandPalette = true } label: {
+          HStack {
+            Image(systemName: "magnifyingglass")
+            Text("Go to…")
+            Spacer()
+            Text("⌘K").font(.caption).foregroundStyle(.secondary)
+          }.font(.callout).foregroundStyle(.secondary).padding(10)
+            .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+        }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 12)
+        sidebarFooter.padding(.horizontal, 12).padding(.bottom, 12)
+        Divider().padding(.horizontal, 16)
+        HStack(spacing: 8) {
+          Button { model.selectedSection = .settings } label: {
+            Label("Settings", systemImage: "gearshape").font(.callout)
+          }.buttonStyle(.plain)
+            .foregroundStyle(model.selectedSection == .settings ? AppTheme.accentText : Color.secondary)
           Spacer()
-          Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle").accessibilityLabel("Help") }
-        }.buttonStyle(.borderless).padding(.horizontal, 16)
-        sidebarFooter.padding(12)
+          Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle") }
+            .buttonStyle(.plain).foregroundStyle(.secondary).help("Help & diagnostics")
+            .accessibilityLabel("Help and diagnostics")
+        }.padding(18)
       }
-      .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 260)
+      .background(AppTheme.sidebar)
+      .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 250)
     } detail: {
       Group {
         switch model.selectedSection {
@@ -61,14 +72,29 @@ struct RootView: View {
         case .settings: SettingsView()
         }
       }
-      .background(Color(nsColor: .windowBackgroundColor))
+      .background(AppTheme.canvas)
+      .scrollContentBackground(.hidden)
       .safeAreaInset(edge: .top, spacing: 0) {
         VStack(spacing: 0) {
           updateBanner
           if !model.selectedSection.tabs.isEmpty {
-            Picker("View", selection: $model.selectedSection) {
-              ForEach(model.selectedSection.tabs) { section in Text(section.rawValue).tag(section) }
-            }.pickerStyle(.segmented).padding(10).frame(maxWidth: 620)
+            HStack(spacing: 4) {
+              ForEach(model.selectedSection.tabs) { section in
+                Button { model.selectedSection = section } label: {
+                  HStack(spacing: 6) {
+                    Image(systemName: section.icon).font(.system(size: 11))
+                    Text(section.rawValue).font(.system(size: 12, weight: model.selectedSection == section ? .semibold : .medium))
+                  }.padding(.horizontal, 13).padding(.vertical, 8)
+                    .foregroundStyle(model.selectedSection == section ? AppTheme.accentText : Color.secondary)
+                    .background(model.selectedSection == section ? AppTheme.surface : .clear,
+                      in: RoundedRectangle(cornerRadius: 8))
+                    .contentShape(RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain)
+                  .accessibilityAddTraits(model.selectedSection == section ? .isSelected : [])
+              }
+              Spacer(minLength: 0)
+            }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 10)
+              .background(AppTheme.canvas).overlay(alignment: .bottom) { Divider().opacity(0.5) }
           }
         }
       }
@@ -79,10 +105,21 @@ struct RootView: View {
     .toolbar {
       ToolbarItemGroup {
         Button { model.selectedSection = .review } label: {
-          Label("Review \(model.queuedCount) · \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist")
+          HStack(spacing: 7) {
+            Image(systemName: "checklist")
+            Text("Review")
+            if model.queuedCount > 0 {
+              Text("\(model.queuedCount)").font(.caption.weight(.semibold))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(AppTheme.selection, in: Capsule())
+            }
+          }
         }
+        .help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
         if account.aiAvailable { Button { model.selectedSection = .assistant } label: { Label("Ask MacMint", systemImage: "sparkles") } }
-        Button(account.isUnlocked ? "Account" : "Unlock Pro") { model.showingAccount = true }
+        Button { model.showingAccount = true } label: {
+          Label(account.isUnlocked ? "Account" : "Get Pro", systemImage: "person.crop.circle")
+        }
       }
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
@@ -93,6 +130,7 @@ struct RootView: View {
     }) { AccountAccessSheet() }
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      guard !SmokeTest.isRequested else { return }
       Task {
         await account.refreshAccess()
         await account.refreshAIStatus()
@@ -126,6 +164,7 @@ struct RootView: View {
     }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
+      guard !SmokeTest.isRequested else { return }
       model.authorizeRemoval = { [weak account] in account?.isUnlocked == true }
       if !onboardingDone {
         showingOnboarding = true
@@ -137,10 +176,10 @@ struct RootView: View {
 
   private var sidebarBrand: some View {
     HStack(spacing: 11) {
-      BrandMark()
+      BrandMark().frame(width: 36, height: 36)
       VStack(alignment: .leading, spacing: 1) {
         Text("MacMint")
-          .font(.headline)
+          .font(.system(size: 18, weight: .semibold)).tracking(-0.4)
         Text(account.isUnlocked ? (account.isOffline ? "Pro • Offline" : "Pro") : "Local inspection")
           .font(.caption2)
           .foregroundStyle(.secondary)
@@ -149,27 +188,42 @@ struct RootView: View {
     }
   }
 
+  private func sidebarDestination(_ section: AppViewModel.Section) -> some View {
+    let selected = model.selectedSection.parent == section
+    return Button { model.selectedSection = section } label: {
+      HStack(spacing: 11) {
+        Image(systemName: section.icon).font(.system(size: 16, weight: selected ? .semibold : .regular))
+          .frame(width: 22)
+        Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .medium))
+        Spacer(minLength: 0)
+        if selected { Circle().fill(AppTheme.accentText).frame(width: 5, height: 5) }
+      }.foregroundStyle(selected ? AppTheme.accentText : AppTheme.ink.opacity(0.8))
+        .padding(.horizontal, 12).padding(.vertical, 11)
+        .background(selected ? AppTheme.selection : .clear, in: RoundedRectangle(cornerRadius: 10))
+        .contentShape(RoundedRectangle(cornerRadius: 10))
+    }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+      .help(section.rawValue)
+  }
+
   private var sidebarFooter: some View {
     let stats = model.volumeStats
     let fraction = stats.total > 0 ? min(1, Double(stats.used) / Double(stats.total)) : 0
-    return VStack(alignment: .leading, spacing: 8) {
-      HStack {
-        Text(model.volumeName)
-          .lineLimit(1)
-          .font(.caption.weight(.semibold))
-        Spacer()
-        Text(ByteFormatter.string(stats.free) + " free")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
+    return VStack(alignment: .leading, spacing: 11) {
+      HStack(spacing: 8) {
+        Image(systemName: "internaldrive").foregroundStyle(AppTheme.accentText)
+        Text(model.volumeName).lineLimit(1).font(.caption.weight(.semibold))
       }
-      ProgressView(value: fraction)
-        .progressViewStyle(.linear)
-      Text("Trash-first • Scans stay local")
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-    }
-    .padding(12)
-    .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+      GeometryReader { geometry in
+        Capsule().fill(AppTheme.border)
+          .overlay(alignment: .leading) {
+            Capsule().fill(AppTheme.accentText).frame(width: geometry.size.width * fraction)
+          }
+      }.frame(height: 5).accessibilityLabel("Disk \(Int(fraction * 100)) percent used")
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(ByteFormatter.string(stats.free)).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+        Text("available").font(.caption).foregroundStyle(.secondary)
+      }
+    }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
   }
 
   @ViewBuilder
@@ -201,7 +255,7 @@ struct RootView: View {
       }
       .padding(.horizontal, 16)
       .padding(.vertical, 8)
-      .background(.bar)
+      .background(AppTheme.surface)
       .overlay(alignment: .bottom) { Divider() }
     }
   }
@@ -217,9 +271,9 @@ struct RootView: View {
       } else {
         Image(
           systemName: model.scanIssues.isEmpty
-            ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+            ? "leaf" : "exclamationmark.triangle.fill"
         )
-        .foregroundStyle(model.scanIssues.isEmpty ? .green : .orange)
+        .foregroundStyle(model.scanIssues.isEmpty ? AppTheme.accentText : .orange)
       }
 
       VStack(alignment: .leading, spacing: 1) {
@@ -260,7 +314,7 @@ struct RootView: View {
     }
     .padding(.horizontal, 16)
     .padding(.vertical, 8)
-    .background(.bar)
+    .background(AppTheme.surface)
     .overlay(alignment: .top) { Divider() }
   }
 }

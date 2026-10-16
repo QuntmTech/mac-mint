@@ -16,10 +16,10 @@ struct StorageExplorerView: View {
         Divider()
         HSplitView {
           treemap(node)
-            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
             .padding(14)
           itemList(node)
-            .frame(minWidth: 340, idealWidth: 400, maxWidth: 520)
+            .frame(minWidth: 300, idealWidth: 340, maxWidth: 480)
         }
         Divider()
         coverageBar(scan)
@@ -39,7 +39,8 @@ struct StorageExplorerView: View {
       } else {
         EmptyState(
           icon: "chart.pie", title: "See what's using your space",
-          detail: "Map your home folder or any drive. Click a block to dive in; select items to review them.")
+          detail: "Map your home folder or inspect a connected drive. Open a folder to explore, then review what you no longer need.",
+          actionTitle: "Map storage", action: { model.scanStorage() })
       }
     }
   }
@@ -47,28 +48,21 @@ struct StorageExplorerView: View {
   // MARK: Header
 
   private var header: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Storage").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("A size map of \(model.storageRoot.path). Nothing changes until you review it.")
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
-      }
+    PageHeader(title: "Storage", subtitle: "Explore your disk, folder by folder. Select items for a closer look.") {
+      HStack(spacing: 8) {
       if !FileSystem.path(model.storageRoot, isInsideOrEqual: FileManager.default.homeDirectoryForCurrentUser) {
         StatusPill(title: "Inspection only", icon: "eye", tint: .secondary)
       }
-      Spacer()
       if !model.selectedStoragePaths.isEmpty {
         Button("Deselect") { model.keepQueuedFiles(model.queuedStorageNodes.map(\.url)) }
         Button {
           model.reviewStorageSelection()
         } label: {
           Label(
-            "Review \(model.selectedStoragePaths.count) Selected (\(ByteFormatter.string(model.queuedStorageNodes.reduce(0) { $0 + $1.allocatedBytes })))",
-            systemImage: "trash")
+            "Review \(model.selectedStoragePaths.count) items",
+            systemImage: "checklist")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning)
       }
       Menu {
@@ -82,8 +76,9 @@ struct StorageExplorerView: View {
       }
       .fixedSize()
       Button(model.storageScan == nil ? "Scan" : "Rescan") { model.scanStorage() }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -111,7 +106,7 @@ struct StorageExplorerView: View {
       .padding(.horizontal, AppTheme.pagePadding)
       .padding(.vertical, 9)
     }
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 
   // MARK: Treemap
