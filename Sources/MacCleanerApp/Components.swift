@@ -8,7 +8,7 @@ struct AppTheme {
   // White labels on this fill meet WCAG AA in both appearances.
   static let accent = Color(red: 0.016, green: 0.471, blue: 0.341)
   static let brand = Color(red: 0.063, green: 0.725, blue: 0.506)
-  static let accentText = adaptive("AccentText", light: 0x047857, dark: 0x60DDAA)
+  static let accentText = adaptive("AccentText", light: 0x046F50, dark: 0x60DDAA)
   static let canvas = adaptive("Canvas", light: 0xF5F7F6, dark: 0x141917)
   static let surface = adaptive("Surface", light: 0xFFFFFF, dark: 0x1D2421)
   static let panel = adaptive("Panel", light: 0xEDF1EF, dark: 0x252E29)
@@ -17,6 +17,10 @@ struct AppTheme {
   static let ink = adaptive("Ink", light: 0x1E3429, dark: 0xEDF5EF)
   static let border = adaptive("Border", light: 0xDCE5DF, dark: 0x38463D)
   static let selection = adaptive("Selection", light: 0xD9EDE2, dark: 0x253F31)
+  static let warning = adaptive("Warning", light: 0x915000, dark: 0xF5BC67)
+  static let danger = adaptive("Danger", light: 0xB33430, dark: 0xFF958D)
+  static let info = adaptive("Info", light: 0x1C65A6, dark: 0x8AC4F4)
+  static let violet = adaptive("Violet", light: 0x754B9B, dark: 0xCBB0EF)
   static let hero = adaptive("Hero", light: 0xE5F2EA, dark: 0x20382A)
 
   private static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
@@ -49,7 +53,7 @@ struct MetricCard: View {
 
   var body: some View {
     if let action {
-      Button(action: action) { card }.buttonStyle(.plain)
+      Button(action: action) { card }.buttonStyle(CardButtonStyle())
         .help("Open " + title).accessibilityElement(children: .combine)
     } else { card.accessibilityElement(children: .combine) }
   }
@@ -105,9 +109,9 @@ struct RiskBadge: View {
 
   private var color: Color {
     switch risk {
-    case .safe: return .green
-    case .review: return .orange
-    case .restricted: return .red
+    case .safe: return AppTheme.accentText
+    case .review: return AppTheme.warning
+    case .restricted: return AppTheme.danger
     }
   }
 }
@@ -177,7 +181,7 @@ struct StorageRing: View {
 struct StatusPill: View {
   let title: String
   let icon: String
-  var tint: Color = .gray
+  var tint: Color = .secondary
 
   var body: some View {
     Label(title, systemImage: icon)

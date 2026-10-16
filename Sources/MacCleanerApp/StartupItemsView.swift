@@ -18,15 +18,8 @@ struct StartupItemsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Startup Items").font(.system(size: 29, weight: .semibold))
-          Text(
-            "Declared launch agent and daemon settings. These files do not establish whether a job is currently running."
-          )
-          .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Startup Items", subtitle: "Inspect declared launch settings. Open Login Items to manage what starts with your Mac.") {
+        HStack(spacing: 8) {
         StatusPill(
           title: "\(model.startupItems.count) items", icon: "bolt.horizontal.circle",
           tint: AppTheme.accentText)
@@ -34,13 +27,13 @@ struct StartupItemsView: View {
         Button("Refresh") { model.runSmartScan() }
           .disabled(model.isScanning || model.isWorking)
       }
+      }
       .padding(AppTheme.pagePadding)
 
       Divider()
 
       HStack {
-        TextField("Search startup items", text: $search)
-          .textFieldStyle(.roundedBorder)
+        SearchField(prompt: "Search startup items", text: $search)
           .frame(maxWidth: 340)
         Spacer()
         Text("Read-only")
@@ -78,7 +71,7 @@ struct StartupItemsView: View {
             Spacer()
             if item.disabled { StatusPill(title: "Declared disabled", icon: "pause.circle") }
             if item.runAtLoad {
-              StatusPill(title: "Requests run at load", icon: "arrow.clockwise", tint: .orange)
+              StatusPill(title: "Requests run at load", icon: "arrow.clockwise", tint: AppTheme.warning)
             }
             if item.keepAlive { StatusPill(title: "Requests keep alive", icon: "heart.fill", tint: .red) }
             Text(item.scope)

@@ -1,8 +1,9 @@
+import AppKit
 import MacCleanerCore
 import SwiftUI
 
 /// Synthetic data used only by the explicit --smoke-test harness. No scan, sign-in,
-/// permission request, file creation, or removal is performed by this fixture.
+/// permission request, or removal is performed. Preview images live only in the isolated test directory.
 @MainActor
 func seedDesignFixtures(_ model: AppViewModel, root: URL) {
   let gib: Int64 = 1_073_741_824
@@ -39,5 +40,36 @@ func seedDesignFixtures(_ model: AppViewModel, root: URL) {
   model.duplicateGroups = [DuplicateGroup(fingerprint: "design-fixture", files: [first, copy])]
   model.largeFiles = [LargeFile(url: root.appendingPathComponent("Movies/Weekend edit.mov"), size: gib * 5, modifiedAt: Date().addingTimeInterval(-86400 * 60), accessedAt: nil)]
   model.history = [HistoryEntry(date: Date().addingTimeInterval(-86400), action: "Quick Scan cleanup", paths: [root.appendingPathComponent("Library/Caches/Example").path], bytes: gib * 2, notes: "Fixture operation. No files were moved.", receipts: [])]
+  // Deterministic, synthetic preview images exercise the real thumbnail path without
+  // relying on a runner's Photos library, an internet image, or anyone's personal data.
+  let photos: [PhotoFingerprint] = (0..<3).map { index in
+    let url = root.appendingPathComponent("Pictures/Sample coast \(index + 1).png")
+    let image = NSImage(size: NSSize(width: 480, height: 360), flipped: false) { rect in
+      NSGradient(colors: [NSColor(srgbRed: 0.72, green: 0.88, blue: 0.87, alpha: 1),
+        NSColor(srgbRed: 0.30, green: 0.62, blue: 0.67, alpha: 1)])?.draw(in: rect, angle: -90)
+      NSColor(srgbRed: 0.98, green: 0.89, blue: 0.65, alpha: 1).setFill()
+      NSBezierPath(ovalIn: NSRect(x: 326 - index * 5, y: 247, width: 50, height: 50)).fill()
+      NSColor(srgbRed: 0.17, green: 0.40, blue: 0.37, alpha: 1).setFill()
+      let hill = NSBezierPath()
+      hill.move(to: NSPoint(x: 0, y: 0)); hill.line(to: NSPoint(x: 0, y: 130))
+      hill.curve(to: NSPoint(x: 480, y: 60), controlPoint1: NSPoint(x: 155, y: 270), controlPoint2: NSPoint(x: 250, y: 75))
+      hill.line(to: NSPoint(x: 480, y: 0)); hill.close(); hill.fill()
+      NSColor(srgbRed: 0.80, green: 0.77, blue: 0.58, alpha: 1).setFill()
+      let beach = NSBezierPath()
+      beach.move(to: NSPoint(x: 0, y: 0)); beach.line(to: NSPoint(x: 480, y: 0))
+      beach.line(to: NSPoint(x: 480, y: 70))
+      beach.curve(to: NSPoint(x: 0, y: 35), controlPoint1: NSPoint(x: 270, y: 135), controlPoint2: NSPoint(x: 120, y: 0))
+      beach.close(); beach.fill()
+      return true
+    }
+    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    if let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+       let png = bitmap.representation(using: .png, properties: [:]) { try? png.write(to: url) }
+    return PhotoFingerprint(url: url, bytes: 4_000_000, hash: UInt64(index), sharpness: 100 - Double(index), pixelWidth: 480, pixelHeight: 360)
+  }
+  model.photoSource = .folder(root.appendingPathComponent("Pictures"))
+  model.photoScan = PhotoScanResult(photos: photos,
+    similarGroups: [SimilarPhotoGroup(id: "sample-coast", photos: photos, keeperIndex: 0)],
+    blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
   model.refreshRecommendations()
 }

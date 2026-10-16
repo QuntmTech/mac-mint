@@ -133,14 +133,23 @@ struct PhotosView: View {
     let kept = model.keeper(of: group)
     return SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text("\(group.photos.count) similar photos").font(.headline)
-          Text(kept.isLibraryAsset ? "• Size unavailable" : "• \(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in the others")
-            .foregroundStyle(.secondary)
-          Spacer()
-          Button("Compare") { comparing = group }
-          Button("Select All but Kept") { model.selectAllButKeeper(in: group) }
-            .controlSize(.small)
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("\(group.photos.count) similar photos").font(.headline)
+              Text(kept.isLibraryAsset ? "Size unavailable" : "\(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in other copies")
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { comparing = group } label: { Label("Compare", systemImage: "rectangle.split.2x1") }
+              .buttonStyle(MintButtonStyle(prominent: false))
+          }
+          HStack {
+            Label("Suggested keeper · You can change it", systemImage: "star")
+              .font(.caption).foregroundStyle(AppTheme.accentText)
+            Spacer()
+            Button("Select other copies") { model.selectAllButKeeper(in: group) }.controlSize(.small)
+          }
         }
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 12) {

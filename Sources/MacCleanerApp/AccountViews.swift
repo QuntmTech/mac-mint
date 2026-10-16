@@ -86,7 +86,7 @@ private struct GateMessages: View {
     VStack(spacing: 8) {
       if let error = account.errorMessage {
         Label(error, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
       }
       if let info = account.infoMessage {
         Label(info, systemImage: "checkmark.circle.fill")
@@ -308,7 +308,7 @@ struct AccountSettingsCard: View {
           Label("Account", systemImage: "person.crop.circle.fill").font(.headline)
           Spacer()
           if account.isOffline {
-            StatusPill(title: "Offline", icon: "wifi.slash", tint: .orange)
+            StatusPill(title: "Offline", icon: "wifi.slash", tint: AppTheme.warning)
           }
         }
         if let snapshot = account.snapshot {

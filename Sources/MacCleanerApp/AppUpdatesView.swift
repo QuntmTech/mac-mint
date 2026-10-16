@@ -76,7 +76,7 @@ struct AppUpdatesView: View {
               .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(update.statusLabel).font(.caption).foregroundStyle(update.checkState == .failed ? Color.orange : Color.secondary)
+            Text(update.statusLabel).font(.caption).foregroundStyle(update.checkState == .failed ? AppTheme.warning : Color.secondary)
             StatusPill(title: update.source.label, icon: icon(update.source), tint: .secondary)
             action(update)
           }

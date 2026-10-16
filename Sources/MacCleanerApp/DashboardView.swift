@@ -66,13 +66,13 @@ struct DashboardView: View {
               Text("Last scanned \(date.formatted(.relative(presentation: .named)))")
             } else { Text("Local scan · No account needed") }
           }
-        }.font(.caption).foregroundStyle(AppTheme.ink.opacity(0.65))
+        }.font(.caption).foregroundStyle(AppTheme.ink.opacity(0.82))
       }.frame(maxWidth: .infinity, alignment: .leading)
       VStack(spacing: 18) {
         StorageRing(used: stats.used, total: stats.total,
           centerValue: ByteFormatter.string(stats.free), centerLabel: "available")
         Text("\(ByteFormatter.string(stats.used)) of \(ByteFormatter.string(stats.total)) used")
-          .font(.caption).foregroundStyle(AppTheme.ink.opacity(0.7)).monospacedDigit()
+          .font(.caption).foregroundStyle(AppTheme.ink.opacity(0.82)).monospacedDigit()
       }.padding(.horizontal, 12)
     }
     .padding(28).frame(maxWidth: .infinity, alignment: .leading)
@@ -112,9 +112,9 @@ struct DashboardView: View {
       }
       LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
         tool("Explore storage", detail: "See what’s taking up room, folder by folder.", symbol: "chart.pie", tint: AppTheme.accentText, section: .storage)
-        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", tint: .blue, section: .applications)
-        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", tint: .purple, section: .photos)
-        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", tint: .orange, section: .developer)
+        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", tint: AppTheme.info, section: .applications)
+        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", tint: AppTheme.violet, section: .photos)
+        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", tint: AppTheme.warning, section: .developer)
       }
     }
   }
@@ -131,7 +131,7 @@ struct DashboardView: View {
           Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
       }
-    }.buttonStyle(.plain).accessibilityElement(children: .combine)
+    }.buttonStyle(CardButtonStyle()).accessibilityElement(children: .combine)
   }
 
   private var coverage: some View {

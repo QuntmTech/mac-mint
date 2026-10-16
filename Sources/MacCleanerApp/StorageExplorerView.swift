@@ -289,7 +289,7 @@ struct StorageExplorerView: View {
       Label("\(scan.coverage.scannedItems.formatted()) items", systemImage: "doc.on.doc")
       if !scan.coverage.inaccessiblePaths.isEmpty {
         Label("\(scan.coverage.inaccessiblePaths.count) unreadable", systemImage: "lock")
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
           .help("Grant Full Disk Access in System Settings to include protected folders.")
       }
       if scan.coverage.cloudOnlyItems > 0 {
@@ -299,7 +299,7 @@ struct StorageExplorerView: View {
         Label("\(scan.coverage.otherVolumes.count) other drive(s) skipped", systemImage: "externaldrive")
       }
       if scan.coverage.wasCancelled {
-        Label("Partial — scan was stopped", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+        Label("Partial — scan was stopped", systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
       }
       Spacer()
       Text("Sizes show space used on this disk; freed space appears after emptying the Trash.")

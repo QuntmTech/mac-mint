@@ -140,7 +140,7 @@ struct ApplicationsView: View {
                 let days = Int(Date().timeIntervalSince(lastUsed) / 86_400)
                 Text(days < 1 ? "Opened today" : "Opened \(RelativeAge.describe(days: days)) ago")
                   .font(.caption2)
-                  .foregroundStyle(days >= 180 ? Color.orange : Color.secondary)
+                  .foregroundStyle(days >= 180 ? AppTheme.warning : Color.secondary)
               }
             }
             Spacer()
@@ -160,7 +160,7 @@ struct ApplicationsView: View {
   @ViewBuilder private func appDetails(_ app: AppRecord) -> some View {
     Text(ByteFormatter.string(app.bundleSize)).font(.caption.weight(.medium)).foregroundStyle(AppTheme.accentText)
     if let version = app.version { Text("Version " + version).font(.caption).foregroundStyle(.secondary) }
-    if model.selectedAppIsRunning { StatusPill(title: "Running", icon: "play.circle.fill", tint: .orange) }
+    if model.selectedAppIsRunning { StatusPill(title: "Running", icon: "play.circle.fill", tint: AppTheme.warning) }
   }
 
   @ViewBuilder

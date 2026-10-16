@@ -65,11 +65,11 @@ struct ExplainSheet: View {
             Text(rule).font(.callout)
           }
         } icon: {
-          Image(systemName: "checkmark.shield.fill").foregroundStyle(.orange)
+          Image(systemName: "checkmark.shield.fill").foregroundStyle(AppTheme.warning)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(AppTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       }
 
       Divider()
@@ -82,7 +82,7 @@ struct ExplainSheet: View {
           detail("Confidence", explanation.confidence.capitalized)
         }
       } else if let error = model.explanationError {
-        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
       } else {
         HStack(spacing: 8) {
           ProgressView().controlSize(.small)
@@ -117,7 +117,7 @@ struct ExplainSheet: View {
   private func verdictPill(_ verdict: AIExplanation.Verdict) -> some View {
     switch verdict {
     case .safe: return StatusPill(title: "Rebuildable cache", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
-    case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: .orange)
+    case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: AppTheme.warning)
     case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: .red)
     case .unknown: return StatusPill(title: "Not sure", icon: "questionmark.circle", tint: .gray)
     }
@@ -205,7 +205,7 @@ struct AIReviewPanel: View {
           ForEach(review.cautions, id: \.self) { caution in
             Label(caution, systemImage: "exclamationmark.triangle.fill")
               .font(.caption)
-              .foregroundStyle(.orange)
+              .foregroundStyle(AppTheme.warning)
               .fixedSize(horizontal: false, vertical: true)
           }
           ForEach(review.insights, id: \.self) { insight in
@@ -222,7 +222,7 @@ struct AIReviewPanel: View {
           AIDisclaimer()
         }
         if let error = model.reviewAIError, !model.aiReviewBusy, model.selectedSection != .assistant {
-          Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+          Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppTheme.warning)
         }
       }
       .padding(12)
@@ -296,7 +296,7 @@ struct AssistantView: View {
                 .id("busy")
               }
               if let error = model.aiError {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
               }
             }
             .padding(.horizontal, AppTheme.pagePadding)

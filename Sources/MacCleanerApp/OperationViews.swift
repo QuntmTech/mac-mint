@@ -14,18 +14,18 @@ struct PlanItemRow: View {
     HStack(spacing: 11) {
       ZStack {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill((item.needsAttention ? Color.orange : AppTheme.accent).opacity(0.12))
+          .fill((item.needsAttention ? AppTheme.warning : AppTheme.accent).opacity(0.12))
           .frame(width: 30, height: 30)
         Image(systemName: Self.icon(for: item.kind))
           .accessibilityHidden(true)
           .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(item.needsAttention ? Color.orange : AppTheme.accentText)
+          .foregroundStyle(item.needsAttention ? AppTheme.warning : AppTheme.accentText)
       }
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
           Text(item.displayName).fontWeight(.medium).lineLimit(1)
           if item.needsAttention {
-            StatusPill(title: "Review", icon: "eye.fill", tint: .orange)
+            StatusPill(title: "Review", icon: "eye.fill", tint: AppTheme.warning)
           }
         }
         Text(item.kind.label + " · " + (item.ownerBundleID ?? "Owner not identified"))
@@ -193,9 +193,9 @@ struct PlanReviewSheet: View {
       }
       if !plan.attentionItems.isEmpty {
         Label("\(plan.attentionItems.count) items need a closer look: personal files, backups, or data that may not rebuild.", systemImage: "exclamationmark.triangle")
-          .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+          .font(.callout).foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
           .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+          .background(AppTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
       }
       Text("Remove anything you want to keep. Only the items below will move.")
         .font(.callout).foregroundStyle(.secondary)
@@ -229,7 +229,7 @@ struct PlanReviewSheet: View {
             systemImage: "hand.raised.fill"
           )
           .font(.caption.weight(.semibold))
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
         }
       }
     }

@@ -70,6 +70,7 @@ struct IconTile: View {
 struct SearchField: View {
   let prompt: String
   @Binding var text: String
+  @Environment(\.colorSchemeContrast) private var contrast
   var body: some View {
     HStack(spacing: 8) {
       Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -81,7 +82,7 @@ struct SearchField: View {
     }
     .padding(.horizontal, 11).padding(.vertical, 9)
     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(AppTheme.border))
+    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(contrast == .increased ? Color.primary.opacity(0.6) : AppTheme.border))
   }
 }
 
@@ -176,5 +177,24 @@ struct AppearanceSettingsCard: View {
       .clipShape(RoundedRectangle(cornerRadius: 7))
       .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(Color.gray.opacity(0.15)))
     }.frame(height: 84).accessibilityHidden(true)
+  }
+}
+
+
+/// A quiet pointer affordance without changing layout or relying on motion.
+struct CardButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    CardButtonFace(content: configuration.label, pressed: configuration.isPressed)
+  }
+}
+
+private struct CardButtonFace<Content: View>: View {
+  let content: Content
+  let pressed: Bool
+  @State private var hovering = false
+  var body: some View {
+    content.overlay(RoundedRectangle(cornerRadius: AppTheme.corner)
+      .strokeBorder(AppTheme.accentText.opacity(hovering || pressed ? 0.55 : 0), lineWidth: 1))
+      .brightness(pressed ? -0.025 : 0).onHover { hovering = $0 }
   }
 }

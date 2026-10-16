@@ -211,7 +211,7 @@ struct DeveloperView: View {
     switch cost {
     case .rebuildable: return StatusPill(title: "Rebuilds", icon: "arrow.triangle.2.circlepath", tint: .green)
     case .redownload: return StatusPill(title: "Re-downloads", icon: "icloud.and.arrow.down", tint: .teal)
-    case .review: return StatusPill(title: "Review", icon: "eye.fill", tint: .orange)
+    case .review: return StatusPill(title: "Review", icon: "eye.fill", tint: AppTheme.warning)
     }
   }
 }

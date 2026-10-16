@@ -53,7 +53,7 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
 
             if let error = model.exclusionLoadError {
-              Text(error).foregroundStyle(.orange)
+              Text(error).foregroundStyle(AppTheme.warning)
               Button("Show Exclusion Files") { model.reveal(AppPaths.supportDirectory) }
             } else if model.ignoredPaths.isEmpty {
               Text("No exclusions saved.")
@@ -147,7 +147,7 @@ struct HelpersSettingsCard: View {
             if enabled != care.launchesAtLogin { care.setLaunchAtLogin(enabled) }
           }
         if let error = care.launchAtLoginError {
-          Text(error).font(.caption).foregroundStyle(.orange)
+          Text(error).font(.caption).foregroundStyle(AppTheme.warning)
         }
         Divider()
         HStack {
@@ -168,7 +168,7 @@ struct HelpersSettingsCard: View {
         if care.notificationsDenied {
           Text("Notifications are turned off for MacMint in System Settings → Notifications.")
             .font(.caption)
-            .foregroundStyle(.orange)
+            .foregroundStyle(AppTheme.warning)
         }
       }
       .toggleStyle(.switch)
@@ -193,7 +193,7 @@ struct AboutSettingsCard: View {
         }
         HStack {
           if let error = updates.checkError {
-            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
           } else if updates.lastChecked == nil {
             Text("Not checked").foregroundStyle(.secondary)
           } else { switch updates.status {
@@ -205,7 +205,7 @@ struct AboutSettingsCard: View {
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
           case .required(let release, let minimum):
             Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
+              .foregroundStyle(AppTheme.warning)
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
           }
           }

@@ -134,7 +134,7 @@ struct CommandPalette: View {
           }
           .padding(.vertical, 3)
           .contentShape(Rectangle())
-          .listRowBackground(index == highlighted ? AppTheme.accent.opacity(0.15) : Color.clear)
+          .listRowBackground(index == highlighted ? AppTheme.selection : Color.clear)
           .onTapGesture {
             highlighted = index
             run(current)
@@ -149,6 +149,7 @@ struct CommandPalette: View {
       }
     }
     .frame(width: 600, height: 420)
+    .scrollContentBackground(.hidden).background(AppTheme.surface)
     .onAppear { focused = true }
     .onChange(of: query) { _, _ in highlighted = 0 }
     .onKeyPress(.downArrow) {

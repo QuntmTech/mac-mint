@@ -21,7 +21,7 @@ struct HistoryView: View {
           Label("Recovery needs attention (\(model.recoveryWarnings.count))", systemImage: "exclamationmark.triangle")
           ForEach(model.recoveryWarnings) { Text($0.message).font(.caption) }
           Button("Show Recovery Files") { model.reveal(AppPaths.supportDirectory) }
-        }.padding(16).foregroundStyle(.orange)
+        }.padding(16).foregroundStyle(AppTheme.warning)
       }
 
       if model.history.isEmpty {
@@ -50,7 +50,7 @@ struct HistoryView: View {
     ) {
       if let unresolved = entry.unresolvedPaths, !unresolved.isEmpty {
         Label("These interrupted moves could not be verified. Inspect their original locations and Trash in Finder.", systemImage: "exclamationmark.triangle")
-          .font(.caption).foregroundStyle(.orange)
+          .font(.caption).foregroundStyle(AppTheme.warning)
         ForEach(unresolved, id: \.self) { path in
           Text(path).font(.caption2).textSelection(.enabled)
         }

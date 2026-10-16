@@ -44,7 +44,7 @@ struct RecommendationRow: View {
     switch recommendation.confidence {
     case .safe: return AppTheme.accentText
     case .likely: return .blue
-    case .review: return .orange
+    case .review: return AppTheme.warning
     }
   }
 
@@ -125,7 +125,7 @@ struct SpaceHistoryCard: View {
               systemImage: change >= 0 ? "arrow.up.right" : "arrow.down.right"
             )
             .font(.caption.weight(.medium))
-            .foregroundStyle(change >= 0 ? AppTheme.accentText : Color.orange)
+            .foregroundStyle(change >= 0 ? AppTheme.accentText : AppTheme.warning)
           }
         }
         if model.spaceHistory.count >= 2 {
@@ -162,7 +162,7 @@ struct SpaceHistoryCard: View {
               Spacer()
               Text("+\(ByteFormatter.string(growth.delta))")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.warning)
             }
             .font(.caption)
           }
@@ -224,9 +224,9 @@ struct DownloadsView: View {
       } else if model.downloadItems.isEmpty {
         EmptyState(
           icon: model.downloadsScanned ? "checkmark.seal" : "arrow.down.circle",
-          title: model.downloadsScanned ? "Your Downloads folder is tidy" : "Find downloads you never used",
+          title: model.downloadsScanned ? "No downloads found" : "Take a look at your Downloads",
           detail:
-            "Uses Spotlight's \"last opened\" and \"date added\" records. Items with no record are judged only by when they last changed, and are never called unused.")
+            "Review downloads using their size, change dates, and available macOS usage records.")
       } else {
         HStack(spacing: 6) {
           filterChip(nil, title: "All")
