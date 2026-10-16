@@ -65,7 +65,7 @@ struct OnboardingView: View {
       Text("Welcome to MacMint").font(.system(size: 28, weight: .bold, design: .rounded))
       point("checkmark.shield.fill", "Safe by design", "Only rebuildable caches are preselected. Personal files always need your review.")
       point("arrow.uturn.backward.circle.fill", "Review and restore", "File removals use Trash receipts. Restore while items remain there; Photos manages its own recovery.")
-      point("lock.fill", "Private", "Scans run on your Mac. File contents never leave it, and optional AI features only see anonymized summaries.")
+      point("lock.fill", "Private", "Scans run on your Mac. Optional AI sends category summaries and your typed questions after consent; preview the request first.")
     }
   }
 

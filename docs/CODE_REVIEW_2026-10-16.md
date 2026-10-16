@@ -70,7 +70,7 @@ Stripe documents that keys may be pruned after at least 24 hours and reused keys
 
 **Trigger:** build a preview, show consent, then change results or chat context before accepting. Review and Ask rebuilt the request after consent, so the displayed snapshot could differ from the transmitted one.
 
-**Fix:** freeze the actual request and generation before consent. The continuation uses that request. Scan invalidation clears pending actions and dismisses stale consent; generation checks also protect the continuation after the sheet yields.
+**Fix:** freeze the actual request and generation before consent. The continuation uses that request. Scan invalidation clears pending actions and dismisses stale consent; generation checks also protect the continuation after the sheet yields. Onboarding now describes category summaries and typed questions explicitly, replacing its remaining “anonymized summaries” claim.
 
 **Evidence:** [AppViewModel AI flow](../Sources/MacCleanerApp/AppViewModel+AI.swift), native controller tests in [AccountLifecycleTests](../Tests/MacCleanerAppTests/AccountLifecycleTests.swift). One test compares the decoded preview to the actual serialized request captured by the transport after changing chat state before consent. Another invalidates the scan generation and verifies that consent cannot resume the old request or erase the draft. A human review of the complete consent-sheet journey remains a release gate; controller tests are not presented as an interactive UI test.
 
