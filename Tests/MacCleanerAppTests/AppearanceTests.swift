@@ -26,6 +26,21 @@ final class AppearanceTests: XCTestCase {
     XCTAssertEqual(Set(AppAppearance.allCases.map(\.rawValue)), ["system", "light", "dark"])
   }
 
+  func testResponsiveHeadersKeepTheirIntrinsicHeight() {
+    _ = NSApplication.shared
+    for width in [CGFloat(360), 640, 1000] {
+      let heading = PageHeader(title: "Cleanup", subtitle: "Inspect caches and generated data before reviewing your selection.") {
+        HStack {
+          Button("Rescan") {}
+          Button("Review 2.8 GB") {}
+        }
+      }.frame(width: width)
+      let hosting = NSHostingView(rootView: heading)
+      XCTAssertGreaterThan(hosting.fittingSize.height, 35)
+      XCTAssertLessThan(hosting.fittingSize.height, 190, "Header at \(width) must leave room for results")
+    }
+  }
+
   private func contrast(_ foreground: Color, _ background: Color) -> Double {
     let first = luminance(foreground), second = luminance(background)
     return (max(first, second) + 0.05) / (min(first, second) + 0.05)

@@ -95,7 +95,7 @@ struct HistoryView: View {
           if let restored = entry.restoredPaths, !restored.isEmpty {
             Label("\(restored.count) restored", systemImage: "arrow.uturn.backward.circle.fill")
               .font(.caption2)
-              .foregroundStyle(.green)
+              .foregroundStyle(AppTheme.accentText)
           }
         }
         Spacer()

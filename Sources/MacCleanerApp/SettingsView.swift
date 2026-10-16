@@ -22,7 +22,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 12) {
             Label("Safety model", systemImage: "checkmark.shield.fill")
               .font(.headline)
-              .foregroundStyle(.green)
+              .foregroundStyle(AppTheme.accentText)
             settingRow("Deletion mode", value: "Trash-first")
             settingRow("Automatic personal-file cleanup", value: "Blocked")
             settingRow("System-owned cleanup", value: "Read-only")
@@ -198,7 +198,7 @@ struct AboutSettingsCard: View {
             Text("Not checked").foregroundStyle(.secondary)
           } else { switch updates.status {
           case .current:
-            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(AppTheme.accentText)
           case .available(let release):
             Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
               .foregroundStyle(AppTheme.accentText)

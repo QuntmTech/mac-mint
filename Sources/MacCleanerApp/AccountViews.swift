@@ -2,7 +2,7 @@ import AppKit
 import MacCleanerCore
 import SwiftUI
 
-/// Shows the main app only when the account is unlocked; otherwise the matching account step.
+/// Local inspection and recovery stay available independently of paid access.
 struct AccountGateView: View {
   @EnvironmentObject private var account: AccountStore
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -90,7 +90,7 @@ private struct GateMessages: View {
       }
       if let info = account.infoMessage {
         Label(info, systemImage: "checkmark.circle.fill")
-          .foregroundStyle(.green)
+          .foregroundStyle(AppTheme.accentText)
       }
     }
     .font(.callout)
@@ -299,6 +299,7 @@ private struct FailurePanel: View {
 /// Compact account summary used in Settings.
 struct AccountSettingsCard: View {
   @EnvironmentObject private var account: AccountStore
+  @EnvironmentObject private var model: AppViewModel
   @State private var confirmSignOut = false
 
   var body: some View {
@@ -313,17 +314,27 @@ struct AccountSettingsCard: View {
         }
         if let snapshot = account.snapshot {
           row("Email", snapshot.user.email)
-          row("Plan", planLabel(snapshot.entitlement))
+          row("Access", account.isUnlocked ? planLabel(snapshot.entitlement) : "Verification required")
           row(
             "Devices",
             "\(snapshot.devices.count) of \(max(snapshot.entitlement.maxDevices, 1)) in use")
           row("This Mac", account.deviceInfo.name)
         }
+        if account.snapshot == nil {
+          Text("You’re inspecting locally. Scan, explore, and use History without signing in. Connect your account when you’re ready to start a paid operation.")
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         Divider()
         HStack {
-          Button("Manage Account…") { account.openAccountPage() }
-          Spacer()
-          Button("Sign Out", role: .destructive) { confirmSignOut = true }
+          if account.snapshot != nil {
+            Button("Manage Account…") { account.openAccountPage() }
+            Spacer()
+            Button("Sign Out", role: .destructive) { confirmSignOut = true }
+          } else {
+            Label("Local inspection", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Connect account") { model.showingAccount = true }.buttonStyle(MintButtonStyle(prominent: false))
+          }
         }
       }
     }
@@ -331,7 +342,7 @@ struct AccountSettingsCard: View {
       Button("Cancel", role: .cancel) {}
       Button("Sign Out", role: .destructive) { Task { await account.signOut() } }
     } message: {
-      Text("This Mac will be removed from your account. Your cleanup history and exclusions stay on this Mac.")
+      Text("Sign out on this Mac. Your cleanup history and exclusions stay available here.")
     }
   }
 
