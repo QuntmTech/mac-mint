@@ -134,4 +134,15 @@ final class RestoreDurabilityTests: XCTestCase {
     XCTAssertTrue(saved.pendingReceipts.isEmpty)
     XCTAssertEqual(entries.count, 201)
   }
+
+  func testManagedLibraryCannotBeChosenAsAnAlternateRestoreDestination() throws {
+    let (root, receipt, _) = try fixture()
+    defer { try? fm.removeItem(at: root) }
+    let library = root.appendingPathComponent("Library.photoslibrary/originals")
+    XCTAssertThrowsError(try RecoveryService().restore(receipt, into: library)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("Managed photo libraries"))
+    }
+    XCTAssertTrue(fm.fileExists(atPath: receipt.trashPath!))
+    XCTAssertFalse(fm.fileExists(atPath: library.path))
+  }
 }

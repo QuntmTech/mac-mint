@@ -38,6 +38,7 @@ public actor RestoreCoordinator {
       throw RestoreError.notTheSameItem(URL(fileURLWithPath: receipt.originalPath).lastPathComponent)
     }
     let destination = RecoveryService.destination(for: receipt, into: folder)
+    try RecoveryService.validateDestination(destination, source: URL(fileURLWithPath: path))
     let record = RestoreRecord(id: UUID(), entryID: entryID, receipt: receipt,
       destination: destination.path, identity: identity)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

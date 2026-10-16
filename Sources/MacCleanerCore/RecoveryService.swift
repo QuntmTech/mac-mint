@@ -68,6 +68,18 @@ public struct RecoveryService: Sendable {
       .appendingPathComponent(destination.lastPathComponent)
   }
 
+  static func validateDestination(_ destination: URL, source: URL) throws {
+    guard !PhotoAnalysis.isInsideLibraryPackage(destination) else {
+      throw RestoreError.failed("Managed photo libraries cannot be restore destinations. Choose a folder outside the library.")
+    }
+    var ancestor = destination.deletingLastPathComponent()
+    while !(try FileSystem.entryExists(at: ancestor)), ancestor.path != "/" { ancestor.deleteLastPathComponent() }
+    guard let sourceVolume = FileSystem.volumeIdentity(at: source),
+      let targetVolume = FileSystem.volumeIdentity(at: ancestor), sourceVolume == targetVolume else {
+      throw RestoreError.failed("Choose a restore folder on the same volume as this Trash item. Restoring across volumes cannot yet preserve verifiable recovery evidence.")
+    }
+  }
+
   func restore(_ receipt: TrashReceipt, to destination: URL, fileManager: FileManager = .default) throws -> URL {
     guard let trashPath = receipt.trashPath, Self.isTrashLocation(trashPath) else {
       throw RestoreError.noTrashLocation
@@ -79,6 +91,7 @@ public struct RecoveryService: Sendable {
     guard Self.isSameItem(receipt, at: URL(fileURLWithPath: trashPath)) else {
       throw RestoreError.notTheSameItem(original.lastPathComponent)
     }
+    try Self.validateDestination(destination, source: URL(fileURLWithPath: trashPath))
     // lstat-based check so a dangling symlink at the destination also counts as occupied.
     if fileManager.fileExists(atPath: destination.path)
       || FileSystem.fileIdentity(at: destination) != nil
@@ -88,6 +101,7 @@ public struct RecoveryService: Sendable {
     do {
       try fileManager.createDirectory(
         at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try Self.validateDestination(destination, source: URL(fileURLWithPath: trashPath))
       // Repeat identity and parent checks after potentially expensive directory creation.
       guard Self.isTrashLocation(trashPath),
         Self.isSameItem(receipt, at: URL(fileURLWithPath: trashPath)),

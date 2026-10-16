@@ -69,10 +69,50 @@ final class NativeVolumeTests: XCTestCase {
     XCTAssertEqual(count, 0)
     XCTAssertTrue(fm.fileExists(atPath: personal.path))
 
+    let trashItem = root.appendingPathComponent(".Trash/restore.txt")
+    try fm.createDirectory(at: trashItem.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("restore".utf8).write(to: trashItem)
+    let receipt = TrashReceipt(originalPath: root.appendingPathComponent("restore.txt").path,
+      trashPath: trashItem.path, bytes: 7, identity: FileSystem.fileIdentity(at: trashItem))
+    XCTAssertThrowsError(try RecoveryService().restore(receipt, into: owner)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("same volume"))
+    }
+    XCTAssertTrue(fm.fileExists(atPath: trashItem.path))
+
     let staleItem = PlanItem(url: personal, displayName: "allowed.txt", kind: .reviewedFile,
       expectedBytes: 3, reason: "Test", source: "Test", identity: FileSystem.fileIdentity(at: personal))
     let stalePlan = OperationPlanner.plan(title: "Test", items: [staleItem])
     XCTAssertEqual(stalePlan.items.count, 1)
+
+    // Fill only our bounded 128 MB image, never the runner's/user's disk. This proves
+    // actual ENOSPC stops movement when the initial journal cannot be made durable.
+    let journals = owner.appendingPathComponent("Operations")
+    try fm.createDirectory(at: journals, withIntermediateDirectories: true)
+    let filler = owner.appendingPathComponent("bounded-full-disk-fixture")
+    XCTAssertTrue(fm.createFile(atPath: filler.path, contents: nil))
+    let handle = try FileHandle(forWritingTo: filler)
+    let chunk = Data(repeating: 0x56, count: 1_048_576)
+    var fullError: NSError?
+    for _ in 0..<192 {
+      do { try handle.write(contentsOf: chunk) }
+      catch { fullError = error as NSError; break }
+    }
+    try handle.close()
+    XCTAssertNotNil(fullError, "The disposable image did not reach its bounded capacity")
+    let underlying = fullError?.userInfo[NSUnderlyingErrorKey] as? NSError
+    XCTAssertTrue([fullError, underlying].compactMap { $0 }.contains {
+      ($0.domain == NSPOSIXErrorDomain && $0.code == 28)
+        || ($0.domain == NSCocoaErrorDomain && $0.code == CocoaError.fileWriteOutOfSpace.rawValue)
+    }, "Expected an actual out-of-space error, not an unrelated write failure")
+    let full = await OperationExecutor(trashService: trash, safetyPolicy: mountedHome,
+      journalDirectory: journals).run(stalePlan)
+    XCTAssertNotNil(full.persistenceError, "Full storage must fail closed before the first move")
+    XCTAssertTrue(full.moved.isEmpty)
+    XCTAssertTrue(fm.fileExists(atPath: personal.path))
+    let callsAfterFullDisk = await trash.calls
+    XCTAssertEqual(callsAfterFullDisk, 0)
+    try fm.removeItem(at: filler)
+
     _ = try command(["detach", try XCTUnwrap(attachedDevice)])
     attachedDevice = nil
     let disconnected = await OperationExecutor(trashService: trash, safetyPolicy: mountedHome).run(stalePlan)

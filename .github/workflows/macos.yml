@@ -7,12 +7,14 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Swift version
         run: swift --version
       - name: Core tests
         run: swift test
+        timeout-minutes: 7
         env:
           MACMINT_VOLUME_TESTS: "1"
       - name: Build desktop app
@@ -33,6 +35,7 @@ jobs:
   downloaded-package:
     needs: build
     runs-on: macos-15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
