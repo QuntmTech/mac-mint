@@ -111,7 +111,7 @@ struct PerformanceView: View {
         HStack {
           SearchField(prompt: "Find an app", text: $search)
           Picker("Sort apps", selection: $sortByCPU) { Text("Memory").tag(false); Text("CPU").tag(true) }
-            .pickerStyle(.segmented).frame(width: 170)
+            .pickerStyle(.segmented).labelsHidden().frame(width: 170)
         }
         Text(paused ? "Readings paused in this window. The menu bar may continue sampling while open." : "Main app processes · 100% CPU equals one core · refreshes every \(Int(monitor.samplingInterval ?? 4)) seconds")
           .font(.caption).foregroundStyle(.secondary)

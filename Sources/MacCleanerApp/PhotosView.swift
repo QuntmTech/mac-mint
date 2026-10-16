@@ -36,6 +36,10 @@ struct PhotosView: View {
       }
     }
     .sheet(item: $comparing) { group in PhotoComparisonSheet(group: group) }
+    .onAppear { if isLibrary && tab == .screenshots { tab = .similar } }
+    .onChange(of: model.photoSource) { _, source in
+      if source == .library && tab == .screenshots { tab = .similar }
+    }
   }
 
   // MARK: Header
