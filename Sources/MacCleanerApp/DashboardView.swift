@@ -3,7 +3,7 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var confirmEmptyTrash = false
+
 
   var body: some View {
     ScrollView {
@@ -12,7 +12,7 @@ struct DashboardView: View {
 
         HStack(spacing: 14) {
           MetricCard(
-            title: "Safe to reclaim",
+            title: "Rebuildable data",
             value: ByteFormatter.string(model.reclaimableBytes),
             subtitle: "Known user-level caches and regenerable data",
             icon: "checkmark.shield",
@@ -80,7 +80,7 @@ struct DashboardView: View {
             }
           }
 
-          Text("Smart Care")
+          Text("Quick Scan")
             .font(.system(size: 34, weight: .bold, design: .rounded))
           Text(
             "One pass over caches, apps, developer data, Downloads, and leftovers — ranked by how much space each frees and how sure MacMint is. Nothing changes until you review it."
@@ -94,7 +94,7 @@ struct DashboardView: View {
             Button {
               model.runSmartCare()
             } label: {
-              Label(model.isScanning ? "Scanning…" : "Run Smart Care", systemImage: "sparkles")
+              Label(model.isScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -104,7 +104,7 @@ struct DashboardView: View {
               Button("Cancel") { model.cancelCurrentOperation() }
                 .controlSize(.large)
             } else if model.safeRecommendationBytes > 0 {
-              Button("Review Safe Items (\(ByteFormatter.string(model.safeRecommendationBytes)))") {
+              Button("Review Rebuildable Items (\(ByteFormatter.string(model.safeRecommendationBytes)))") {
                 model.reviewAllSafe()
               }
               .controlSize(.large)
@@ -159,18 +159,11 @@ struct DashboardView: View {
             }
           }
           Spacer()
-          Button("Empty Trash…", role: .destructive) { confirmEmptyTrash = true }
+          Button("Review Trash in Finder") { model.emptyTrash() }
             .disabled(model.isWorking || status.items == 0)
         }
       }
-      .alert("Permanently erase the Trash?", isPresented: $confirmEmptyTrash) {
-        Button("Cancel", role: .cancel) {}
-        Button("Empty Trash", role: .destructive) { model.emptyTrash() }
-      } message: {
-        Text(
-          "\(ByteFormatter.string(status.bytes)) will be erased and can't be recovered — not even from MacMint's History. Finder empties the Trash for you."
-        )
-      }
+
     }
   }
 

@@ -1,3 +1,4 @@
+import AppKit
 import MacCleanerCore
 import SwiftUI
 
@@ -18,9 +19,9 @@ struct RootView: View {
           .padding(.bottom, 8)
 
         List(
-          AppViewModel.Section.allCases.filter { $0 != .assistant || account.aiAvailable },
+          AppViewModel.Section.primary,
           selection: Binding(
-            get: { Optional(model.selectedSection) },
+            get: { Optional(model.selectedSection.parent) },
             set: { if let section = $0 { model.selectedSection = section } }
           )
         ) { section in
@@ -32,8 +33,12 @@ struct RootView: View {
         }
         .listStyle(.sidebar)
 
-        sidebarFooter
-          .padding(12)
+        HStack {
+          Button { model.selectedSection = .settings } label: { Label("Settings", systemImage: "gearshape") }
+          Spacer()
+          Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle").accessibilityLabel("Help") }
+        }.buttonStyle(.borderless).padding(.horizontal, 16)
+        sidebarFooter.padding(12)
       }
       .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 260)
     } detail: {
@@ -59,11 +64,37 @@ struct RootView: View {
       }
       .background(Color(nsColor: .windowBackgroundColor))
       .safeAreaInset(edge: .top, spacing: 0) {
-        updateBanner
+        VStack(spacing: 0) {
+          updateBanner
+          if !model.selectedSection.tabs.isEmpty {
+            Picker("View", selection: $model.selectedSection) {
+              ForEach(model.selectedSection.tabs) { section in Text(section.rawValue).tag(section) }
+            }.pickerStyle(.segmented).padding(10).frame(maxWidth: 620)
+          }
+        }
       }
       .safeAreaInset(edge: .bottom) {
         operationBar
       }
+    }
+    .toolbar {
+      ToolbarItemGroup {
+        Button { model.selectedSection = .review } label: {
+          Label("Review \(model.queuedCount) · \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist")
+        }
+        if account.aiAvailable { Button { model.selectedSection = .assistant } label: { Label("Ask MacMint", systemImage: "sparkles") } }
+        Button(account.isUnlocked ? "Account" : "Unlock Pro") { model.showingAccount = true }
+      }
+    }
+    .sheet(isPresented: $model.showingAccount, onDismiss: {
+      if account.isUnlocked, let plan = model.deferredPlan {
+        model.deferredPlan = nil
+        model.pendingPlan = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered, ignoredPaths: model.ignoredPaths)
+      }
+    }) { AccountAccessSheet() }
+    .sheet(isPresented: $model.showingHelp) { HelpView() }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      Task { await account.refreshAIStatus() }
     }
     .sheet(isPresented: $showingIssues) {
       ScanIssueSheet(issues: model.scanIssues)
@@ -89,7 +120,7 @@ struct RootView: View {
     .sheet(item: $model.explainTarget) { target in
       ExplainSheet(target: target)
     }
-    .sheet(isPresented: $model.aiConsentPending) {
+    .sheet(isPresented: $model.aiConsentPending, onDismiss: { model.pendingAIAction = nil }) {
       AIConsentSheet()
     }
     .sheet(isPresented: $model.showingCommandPalette) {
@@ -98,7 +129,9 @@ struct RootView: View {
     .sheet(isPresented: $showingOnboarding) {
       OnboardingView()
     }
+    .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
+      model.authorizeRemoval = { [weak account] in account?.isUnlocked == true }
       if !onboardingDone {
         showingOnboarding = true
       } else if model.cleanupTargets.isEmpty {
@@ -113,7 +146,7 @@ struct RootView: View {
       VStack(alignment: .leading, spacing: 1) {
         Text("MacMint")
           .font(.headline)
-        Text(account.isOffline ? "Pro • Offline" : "Pro")
+        Text(account.isUnlocked ? (account.isOffline ? "Pro • Offline" : "Pro") : "Local inspection")
           .font(.caption2)
           .foregroundStyle(.secondary)
       }

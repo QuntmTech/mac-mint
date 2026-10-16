@@ -43,7 +43,7 @@ struct PhotosView: View {
         Text("Photos").font(.system(size: 30, weight: .bold, design: .rounded))
         Text(
           isLibrary
-            ? "Library photos are removed through Photos — they stay in Recently Deleted for 30 days."
+            ? "Deleting in Photos also deletes from iCloud and synced devices. Recover through Photos while available in Recently Deleted."
             : "Folder photos go to the Trash and can be restored from History."
         )
         .foregroundStyle(.secondary)

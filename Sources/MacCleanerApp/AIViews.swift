@@ -22,7 +22,7 @@ struct ExplainMenuItem: View {
   @EnvironmentObject private var account: AccountStore
 
   var body: some View {
-    if account.aiAvailable, let target {
+    if account.aiStatus.allows("explain"), let target {
       Button {
         model.explain(target)
       } label: {
@@ -81,7 +81,7 @@ struct ExplainSheet: View {
           detail("If moved to the Trash", explanation.whatHappens)
           detail("Confidence", explanation.confidence.capitalized)
         }
-      } else if let error = model.aiError {
+      } else if let error = model.explanationError {
         Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
       } else {
         HStack(spacing: 8) {
@@ -92,7 +92,7 @@ struct ExplainSheet: View {
 
       Spacer(minLength: 0)
       AIDisclaimer()
-      Text("Only the name “\(target.request.identifier)” and its Library area were sent — never the path or file contents.")
+      Text("Sent: “\(target.request.identifier)” and its category. Unrecognized names are omitted. No path or file contents.")
         .font(.caption2)
         .foregroundStyle(.tertiary)
         .fixedSize(horizontal: false, vertical: true)
@@ -136,16 +136,19 @@ struct AIConsentSheet: View {
       Text("AI features are optional. When you use one, MacMint sends a small summary to its server, which asks Anthropic's Claude and returns advice.")
         .fixedSize(horizontal: false, vertical: true)
       VStack(alignment: .leading, spacing: 6) {
-        point("checkmark.circle", "Sent: item names (like com.spotify.client), sizes, categories, app names, and folder paths relative to your home folder.")
-        point("xmark.circle", "Never sent: file contents, personal file names, your account name, or email addresses.")
+        point("checkmark.circle", "Automatic context: sizes, storage categories, and recognized app or tool identifiers. Unrecognized names and personal folder paths are omitted.")
+        point("xmark.circle", "File contents are never sent. Your typed questions and recent conversation are sent as written; avoid including private information.")
         point("hand.raised", "AI only advises. It can't select, change, or remove anything, and MacMint's safety rules always win.")
+      }
+      DisclosureGroup("See the context that will be sent") {
+        ScrollView { Text(model.aiPayloadPreview).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 180)
       }
       Text("You can turn this off any time in Settings.").font(.caption).foregroundStyle(.secondary)
       HStack {
         Spacer()
-        Button("Not Now") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Not Now") { model.pendingAIAction = nil; dismiss() }.keyboardShortcut(.cancelAction)
         Button("Turn On AI") {
-          model.aiEnabled = true
+          model.acceptAIConsent()
           dismiss()
         }
         .keyboardShortcut(.defaultAction)
@@ -172,7 +175,7 @@ struct AIReviewPanel: View {
   @EnvironmentObject private var account: AccountStore
 
   var body: some View {
-    if account.aiAvailable, !model.recommendations.isEmpty {
+    if account.aiStatus.allows("review"), !model.recommendations.isEmpty {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 10) {
           if let review = model.aiReview {
@@ -218,7 +221,7 @@ struct AIReviewPanel: View {
           }
           AIDisclaimer()
         }
-        if let error = model.aiError, !model.aiReviewBusy, model.selectedSection != .assistant {
+        if let error = model.reviewAIError, !model.aiReviewBusy, model.selectedSection != .assistant {
           Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
         }
       }
@@ -262,20 +265,19 @@ struct AssistantView: View {
       HStack(alignment: .firstTextBaseline) {
         VStack(alignment: .leading, spacing: 4) {
           Text("Ask MacMint").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Questions about your Mac's storage, answered from an anonymized summary of your scans.")
+          Text("Answers from category-level scan summaries. Your questions are sent as written.")
             .foregroundStyle(.secondary)
         }
         Spacer()
         if !model.assistantTurns.isEmpty {
           Button("New Chat") {
-            model.assistantTurns = []
-            model.aiError = nil
+            model.resetAIState()
           }
         }
       }
       .padding(AppTheme.pagePadding)
 
-      if !account.aiAvailable {
+      if !account.aiStatus.allows("ask") {
         EmptyState(
           icon: "sparkles", title: "AI is unavailable",
           detail: "MacMint AI is turned off right now or you're offline. Everything else works as usual.")
@@ -317,7 +319,7 @@ struct AssistantView: View {
   private var suggestionGrid: some View {
     VStack(alignment: .leading, spacing: 10) {
       if model.recommendations.isEmpty && model.storageScan == nil {
-        Label("Run Smart Scan or open Storage first so MacMint has something to look at.", systemImage: "info.circle")
+        Label("Run Quick Scan or open Storage first so MacMint has something to look at.", systemImage: "info.circle")
           .font(.callout)
           .foregroundStyle(.secondary)
       }
@@ -417,7 +419,6 @@ struct AISettingsCard: View {
           Toggle("", isOn: Binding(get: { model.aiEnabled }, set: { model.aiEnabled = $0 }))
             .toggleStyle(.switch)
             .labelsHidden()
-            .disabled(!account.aiAvailable)
             .accessibilityLabel("MacMint AI")
         }
         Text(
@@ -429,11 +430,14 @@ struct AISettingsCard: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
         Text(
-          "When on, MacMint sends item names, sizes, categories, app names, and home-relative folder paths to its server, which asks Anthropic's Claude. File contents, personal file names, your account name, and email addresses are never sent. Usage counts are kept for daily limits; questions and answers are not stored."
+          "Automatic context uses sizes, storage categories and recognized app/tool identifiers. Personal folder paths and unrecognized names are omitted. Your typed questions and recent conversation are sent as written to MacMint's server and Anthropic. File contents are never sent. MacMint keeps usage counts for limits; its application database does not store chat transcripts."
         )
         .font(.caption)
         .foregroundStyle(.tertiary)
         .fixedSize(horizontal: false, vertical: true)
+        DisclosureGroup("Preview automatic chat context") {
+          Text(model.previewPayload(model.aiContext)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
       }
     }
   }

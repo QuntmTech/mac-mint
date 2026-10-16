@@ -165,7 +165,7 @@ extension AppViewModel {
   /// Library photos go through Photos itself (system confirmation, Recently Deleted for 30 days).
   func deleteSelectedLibraryPhotos() async {
     let assets = selectedPhotos.filter(\.isLibraryAsset)
-    guard !assets.isEmpty, !isWorking else { return }
+    guard !assets.isEmpty, !isWorking, requirePaidAccess() else { return }
     isWorking = true
     operationTitle = "Photos"
     statusMessage = "Waiting for your confirmation in Photos…"
@@ -219,16 +219,8 @@ extension AppViewModel {
   }
 
   func emptyTrash() {
-    do {
-      let freed = try TrashBinService.empty()
-      statusMessage =
-        freed > 0 ? "Trash emptied — \(ByteFormatter.string(freed)) freed" : "Trash emptied"
-    } catch {
-      statusMessage = error.localizedDescription
-    }
-    refreshTrashStatus()
-    // Receipts that pointed into the Trash are now unrestorable; redraw History's buttons.
-    Task { history = await historyStore.load() }
+    NSWorkspace.shared.open(TrashBinService.trashURL)
+    statusMessage = "Review Trash in Finder. Emptying it permanently erases items and prevents Restore."
   }
 
   // MARK: Removed apps

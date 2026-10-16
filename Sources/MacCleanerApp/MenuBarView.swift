@@ -51,27 +51,21 @@ struct MenuBarView: View {
 
       Divider()
 
-      if account.isUnlocked {
-        Button {
-          open(.dashboard)
-          model.runSmartScan()
-        } label: {
-          Label(model.isScanning ? "Scanning…" : "Run Smart Scan", systemImage: "sparkles")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(model.isScanning || model.isWorking)
-        HStack {
-          Button("Storage") { open(.storage) }
-          Button("Performance") { open(.performance) }
-          Button("Review (\(model.queuedCount))") { open(.review) }
-        }
-        .controlSize(.small)
-      } else {
-        Button("Sign in to MacMint") { open(nil) }
-          .buttonStyle(.borderedProminent)
+      Button {
+        open(.dashboard)
+        model.runSmartScan()
+      } label: {
+        Label(model.isScanning ? "Scanning…" : "Quick Scan", systemImage: "sparkles")
           .frame(maxWidth: .infinity)
       }
+      .buttonStyle(.borderedProminent)
+      .disabled(model.isScanning || model.isWorking)
+      HStack {
+        Button("Storage") { open(.storage) }
+        Button("Performance") { open(.performance) }
+        Button("Review (\(model.queuedCount))") { open(.review) }
+      }
+      .controlSize(.small)
 
       HStack {
         Button("Open MacMint") { open(nil) }

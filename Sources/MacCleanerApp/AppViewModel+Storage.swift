@@ -30,7 +30,7 @@ extension AppViewModel {
 
     currentTask = Task { [weak self] in
       guard let self else { return }
-      let scan = await scanner.scan(root) { count, _ in
+      let scan = await scanner.scan(root, ignoredPaths: ignoredPaths) { count, _ in
         Task { @MainActor [weak self] in
           guard let self, self.isScanning else { return }
           self.storageScannedCount = count

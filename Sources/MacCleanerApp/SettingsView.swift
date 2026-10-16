@@ -50,7 +50,7 @@ struct SettingsView: View {
               }
             }
             Text(
-              "Excluded folders are skipped by cleanup, large-file, duplicate, and app-leftover scans."
+              "Excluded folders are skipped by cleanup, storage, developer, photo, large-file, duplicate, and app-leftover scans."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -102,9 +102,9 @@ struct SettingsView: View {
             Label("Privacy", systemImage: "hand.raised.square")
               .font(.headline)
             settingRow("Telemetry", value: "None")
-            settingRow("Network calls", value: model.aiEnabled ? "Account, license & AI requests" : "Account & license checks only")
-            settingRow("File contents or personal file names uploaded", value: "Never")
-            settingRow("AI summaries", value: model.aiEnabled ? "Anonymized, only when you ask" : "Off")
+            settingRow("Network calls", value: model.aiEnabled ? "Account, releases, optional app updates & AI" : "Account, release and optional app-update checks")
+            settingRow("File contents uploaded", value: "Never")
+            settingRow("AI summaries", value: model.aiEnabled ? "Categories, only when requested" : "Off")
             settingRow("Cleanup history", value: "Local JSON")
             settingRow("Exclusions", value: "Local JSON")
           }
@@ -161,7 +161,7 @@ struct HelpersSettingsCard: View {
         }
         Toggle("Remind me to scan if a week goes by", isOn: $scanReminders)
         Text(
-          "Alerts are checked while MacMint or its menu bar item is running, at most once a day, and never between 10 pm and 8 am. Nothing is ever cleaned automatically."
+          "Alerts are checked while MacMint or its menu bar item is running, at most once a day, and never between 10 pm and 8 am. Removal always needs your confirmation."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

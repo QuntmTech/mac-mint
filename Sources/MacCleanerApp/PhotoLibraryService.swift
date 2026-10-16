@@ -88,7 +88,7 @@ enum PhotoLibraryService {
     else { return nil }
     let options = PHImageRequestOptions()
     options.deliveryMode = .highQualityFormat
-    options.isNetworkAccessAllowed = true
+    options.isNetworkAccessAllowed = false
     options.resizeMode = .fast
     let target = CGSize(width: side * 2, height: side * 2)
     let data: Data? = await withCheckedContinuation { continuation in

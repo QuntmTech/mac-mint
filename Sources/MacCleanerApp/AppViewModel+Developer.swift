@@ -26,7 +26,7 @@ extension AppViewModel {
 
     currentTask = Task { [weak self] in
       guard let self else { return }
-      let report = await scanner.scan(projectRoots: roots)
+      let report = await scanner.scan(projectRoots: roots, ignoredPaths: ignoredPaths)
       guard !Task.isCancelled else {
         finishCancelledOperation()
         return

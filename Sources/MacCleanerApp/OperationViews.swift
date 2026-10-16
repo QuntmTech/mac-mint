@@ -193,7 +193,7 @@ struct PlanReviewSheet: View {
   private var footer: some View {
     HStack {
       Label(
-        "Everything goes to the Trash and can be restored from History.",
+        "Files go to Trash. Restore is available while the recorded items remain there.",
         systemImage: "arrow.uturn.backward.circle"
       )
       .font(.caption)

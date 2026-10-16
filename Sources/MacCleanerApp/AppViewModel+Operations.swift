@@ -44,9 +44,7 @@ extension AppViewModel {
   }
 
   var queuedBytes: Int64 {
-    var seen: Set<String> = []
-    return queuedItems.filter { seen.insert($0.url.standardizedFileURL.path).inserted }
-      .reduce(0) { $0 + $1.expectedBytes }
+    OperationPlanner.plan(title: "Queue estimate", items: queuedItems, ignoredPaths: ignoredPaths).totalBytes
   }
 
   func dequeue(_ item: PlanItem) {
@@ -188,6 +186,11 @@ extension AppViewModel {
   func execute(_ plan: OperationPlan) {
     pendingPlan = nil
     guard !isWorking, !isScanning, !plan.isEmpty else { return }
+    guard authorizeRemoval() else {
+      deferredPlan = plan
+      Task { await Task.yield(); showingAccount = true }
+      return
+    }
     isWorking = true
     operationTitle = plan.title
     statusMessage = "Moving items to Trash…"
@@ -217,11 +220,14 @@ extension AppViewModel {
   }
 
   private func finish(_ report: OperationReport) async {
-    if !report.moved.isEmpty || !report.problems.isEmpty {
-      await record(report.historyEntry())
+    var recoveryIssues: [ScanIssue] = []
+    let historySaved = await record(report.historyEntry())
+    if historySaved {
+      do { try OperationJournal.acknowledge(report.id, in: AppPaths.journalDirectory) }
+      catch { recoveryIssues.append(ScanIssue(area: "Recovery", path: nil, message: "History is saved; the journal will be checked again next launch.")) }
     }
     applyMoved(report)
-    scanIssues = report.problems.map {
+    scanIssues = recoveryIssues + report.problems.map {
       ScanIssue(area: report.title, path: $0.item.url.path, message: $0.message ?? "Skipped")
     }
     isWorking = false
@@ -234,13 +240,11 @@ extension AppViewModel {
       : "\(ByteFormatter.string(report.bytesMoved)) moved to Trash — \(report.summary)"
     lastReport = report
 
-    let touchesSmartScan = report.moved.contains {
-      switch $0.item.kind {
-      case .cleanupTarget, .appBundle, .appLeftover: return true
-      case .duplicateCopy, .reviewedFile, .developerArtifact: return false
-      }
+    if !historySaved || report.persistenceError != nil {
+      statusMessage += " — recovery needs attention; operation evidence has been retained"
     }
-    if touchesSmartScan { runSmartScan() }
+    refreshRecommendations()
+    refreshTrashStatus()
   }
 
   /// Removes whatever actually moved from every list, and clears matching selections.
@@ -285,7 +289,11 @@ extension AppViewModel {
   func recoverInterruptedOperations() async {
     let reports = OperationJournal.recoverInterrupted(in: AppPaths.journalDirectory)
     guard !reports.isEmpty else { return }
-    for report in reports { await record(report.historyEntry()) }
+    for report in reports {
+      if await record(report.historyEntry()) {
+        try? OperationJournal.acknowledge(report.id, in: AppPaths.journalDirectory)
+      }
+    }
     statusMessage =
       "Recovered \(reports.count) interrupted operation\(reports.count == 1 ? "" : "s") — see History"
   }

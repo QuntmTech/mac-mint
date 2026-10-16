@@ -26,21 +26,24 @@ final class AccountStore: ObservableObject {
   @Published var infoMessage: String?
   /// Server kill switch for AI features (app_config `ai`); off until confirmed.
   @Published var aiAvailable = false
+  @Published var aiStatus = AIStatus(enabled: false)
 
   let deviceInfo: DeviceInfo
   let client: AccountClient
   private let cacheURL: URL
   private(set) var token: String?
+  private let now: @Sendable () -> Date
   private var recheckTask: Task<Void, Never>?
 
-  init(supportDirectory: URL, client: AccountClient = AccountClient()) {
+  init(supportDirectory: URL, client: AccountClient = AccountClient(), now: @escaping @Sendable () -> Date = { Date() }) {
+    self.now = now
     self.client = client
     self.cacheURL = supportDirectory.appendingPathComponent("account.json")
     self.deviceInfo = Self.currentDevice()
   }
 
   var isUnlocked: Bool {
-    if case .active = phase { return true }
+    if case .active = phase { return AccessPolicy.allowsOffline(loadCache(), now: now()) }
     return false
   }
 
@@ -159,7 +162,7 @@ final class AccountStore: ObservableObject {
 
   private func apply(_ result: AccountSnapshot) {
     snapshot = result
-    saveCache(CachedAccess(snapshot: result, verifiedAt: Date()))
+    saveCache(CachedAccess(snapshot: result, verifiedAt: now()))
     phase = .active(offline: false)
   }
 
@@ -177,7 +180,20 @@ final class AccountStore: ObservableObject {
         token = active
         KeychainStore.saveToken(active)
       }
-      try await activate(token: active)
+      // Verification must not silently reactivate a device removed through the portal.
+      let result = try await client.me(token: active)
+      guard result.entitlement.active else {
+        snapshot = result
+        clearCache()
+        phase = .needsPlan
+        return
+      }
+      guard result.devices.contains(where: { $0.deviceId == deviceInfo.deviceId }) else {
+        clearCache()
+        phase = .failed("This Mac was deactivated. Sign in again to activate it explicitly.")
+        return
+      }
+      apply(result)
     } catch let error as AccountAPIError {
       handle(error, quiet: quiet)
     } catch {
@@ -193,13 +209,13 @@ final class AccountStore: ObservableObject {
       return
     }
     if error.isNetwork || error.status >= 500, let cached = loadCache(),
-      AccessPolicy.allowsOffline(cached)
+      AccessPolicy.allowsOffline(cached, now: now())
     {
       snapshot = cached.snapshot
       phase = .active(offline: true)
       return
     }
-    if quiet, isUnlocked { return }
+    _ = quiet
     phase = .failed(error.message)
   }
 

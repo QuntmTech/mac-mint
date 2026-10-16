@@ -8,29 +8,8 @@ struct AccountGateView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Group {
-      switch account.phase {
-      case .active:
-        RootView()
-      case .checking:
-        GateScaffold {
-          VStack(spacing: 14) {
-            ProgressView().controlSize(.large)
-            Text("Checking your MacMint account…").foregroundStyle(.secondary)
-          }
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 30)
-        }
-      case .signedOut:
-        GateScaffold { AuthForm() }
-      case .needsPlan:
-        GateScaffold { RedeemForm() }
-      case .deviceLimit(let message, let devices):
-        GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
-      case .failed(let message):
-        GateScaffold { FailurePanel(message: message) }
-      }
-    }
+    RootView()
+
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: account.phase)
   }
 }
@@ -371,5 +350,28 @@ struct AccountSettingsCard: View {
       return "Pro • renews/expires \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
     return "Pro • Lifetime"
+  }
+}
+
+/// Account access is a recoverable sheet, never a gate around local scans or History.
+struct AccountAccessSheet: View {
+  @EnvironmentObject private var account: AccountStore
+  @Environment(\.dismiss) private var dismiss
+  var body: some View {
+    VStack(alignment: .trailing, spacing: 0) {
+      Button("Continue inspecting locally") { dismiss() }.padding()
+      Group {
+        switch account.phase {
+        case .active: Text("MacMint Pro is active. Return to review to confirm your selection.").padding(32)
+        case .checking: ProgressView("Checking account…").padding(50)
+        case .signedOut: GateScaffold { AuthForm() }
+        case .needsPlan: GateScaffold { RedeemForm() }
+        case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
+        case .failed(let message): GateScaffold { FailurePanel(message: message) }
+        }
+      }
+    }
+    .frame(width: 560, height: 560)
+    .onChange(of: account.isUnlocked) { _, unlocked in if unlocked { dismiss() } }
   }
 }

@@ -38,26 +38,26 @@ struct MacCleanerDesktopApp: App {
       CommandGroup(replacing: .appSettings) {
         Button("Settings…") { model.selectedSection = .settings }
           .keyboardShortcut(",", modifiers: [.command])
-          .disabled(!account.isUnlocked)
+
       }
       CommandGroup(after: .sidebar) {
         Button("Go To…") { model.showingCommandPalette = true }
           .keyboardShortcut("k", modifiers: [.command])
-          .disabled(!account.isUnlocked)
+
         Divider()
-        ForEach(Array(AppViewModel.Section.allCases.prefix(9).enumerated()), id: \.element) { index, section in
+        ForEach(Array(([.dashboard, .cleaner, .storage, .applications, .photos, .developer, .history, .performance, .review] as [AppViewModel.Section]).enumerated()), id: \.element) { index, section in
           Button(section.rawValue) { model.selectedSection = section }
             .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: [.command])
-            .disabled(!account.isUnlocked)
+
         }
       }
       CommandMenu("Scan") {
-        Button("Smart Care") {
+        Button("Quick Scan") {
           model.selectedSection = .dashboard
           model.runSmartCare()
         }
           .keyboardShortcut("r", modifiers: [.command])
-          .disabled(!account.isUnlocked)
+
         Button("Map Storage") {
           model.selectedSection = .storage
           model.scanStorage()
@@ -65,9 +65,9 @@ struct MacCleanerDesktopApp: App {
         .keyboardShortcut("m", modifiers: [.command, .shift])
         .disabled(!account.isUnlocked)
         Button("Choose Folder for Large Files") { model.chooseLargeFileFolder() }
-          .disabled(!account.isUnlocked)
+
         Button("Choose Folder for Duplicates") { model.chooseDuplicateFolder() }
-          .disabled(!account.isUnlocked)
+
       }
     }
 

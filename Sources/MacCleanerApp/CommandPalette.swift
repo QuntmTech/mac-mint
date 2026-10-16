@@ -19,11 +19,11 @@ struct CommandPalette: View {
 
   private var entries: [Entry] {
     var list: [Entry] = []
-    list.append(Entry(id: "action:care", title: "Run Smart Care", subtitle: "Action", icon: "sparkles") {
+    list.append(Entry(id: "action:care", title: "Run Quick Scan", subtitle: "Action", icon: "sparkles") {
       $0.selectedSection = .dashboard
       $0.runSmartCare()
     })
-    list.append(Entry(id: "action:scan", title: "Run Smart Scan (caches only)", subtitle: "Action", icon: "sparkle") {
+    list.append(Entry(id: "action:scan", title: "Run Quick Scan (caches only)", subtitle: "Action", icon: "sparkle") {
       $0.selectedSection = .dashboard
       $0.runSmartScan()
     })

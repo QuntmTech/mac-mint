@@ -8,15 +8,15 @@ final class AppViewModel: ObservableObject {
   enum Section: String, CaseIterable, Identifiable {
     case dashboard = "Overview"
     case review = "Review"
-    case cleaner = "Cleaner"
+    case cleaner = "Cleanup"
     case storage = "Storage"
-    case developer = "Developer & AI"
+    case developer = "Developer"
     case assistant = "Ask MacMint"
     case downloads = "Downloads"
     case photos = "Photos"
     case removedApps = "Removed Apps"
     case performance = "Performance"
-    case applications = "Applications"
+    case applications = "Apps"
     case largeFiles = "Large Files"
     case duplicates = "Duplicates"
     case startup = "Startup Items"
@@ -24,6 +24,26 @@ final class AppViewModel: ObservableObject {
     case settings = "Settings"
 
     var id: String { rawValue }
+
+    static let primary: [Section] = [.dashboard, .cleaner, .storage, .applications, .photos, .developer, .history]
+    var parent: Section {
+      switch self {
+      case .performance: return .dashboard
+      case .downloads: return .cleaner
+      case .largeFiles, .duplicates: return .storage
+      case .removedApps, .startup: return .applications
+      default: return self
+      }
+    }
+    var tabs: [Section] {
+      switch parent {
+      case .dashboard: return [.dashboard, .performance]
+      case .cleaner: return [.cleaner, .downloads]
+      case .storage: return [.storage, .largeFiles, .duplicates]
+      case .applications: return [.applications, .removedApps, .startup]
+      default: return []
+      }
+    }
 
     var icon: String {
       switch self {
@@ -47,6 +67,20 @@ final class AppViewModel: ObservableObject {
     }
   }
 
+  @Published var showingAccount = false
+  @Published var showingHelp = false
+  @Published var deferredPlan: OperationPlan?
+  var authorizeRemoval: () -> Bool = { false }
+
+  func requirePaidAccess() -> Bool {
+    guard authorizeRemoval() else {
+      statusMessage = "Sign in with an active plan to move items. Your selections are kept."
+      showingAccount = true
+      return false
+    }
+    return true
+  }
+
   @Published var selectedSection: Section = .dashboard
   @Published var cleanupTargets: [CleanupTarget] = []
   @Published var apps: [AppRecord] = []
@@ -60,6 +94,7 @@ final class AppViewModel: ObservableObject {
   @Published var history: [HistoryEntry] = []
   @Published var scanIssues: [ScanIssue] = []
   @Published var ignoredPaths: Set<String> = []
+  @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
   @Published var isWorking = false
   @Published var statusMessage = "Ready"
@@ -100,6 +135,14 @@ final class AppViewModel: ObservableObject {
   @Published var aiOrderRecommendations = false
   @Published var assistantTurns: [AITurn] = []
   @Published var assistantBusy = false
+  var aiGeneration = UUID()
+  var pendingAIAction: (@MainActor () -> Void)?
+  var aiReviewTask: Task<Void, Never>?
+  var assistantTask: Task<Void, Never>?
+  var explanationTask: Task<Void, Never>?
+  @Published var explanationError: String?
+  @Published var reviewAIError: String?
+  @Published var aiPayloadPreview = ""
   @Published var aiError: String?
   @Published var aiConsentPending = false
   @Published var pendingPlan: OperationPlan?
@@ -184,41 +227,7 @@ final class AppViewModel: ObservableObject {
     return (max(0, total - free), max(0, free), max(0, total))
   }
 
-  func runSmartScan() {
-    guard !isScanning, !isWorking else { return }
-    beginScan(title: "Smart Scan", message: "Scanning caches, apps, and startup items…")
-
-    currentTask = Task { [weak self] in
-      guard let self else { return }
-      let summary = await smartScan.scan(ignoredPaths: ignoredPaths)
-      guard !Task.isCancelled else {
-        finishCancelledOperation()
-        return
-      }
-
-      cleanupTargets = summary.cleanupTargets.map { target in
-        var target = target
-        if let owner = target.ownerBundleID,
-          !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty
-        {
-          target.isSelected = false
-        }
-        return target
-      }
-      apps = summary.apps
-      startupItems = summary.startupItems
-      scanIssues = summary.issues
-      lastScanDate = summary.scannedAt
-      lastScanDuration = summary.duration
-      if !summary.wasCancelled {
-        UserDefaults.standard.set(summary.scannedAt, forKey: CareService.Keys.lastScanDate)
-      }
-      finishScan(
-        message: summary.wasCancelled
-          ? "Scan stopped"
-          : "Scan complete — \(ByteFormatter.string(summary.reclaimableBytes)) safely reclaimable")
-    }
-  }
+  func runSmartScan() { runSmartCare() }
 
   func cancelCurrentOperation() {
     guard isScanning || isWorking else { return }
@@ -461,13 +470,16 @@ final class AppViewModel: ObservableObject {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
   }
 
-  func record(_ entry: HistoryEntry) async {
+  @discardableResult
+  func record(_ entry: HistoryEntry) async -> Bool {
     do {
       try await historyStore.append(entry)
+      history = await historyStore.load()
+      return true
     } catch {
       statusMessage = "Could not save history: \(error.localizedDescription)"
     }
-    history = await historyStore.load()
+    return false
   }
 
   private func runningInstances(of app: AppRecord) -> [NSRunningApplication] {
@@ -492,6 +504,7 @@ final class AppViewModel: ObservableObject {
   func beginScan(title: String, message: String) {
     isScanning = true
     operationTitle = title
+    invalidateAIReview()
     statusMessage = message
     scanIssues = []
   }

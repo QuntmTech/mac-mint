@@ -19,13 +19,50 @@ extension AppViewModel {
     get { UserDefaults.standard.bool(forKey: Self.aiEnabledKey) }
     set {
       UserDefaults.standard.set(newValue, forKey: Self.aiEnabledKey)
+      if !newValue { resetAIState() }
       objectWillChange.send()
     }
   }
 
   /// Runs `action` if AI is on; otherwise asks for consent first.
-  func withAIConsent(_ action: () -> Void) {
-    if aiEnabled { action() } else { aiConsentPending = true }
+  func withAIConsent(_ action: @escaping @MainActor () -> Void) {
+    if aiEnabled { action() } else { pendingAIAction = action; aiConsentPending = true }
+  }
+
+  func acceptAIConsent() {
+    let action = pendingAIAction
+    pendingAIAction = nil
+    aiEnabled = true
+    aiConsentPending = false
+    Task { await Task.yield(); action?() }
+  }
+
+  func invalidateAIReview() {
+    aiGeneration = UUID()
+    aiReviewTask?.cancel()
+    assistantTask?.cancel()
+    explanationTask?.cancel()
+    aiReview = nil
+    aiOrderRecommendations = false
+    aiReviewBusy = false
+    assistantBusy = false
+    reviewAIError = nil
+  }
+
+  func resetAIState() {
+    invalidateAIReview()
+    assistantTurns = []
+    explanations = [:]
+    aiError = nil
+    explanationError = nil
+    pendingAIAction = nil
+    aiPayloadPreview = ""
+  }
+
+  func previewPayload<T: Encodable>(_ value: T) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    return (try? encoder.encode(value)).map { String(decoding: $0, as: UTF8.self) } ?? "No context"
   }
 
   // MARK: Explain targets (names only; Library items only)
@@ -84,7 +121,7 @@ extension AppViewModel {
     guard item.group != .projects else { return nil }
     let decision = item.url.map { safetyPolicy.developerArtifactDecision(for: $0) }
     return ExplainTarget(
-      request: AIExplainRequest(kind: .developerTool, identifier: "\(item.tool): \(item.title)", location: "Developer"),
+      request: AIExplainRequest(kind: .developerTool, identifier: item.tool, location: "Developer"),
       title: "\(item.tool): \(item.title)", bytes: item.bytes,
       ruleBlock: item.canTrash ? (decision?.allowed == false ? decision?.reason : nil)
         : "Managed by \(item.tool). Use its own command instead of deleting files.")
@@ -100,38 +137,51 @@ extension AppViewModel {
 
   func explain(_ target: ExplainTarget?) {
     guard let target else { return }
-    withAIConsent { explainTarget = target }
+    aiPayloadPreview = previewPayload(target.request)
+    withAIConsent { [self] in explainTarget = target }
   }
 
   func loadExplanation(_ target: ExplainTarget, account: AccountStore) async {
     guard explanations[target.id] == nil else { return }
-    aiError = nil
-    do {
-      explanations[target.id] = try await account.aiExplain(target.request).explanation
-    } catch {
-      aiError = (error as? AccountAPIError)?.message ?? error.localizedDescription
+    explanationError = nil
+    let generation = aiGeneration
+    let task = Task { [weak self] in
+      guard let self else { return }
+      do {
+        let response = try await account.aiExplain(target.request)
+        guard !Task.isCancelled, aiEnabled, aiGeneration == generation else { return }
+        explanations[target.id] = response.explanation
+      } catch {
+        if !Task.isCancelled, aiGeneration == generation { explanationError = error.localizedDescription }
+      }
     }
+    explanationTask = task
+    await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
   }
 
   // MARK: Smart Care AI review (advisory: ordering + notes only)
 
   func runAIReview(account: AccountStore) {
     guard !recommendations.isEmpty, !aiReviewBusy else { return }
-    withAIConsent {
+    aiPayloadPreview = previewPayload(AIContextBuilder.reviewRequest(recommendations: recommendations, totalBytes: volumeStats.total, freeBytes: volumeStats.free, growth: storageGrowth, home: FileManager.default.homeDirectoryForCurrentUser))
+    withAIConsent { [self] in
       aiReviewBusy = true
-      aiError = nil
+      reviewAIError = nil
+      let generation = aiGeneration
       let stats = volumeStats
       let request = AIContextBuilder.reviewRequest(
         recommendations: recommendations, totalBytes: stats.total, freeBytes: stats.free,
         growth: storageGrowth, home: FileManager.default.homeDirectoryForCurrentUser)
-      Task {
+      aiReviewTask = Task {
         do {
-          aiReview = try await account.aiReview(request)
+          let response = try await account.aiReview(request)
+          guard !Task.isCancelled, aiEnabled, aiGeneration == generation else { return }
+          aiReview = response
           aiOrderRecommendations = true
         } catch {
-          aiError = (error as? AccountAPIError)?.message ?? error.localizedDescription
+          if !Task.isCancelled, aiGeneration == generation { reviewAIError = error.localizedDescription }
         }
-        aiReviewBusy = false
+        if aiGeneration == generation { aiReviewBusy = false }
       }
     }
   }
@@ -166,20 +216,23 @@ extension AppViewModel {
   func ask(_ question: String, account: AccountStore) {
     let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty, !assistantBusy else { return }
-    withAIConsent {
+    aiPayloadPreview = previewPayload(aiContext)
+    withAIConsent { [self] in
+      let generation = aiGeneration
       let history = assistantTurns
       assistantTurns.append(AITurn(role: .user, text: trimmed))
       assistantBusy = true
       aiError = nil
       let context = aiContext
-      Task {
+      assistantTask = Task {
         do {
           let answer = try await account.aiAsk(question: trimmed, history: history, context: context)
+          guard !Task.isCancelled, aiEnabled, aiGeneration == generation else { return }
           assistantTurns.append(AITurn(role: .assistant, text: answer.answer, actions: answer.actions))
         } catch {
-          aiError = (error as? AccountAPIError)?.message ?? error.localizedDescription
+          if !Task.isCancelled, aiGeneration == generation { aiError = error.localizedDescription }
         }
-        assistantBusy = false
+        if aiGeneration == generation { assistantBusy = false }
       }
     }
   }

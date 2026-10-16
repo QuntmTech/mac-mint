@@ -2,6 +2,14 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
+private enum QuickScanResult: Sendable {
+  case base(ScanSummary)
+  case developer(ScanReport<[DevStorageItem]>)
+  case leftovers(ScanReport<[OrphanedItem]>)
+  case downloads(ScanReport<[DownloadItem]>)
+  case trash(TrashBinService.Status)
+}
+
 /// Smart Care: one pass over every scanner, ranked into plain-English recommendations.
 /// Review always opens the normal review sheet; nothing is removed from here directly.
 extension AppViewModel {
@@ -14,54 +22,76 @@ extension AppViewModel {
 
   func runSmartCare() {
     guard !isScanning, !isWorking else { return }
-    beginScan(
-      title: "Smart Care", message: "Checking caches, apps, developer data, Downloads, and leftovers…")
+    beginScan(title: "Quick Scan", message: "Checking known storage locations…")
+    scanCompletedAreas = []
     let ignored = ignoredPaths
-    let roots = devProjectRoots
     let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
-
+    let previousSelections = Dictionary(uniqueKeysWithValues: cleanupTargets.map { (FileSystem.comparisonPath($0.url), $0.isSelected) })
+    let started = Date()
     currentTask = Task { [weak self] in
       guard let self else { return }
-      async let summary = SmartScanService().scan(ignoredPaths: ignored)
-      async let developer = DeveloperStorageScanner().scan(projectRoots: roots)
-      async let leftovers = OrphanScanner().scan(knownBundleIDs: running, ignoredPaths: ignored)
-      async let downloads = DownloadsScanner().scan(ignoredPaths: ignored)
-      async let trash = TrashBinService.status()
-      let (scan, dev, orphanReport, downloadReport, trashStatus) = await (
-        summary, developer, leftovers, downloads, trash
-      )
-      guard !Task.isCancelled else {
-        finishCancelledOperation()
-        return
+      await withTaskGroup(of: QuickScanResult.self) { group in
+        group.addTask { .base(await SmartScanService().scan(ignoredPaths: ignored)) }
+        // Deep project enumeration is a separate, deliberate Developer scan.
+        group.addTask { .developer(await DeveloperStorageScanner().scan(ignoredPaths: ignored)) }
+        group.addTask { .leftovers(await OrphanScanner().scan(knownBundleIDs: running, ignoredPaths: ignored)) }
+        group.addTask { .downloads(await DownloadsScanner().scan(ignoredPaths: ignored)) }
+        group.addTask { .trash(await TrashBinService.status()) }
+        for await part in group {
+          if Task.isCancelled { group.cancelAll(); break }
+          switch part {
+          case .base(let report):
+            cleanupTargets = report.cleanupTargets.map { target in
+              var copy = target
+              copy.isSelected = previousSelections[FileSystem.comparisonPath(target.url)] ?? target.isSelected
+              if target.ownerBundleID.map(running.contains) == true { copy.isSelected = false }
+              return copy
+            }
+            apps = report.apps
+            startupItems = report.startupItems
+            scanIssues += report.issues
+            scanCompletedAreas.append("Caches, apps and startup inventory")
+          case .developer(let report):
+            // Keep explicitly scanned project results when refreshing known tool caches.
+            devItems = report.value + devItems.filter { $0.group == .projects }
+            selectedDevIDs.formIntersection(devItems.map(\.id))
+            scanIssues += report.issues
+            scanCompletedAreas.append("Known developer caches")
+          case .leftovers(let report):
+            orphans = report.value
+            selectedOrphanIDs.formIntersection(orphans.map(\.id))
+            orphansScanned = true
+            scanIssues += report.issues
+            scanCompletedAreas.append("Removed-app data")
+          case .downloads(let report):
+            downloadItems = report.value
+            selectedDownloadIDs.formIntersection(downloadItems.map(\.id))
+            downloadsScanned = true
+            scanIssues += report.issues
+            scanCompletedAreas.append("Downloads")
+          case .trash(let status):
+            trashStatus = status
+            if !status.isComplete { scanIssues.append(ScanIssue(area: "Trash", message: "Trash could not be fully measured. Review it in Finder.")) }
+            scanCompletedAreas.append("Home Trash")
+          }
+          refreshRecommendations()
+          statusMessage = "\(scanCompletedAreas.count) of 5 checks complete — results are available"
+        }
       }
-      cleanupTargets = scan.cleanupTargets
-      apps = scan.apps
-      startupItems = scan.startupItems
-      devItems = dev.value
-      selectedDevIDs = selectedDevIDs.intersection(dev.value.map(\.id))
-      orphans = orphanReport.value
-      selectedOrphanIDs = selectedOrphanIDs.intersection(orphanReport.value.map(\.id))
-      orphansScanned = true
-      downloadItems = downloadReport.value
-      selectedDownloadIDs = selectedDownloadIDs.intersection(downloadReport.value.map(\.id))
-      downloadsScanned = true
-      self.trashStatus = trashStatus
-      lastScanDate = scan.scannedAt
-      lastScanDuration = scan.duration
-      scanIssues = scan.issues + dev.issues + orphanReport.issues + downloadReport.issues
+      guard !Task.isCancelled else { finishCancelledOperation(); return }
+      lastScanDate = Date()
+      lastScanDuration = Date().timeIntervalSince(started)
       smartCareRanAt = Date()
-      refreshRecommendations()
+      UserDefaults.standard.set(Date(), forKey: CareService.Keys.lastScanDate)
       recordFreeSpace()
-      let actionable = recommendations.filter(\.canReview).reduce(Int64(0)) { $0 + $1.bytes }
-      finishScan(
-        message: recommendations.isEmpty
-          ? "Smart Care is done — nothing worth cleaning right now"
-          : "Smart Care found about \(ByteFormatter.string(actionable)) you can review")
+      let estimate = OperationPlanner.plan(title: "estimate", items: recommendations.flatMap(\.items), ignoredPaths: ignoredPaths).totalBytes
+      finishScan(message: "Quick Scan complete — approximately \(ByteFormatter.string(estimate)) to inspect" + (scanIssues.isEmpty ? "" : "; some areas need attention"))
     }
   }
 
   func refreshRecommendations() {
     var inputs = RecommendationEngine.Inputs()
+    inputs.runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     inputs.cleanupTargets = cleanupTargets
     inputs.developer = devItems
     inputs.downloads = downloadItems
@@ -92,7 +122,7 @@ extension AppViewModel {
   }
 
   var safeRecommendationBytes: Int64 {
-    recommendations.filter { $0.confidence == .safe }.reduce(0) { $0 + $1.bytes }
+    OperationPlanner.plan(title: "estimate", items: RecommendationEngine.safeItems(recommendations), ignoredPaths: ignoredPaths).totalBytes
   }
 
   func open(_ destination: Recommendation.Destination) {
