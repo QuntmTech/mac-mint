@@ -93,7 +93,7 @@ struct PhotosView: View {
       } else {
         ProgressView().controlSize(.large)
       }
-      Text("Everything is analysed on this Mac. Nothing is uploaded or downloaded from iCloud.")
+      Text("Analysis uses local thumbnails. Default previews stay local; a cloud preview downloads only when you request it.")
         .font(.caption)
         .foregroundStyle(.tertiary)
       Button("Cancel") { model.cancelCurrentOperation() }

@@ -125,7 +125,7 @@ extension AppViewModel {
     let items = RecommendationEngine.safeItems(recommendations)
     guard !items.isEmpty, !isWorking, !isScanning else { return }
     pendingPlan = OperationPlanner.plan(
-      title: "Smart Care — safe items", items: items, ignoredPaths: ignoredPaths)
+      title: "Quick Scan — rebuildable items", items: items, ignoredPaths: ignoredPaths)
   }
 
   var safeRecommendationBytes: Int64 {
