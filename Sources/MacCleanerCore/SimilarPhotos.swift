@@ -128,7 +128,7 @@ public enum PhotoAnalysis {
 
   // MARK: Grouping
 
-  /// A metric index finds candidate keepers without comparing every pair. Each member is
+  /// A partition index finds candidate keepers without comparing every pair. Each member is
   /// within the threshold of its suggested keeper; weak chains do not merge unrelated shots.
   /// Quality is ordered first, so an attached member never displaces its group's anchor.
   public static func group(_ photos: [PhotoFingerprint], threshold: Int = 6) -> [SimilarPhotoGroup] {
@@ -145,51 +145,49 @@ public enum PhotoAnalysis {
       return $0.id < $1.id
     }
     guard unique.count > 1 else { return [] }
-    struct Node {
-      let hash: UInt64
-      let cluster: Int
-      var children: [Int: Int] = [:]
+    if radius == 64 { return [SimilarPhotoGroup(id: unique[0].id, photos: unique, keeperIndex: 0)] }
+    // Split all 64 bits into radius+1 disjoint parts. At most `radius` changed bits
+    // cannot touch every part, so every valid candidate shares at least one exact part.
+    // Index anchors only: every member must still pass a full-distance check to its keeper.
+    let partCount = radius + 1
+    var parts: [(shift: Int, mask: UInt64)] = []
+    var shift = 0
+    for part in 0..<partCount {
+      let width = 64 / partCount + (part < 64 % partCount ? 1 : 0)
+      parts.append((shift, width == 64 ? UInt64.max : (UInt64(1) << width) - 1))
+      shift += width
     }
-    var index: [Node] = []
+    var buckets = Array(repeating: [UInt64: [Int]](), count: partCount)
     var exact: [UInt64: Int] = [:]
+    var visited: [Int] = []
     var clusters: [[PhotoFingerprint]] = []
     for (offset, photo) in unique.enumerated() {
       if offset % 64 == 0, Task.isCancelled { return [] }
       var match = exact[photo.hash]
-      var bestDistance = radius + 1
-      if match == nil, !index.isEmpty {
-        var stack = [0]
-        while let next = stack.popLast() {
-          if Task.isCancelled { return [] }
-          let node = index[next]
-          let d = distance(photo.hash, node.hash)
-          if d <= radius && (d < bestDistance || (d == bestDistance && node.cluster < (match ?? Int.max))) {
-            match = node.cluster
-            bestDistance = d
-          }
-          for (edge, child) in node.children where abs(edge - d) <= min(radius, bestDistance) {
-            stack.append(child)
+      if match == nil {
+        var bestDistance = radius + 1
+        let stamp = offset + 1
+        for (part, bits) in parts.enumerated() {
+          let key = (photo.hash >> bits.shift) & bits.mask
+          for candidate in buckets[part][key] ?? [] {
+            if visited[candidate] == stamp { continue }
+            visited[candidate] = stamp
+            let d = distance(photo.hash, clusters[candidate][0].hash)
+            if d <= radius && (d < bestDistance || (d == bestDistance && candidate < (match ?? Int.max))) {
+              match = candidate; bestDistance = d
+            }
           }
         }
       }
       if let match {
         clusters[match].append(photo)
-        // Exact repeats of a member also belong to this same verified anchor.
         exact[photo.hash] = match
       } else {
         let cluster = clusters.count
-        clusters.append([photo])
-        exact[photo.hash] = cluster
-        let newIndex = index.count
-        if !index.isEmpty {
-          var cursor = 0
-          while true {
-            let d = distance(photo.hash, index[cursor].hash)
-            if let child = index[cursor].children[d] { cursor = child }
-            else { index[cursor].children[d] = newIndex; break }
-          }
+        clusters.append([photo]); visited.append(0); exact[photo.hash] = cluster
+        for (part, bits) in parts.enumerated() {
+          buckets[part][(photo.hash >> bits.shift) & bits.mask, default: []].append(cluster)
         }
-        index.append(Node(hash: photo.hash, cluster: cluster))
       }
     }
     return clusters.filter { $0.count > 1 }.map { members in

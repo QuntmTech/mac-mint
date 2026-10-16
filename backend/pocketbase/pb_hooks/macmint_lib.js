@@ -110,11 +110,8 @@ function applyLicense(ent, lic) {
 }
 
 function devices(app, userId) {
-  try {
-    return app.findRecordsByFilter("devices", "user = {:u} && deactivated = false", "-last_seen", 200, 0, { u: userId }) || []
-  } catch (err) {
-    return []
-  }
+  // A failed count must not be interpreted as zero occupied slots.
+  return app.findRecordsByFilter("devices", "user = {:u} && deactivated = false", "-last_seen", 200, 0, { u: userId }) || []
 }
 
 // Count, reactivation decision, and write share one transaction so concurrent Macs cannot

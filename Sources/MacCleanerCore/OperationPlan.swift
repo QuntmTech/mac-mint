@@ -232,6 +232,11 @@ public enum OperationPlanner {
     for item in items {
       if protecting.contains(where: { FileSystem.path(URL(fileURLWithPath: $0.keeper.path), isInsideOrEqual: item.url) }) {
         rejected.append(OperationFailure(url: item.url, message: "This selection includes a copy you are keeping in Duplicates or Photos. Choose another keeper or select smaller items."))
+      } else if case .cleanupTarget(_, .safe) = item.kind, validationItems.contains(where: { child in
+        guard case .developerArtifact = child.kind else { return false }
+        return child.needsAttention && FileSystem.path(child.url, isInsideOrEqual: item.url)
+      }) {
+        rejected.append(OperationFailure(url: item.url, message: "This broad target includes recent or hard-to-recreate developer data. Review individual items in Developer."))
       } else if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
         rejected.append(OperationFailure(url: item.url, message: "Item is on your exclusion list."))
       } else if FileSystem.containsIgnoredDescendant(item.url, ignoredPaths: ignoredPaths) {

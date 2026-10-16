@@ -207,6 +207,23 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertTrue(fm.fileExists(atPath: kept.path))
   }
 
+  func testBroadCleanerTargetCannotOverrideConservativeDeveloperEvidence() async throws {
+    let home = try temporaryHome()
+    defer { try? fm.removeItem(at: home) }
+    let file = try write(home, "Library/Developer/Xcode/DerivedData/Active/build.o")
+    let parent = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")
+    let broad = PlanItem(url: parent, displayName: "DerivedData", kind: .cleanupTarget(category: .developerJunk, risk: .safe),
+      expectedBytes: 16384, reason: "Rebuildable", source: "Cleanup")
+    let active = PlanItem(url: file.deletingLastPathComponent(), displayName: "Active project", kind: .developerArtifact,
+      expectedBytes: 16384, reason: "Recent project", source: "Developer", needsAttention: true)
+    let planned = OperationPlanner.plan(title: "Broad", items: [broad], validationItems: [active])
+    XCTAssertTrue(planned.items.isEmpty)
+    let raw = OperationPlan(title: "Raw", items: [broad], validationItems: [active])
+    let result = await OperationExecutor(trashService: FixtureTrash(home: home), safetyPolicy: SafetyPolicy(homeDirectory: home)).run(raw)
+    XCTAssertTrue(result.moved.isEmpty)
+    XCTAssertTrue(fm.fileExists(atPath: file.path))
+  }
+
   func testActiveDeveloperEvidenceCannotBeOverriddenByCleanerParent() {
     let home = URL(fileURLWithPath: "/Users/test")
     let root = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")

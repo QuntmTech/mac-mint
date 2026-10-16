@@ -74,6 +74,12 @@ extension AppViewModel {
             if !status.isComplete { scanIssues.append(ScanIssue(area: "Trash", message: "Trash could not be fully measured. Review it in Finder.")) }
             scanCompletedAreas.append("Home Trash")
           }
+          for index in cleanupTargets.indices where cleanupTargets[index].category == .developerJunk {
+            if devItems.contains(where: { dev in
+              guard dev.isActive || dev.rebuild == .review, let url = dev.url else { return false }
+              return FileSystem.path(url, isInsideOrEqual: cleanupTargets[index].url)
+            }) { cleanupTargets[index].isSelected = false }
+          }
           refreshRecommendations()
           statusMessage = "\(scanCompletedAreas.count) of 5 checks complete — results are available"
         }

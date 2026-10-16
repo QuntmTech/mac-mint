@@ -49,6 +49,30 @@ final class SimilarPhotosTests: XCTestCase {
     XCTAssertEqual(PhotoAnalysis.group(photos).first?.keeper.url.lastPathComponent, "large.jpg")
   }
 
+  func testPartitionIndexMatchesExhaustiveAnchorSearchAtBoundaryRadii() {
+    var state: UInt64 = 42
+    var samples: [PhotoFingerprint] = []
+    for index in 0..<120 {
+      state = state &* 6364136223846793005 &+ 1
+      let hash = index % 3 == 0 ? state : samples.last!.hash ^ (UInt64(1) << (index % 64))
+      samples.append(photo(String(format: "%03d.jpg", index), hash: hash, sharpness: 100))
+    }
+    for threshold in [0, 1, 6, 12, 63, 64] {
+      var reference: [[PhotoFingerprint]] = []
+      for sample in samples {
+        let candidates = reference.indices.filter { PhotoAnalysis.distance(sample.hash, reference[$0][0].hash) <= threshold }
+        if let best = candidates.min(by: { lhs, rhs in
+          let l = PhotoAnalysis.distance(sample.hash, reference[lhs][0].hash)
+          let r = PhotoAnalysis.distance(sample.hash, reference[rhs][0].hash)
+          return l == r ? lhs < rhs : l < r
+        }) { reference[best].append(sample) } else { reference.append([sample]) }
+      }
+      let expected = Set(reference.filter { $0.count > 1 }.map { $0.map(\.id).sorted().joined(separator: "|") })
+      let actual = Set(PhotoAnalysis.group(samples, threshold: threshold).map { $0.photos.map(\.id).sorted().joined(separator: "|") })
+      XCTAssertEqual(actual, expected, "No candidate can be missed at radius \(threshold)")
+    }
+  }
+
   func testWeakSimilarityChainCannotMergeDissimilarEndpoints() {
     let photos = [photo("a.jpg", hash: 0, sharpness: 100),
       photo("b.jpg", hash: 0b111111, sharpness: 100),
