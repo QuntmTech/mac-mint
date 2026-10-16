@@ -121,13 +121,15 @@ public actor DeveloperStorageScanner {
   /// A custom cache root is only trusted when it is a dedicated folder: not the home folder,
   /// not a personal folder (or inside one), not an ancestor of home, and not a system path.
   public static func validatedRoots(_ roots: [URL], home: URL) -> [URL] {
-    let homePath = SafetyPolicy.canonicalPath(of: home.resolvingSymlinksInPath())
+    let homePath = FileSystem.comparisonPath(home.resolvingSymlinksInPath())
     let personal = ["Desktop", "Documents", "Pictures", "Movies", "Music", "Downloads", "Library"]
       .map { (homePath + "/" + $0).lowercased() }
     return roots.filter { root in
-      let path = SafetyPolicy.canonicalPath(of: root)
+      let path = FileSystem.comparisonPath(root)
       guard path.hasPrefix(homePath + "/") else { return false }
-      if personal.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return false }
+      // Personal-folder variants stay conservatively blocked; scope itself is volume-aware.
+      let restrictedPath = path.lowercased()
+      if personal.contains(where: { restrictedPath == $0 || restrictedPath.hasPrefix($0 + "/") }) { return false }
       // At least two levels below home (e.g. ~/models/hub), so a top-level folder of
       // arbitrary files is never treated as a cache.
       let depth = path.dropFirst(homePath.count).split(separator: "/").count

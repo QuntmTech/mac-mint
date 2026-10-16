@@ -3,6 +3,33 @@ import XCTest
 @testable import MacCleanerCore
 
 final class TrustRegressionTests: XCTestCase {
+  func testCaseSensitiveHomeBoundaryCannotAdoptADifferentlyCasedSibling() throws {
+    let parent = try temporaryHome()
+    defer { try? fm.removeItem(at: parent) }
+    let home = parent.appendingPathComponent("Owner")
+    let other = parent.appendingPathComponent("owner")
+    try fm.createDirectory(at: home, withIntermediateDirectories: true)
+    if FileSystem.comparisonPath(home) == FileSystem.comparisonPath(other) {
+      throw XCTSkip("The current volume uses case-insensitive names")
+    }
+    let personal = try write(other, "Documents/item.bin")
+    let cache = try write(other, "Library/Caches/com.vendor/item.bin")
+    let models = try write(other, "models/hub/item.bin")
+    let policy = SafetyPolicy(homeDirectory: home)
+    XCTAssertFalse(policy.reviewedFileDecision(for: personal).allowed)
+    XCTAssertFalse(policy.cleanupDecision(for: cache, category: .userCaches).allowed)
+    XCTAssertFalse(policy.developerArtifactDecision(for: cache).allowed)
+    XCTAssertTrue(DeveloperStorageScanner.validatedRoots([models.deletingLastPathComponent()], home: home).isEmpty)
+  }
+
+  func testApplicationUninstallScopeFollowsTheVolumesCaseSensitivity() {
+    let expected = FileSystem.comparisonPath(URL(fileURLWithPath: "/Applications"))
+      == FileSystem.comparisonPath(URL(fileURLWithPath: "/applications"))
+    let policy = SafetyPolicy(homeDirectory: URL(fileURLWithPath: "/Users/fixture"))
+    XCTAssertEqual(policy.appBundleDecision(for: URL(fileURLWithPath: "/applications/Fixture.app")).allowed, expected)
+    XCTAssertTrue(policy.appBundleDecision(for: URL(fileURLWithPath: "/Applications/Fixture.app")).allowed)
+  }
+
   private let fm = FileManager.default
   private func temporaryHome() throws -> URL {
     let url = fm.temporaryDirectory.appendingPathComponent("macmint-trust-" + UUID().uuidString)

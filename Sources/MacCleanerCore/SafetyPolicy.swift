@@ -1,15 +1,17 @@
 import Foundation
 
 /// The write gate for every removal. Paths are compared in canonical form: parent symlinks are
-/// resolved (so a symlinked folder can't smuggle a protected location in) and comparisons ignore
-/// case, matching APFS's default case-insensitive behaviour.
+/// resolved (so a symlinked folder can't smuggle a protected location in). Authority boundaries
+/// follow the volume's case sensitivity; restrictive category rules also protect case variants.
 public struct SafetyPolicy: Sendable {
   public let homeDirectory: URL
   private let home: String
+  private let scopedHome: String
 
   public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
     self.homeDirectory = homeDirectory.standardizedFileURL
     self.home = Self.canonicalPath(of: homeDirectory.standardizedFileURL.resolvingSymlinksInPath())
+    self.scopedHome = FileSystem.comparisonPath(homeDirectory.standardizedFileURL.resolvingSymlinksInPath())
   }
 
   // MARK: Canonical paths
@@ -37,7 +39,9 @@ public struct SafetyPolicy: Sendable {
     roots.contains { inside(path, $0, strict: strict) }
   }
 
-  private var isUnderHomeCheck: (String) -> Bool { { [home] in $0.hasPrefix(home + "/") } }
+  private func isUnderHome(_ url: URL) -> Bool {
+    FileSystem.comparisonPath(url).hasPrefix(scopedHome + "/")
+  }
 
   // MARK: Decisions
 
@@ -52,7 +56,7 @@ public struct SafetyPolicy: Sendable {
     if inside(path, roots: personalRoots()) {
       return (false, "Personal-content folders are never automatic-cleanup targets.")
     }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Automatic cleanup is limited to user-owned paths below the home folder.")
     }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
@@ -114,7 +118,7 @@ public struct SafetyPolicy: Sendable {
     }
     let path = canonical(url)
     if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Developer cleanup is limited to your home folder.")
     }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
@@ -134,11 +138,11 @@ public struct SafetyPolicy: Sendable {
 
   /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
   public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let path = canonical(url)
     guard url.pathExtension.lowercased() == "app" else {
       return (false, "Only application bundles can be uninstalled.")
     }
-    guard inside(path, "/applications", strict: true) || inside(path, homePath("Applications"), strict: true)
+    guard FileSystem.path(url, isInsideOrEqual: URL(fileURLWithPath: "/Applications"))
+      || FileSystem.path(url, isInsideOrEqual: homeDirectory.appendingPathComponent("Applications"))
     else {
       return (false, "This application path is not eligible for uninstall.")
     }
@@ -162,7 +166,7 @@ public struct SafetyPolicy: Sendable {
         "~/Library is managed by dedicated cleanup and uninstaller modules, not generic file removal."
       )
     }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Reviewed file removal is limited to files inside your home folder.")
     }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
