@@ -186,7 +186,8 @@ struct ApplicationsView: View {
 
         Divider()
 
-        VStack(alignment: .leading, spacing: 12) {
+        ScrollView {
+        LazyVStack(alignment: .leading, spacing: 12) {
           VStack(alignment: .leading, spacing: 10) {
             HStack {
               Text("Related files").font(.headline)
@@ -209,7 +210,7 @@ struct ApplicationsView: View {
               icon: "checkmark.seal", title: "No related files found",
               detail: "No matching user-level leftovers were detected for this app.")
           } else {
-            List(model.appLeftovers) { leftover in
+            ForEach(model.appLeftovers) { leftover in
               HStack(spacing: 11) {
                 Toggle(
                   "",
@@ -239,7 +240,7 @@ struct ApplicationsView: View {
                 StatusPill(
                   title: leftover.confidence.rawValue.capitalized,
                   icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
-                  tint: leftover.confidence == .high ? .green : .orange
+                  tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
                 )
                 Text(ByteFormatter.string(leftover.size))
                   .font(.callout.monospacedDigit())
@@ -256,14 +257,14 @@ struct ApplicationsView: View {
               }
               .padding(.vertical, 4)
             }
-            .listStyle(.inset)
           }
         }
         .padding(.horizontal, AppTheme.pagePadding)
-        .padding(.top, 18)
-
-        Spacer(minLength: 0)
-
+        .padding(.vertical, 18)
+        }
+      }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        VStack(spacing: 0) {
         Divider()
         HStack {
           VStack(alignment: .leading, spacing: 2) {
@@ -293,6 +294,8 @@ struct ApplicationsView: View {
           }
         }
         .padding(18)
+        }.background(AppTheme.surface)
+          .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["app review": geometry.frame(in: .global)]) })
       }
     } else {
       EmptyState(

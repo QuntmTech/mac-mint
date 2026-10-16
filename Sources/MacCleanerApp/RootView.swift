@@ -219,7 +219,7 @@ struct RootView: View {
         .background(selected ? AppTheme.selection : hoveredSection == section ? AppTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
     }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }
-      .accessibilityAddTraits(selected ? .isSelected : [])
+      .accessibilityAddTraits(selected ? .isSelected : []).accessibilityLabel(section.rawValue)
       .help(section.rawValue)
   }
 

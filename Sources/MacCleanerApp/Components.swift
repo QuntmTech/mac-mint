@@ -129,7 +129,7 @@ struct EmptyState: View {
         .foregroundStyle(AppTheme.accentText).frame(width: 76, height: 76)
         .background(AppTheme.selection.opacity(0.65), in: RoundedRectangle(cornerRadius: 24))
         .accessibilityHidden(true)
-      Text(title).font(.system(size: 21, weight: .semibold)).foregroundStyle(AppTheme.ink)
+      Text(title).font(.system(size: 21, weight: .semibold)).foregroundStyle(AppTheme.ink).accessibilityAddTraits(.isHeader)
       Text(detail).font(.callout).foregroundStyle(.secondary)
         .multilineTextAlignment(.center).frame(maxWidth: 390)
         .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +174,7 @@ struct StorageRing: View {
     .frame(width: 148, height: 148)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Storage usage")
-    .accessibilityValue("\(Int(fraction * 100)) percent used")
+    .accessibilityValue("\(Int(fraction * 100)) percent used. \(centerValue) \(centerLabel). \(ByteFormatter.string(used)) of \(ByteFormatter.string(total)) used.")
   }
 }
 

@@ -91,7 +91,7 @@ enum SmokeTest {
           RunLoop.current.run(until: Date().addingTimeInterval(0.12))
           hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
           hosting.layoutSubtreeIfNeeded()
-          if (name.contains("-Empty-") || name.contains("-Populated-") || name.contains("-Compact-")), layoutProbe.frames.count != 2 {
+          if (name.contains("-Empty-") || name.contains("-Populated-") || name.contains("-Compact-")), !Set(layoutProbe.frames.keys).isSuperset(of: ["brand", "workspace controls"]) {
             failures.append("Missing workspace layout evidence: " + name)
           }
           for (element, frame) in layoutProbe.frames {

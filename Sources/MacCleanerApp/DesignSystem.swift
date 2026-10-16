@@ -41,7 +41,7 @@ struct PageHeader<Actions: View>: View {
           .tracking(1.6).foregroundStyle(AppTheme.accentText)
       }
       Text(title).font(.system(size: 29, weight: .semibold)).tracking(-0.8)
-        .foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
       if !subtitle.isEmpty {
         Text(subtitle).font(.callout).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
