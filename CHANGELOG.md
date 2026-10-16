@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 — 2026-10-16
+- **AI (opt-in, off by default, with consent):**
+  - **Explain** any cache, app-data folder, background agent, or developer tool.
+  - **Ask MacMint**, an assistant that knows your scan results.
+  - **AI review** of Smart Care.
+- AI is advisory only: it can never select or remove anything, and MacMint's own safety verdict is always shown first.
+- Only names, sizes, dates, and anonymized folder paths are sent, never file contents. Server-side rate limits, daily caps, and a remote off switch apply.
+
 ## 0.8.0 — 2026-10-16
 - **Smart Care:** ranked, plain-English recommendations across caches, developer data, removed-app leftovers, Downloads, unused apps, screenshots, firmware, and Mail attachments. Every recommendation opens the normal review. ⌘R runs it.
 - **Usage intelligence:** Spotlight "last opened" and "date added". An app or file with no record is never called unused.
