@@ -4,6 +4,7 @@ import SwiftUI
 struct RootView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
+  @EnvironmentObject private var updates: UpdateService
   @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @State private var showingIssues = false
   @State private var showingOnboarding = false
@@ -53,6 +54,9 @@ struct RootView: View {
         }
       }
       .background(Color(nsColor: .windowBackgroundColor))
+      .safeAreaInset(edge: .top, spacing: 0) {
+        updateBanner
+      }
       .safeAreaInset(edge: .bottom) {
         operationBar
       }
@@ -125,6 +129,39 @@ struct RootView: View {
     }
     .padding(12)
     .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+  }
+
+  @ViewBuilder
+  private var updateBanner: some View {
+    if let release = updates.bannerRelease {
+      HStack(spacing: 10) {
+        Image(systemName: updates.isRequired ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill")
+          .foregroundStyle(updates.isRequired ? .orange : AppTheme.accent)
+        Text(
+          updates.isRequired
+            ? "This version of MacMint is no longer supported. Please update to \(release.version)."
+            : "MacMint \(release.version) is available — you have \(UpdateService.currentVersion)."
+        )
+        .font(.callout)
+        Spacer()
+        Button("Download") { updates.openDownload(release) }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.small)
+        if !updates.isRequired {
+          Button {
+            updates.dismissedVersion = release.version
+          } label: {
+            Image(systemName: "xmark")
+          }
+          .buttonStyle(.borderless)
+          .accessibilityLabel("Dismiss update notice")
+        }
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 8)
+      .background(.bar)
+      .overlay(alignment: .bottom) { Divider() }
+    }
   }
 
   private var operationBar: some View {
