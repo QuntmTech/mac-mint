@@ -17,6 +17,8 @@ struct SettingsView: View {
 
         HelpersSettingsCard()
 
+        AboutSettingsCard()
+
         SurfaceCard {
           VStack(alignment: .leading, spacing: 12) {
             Label("Safety model", systemImage: "checkmark.shield.fill")
@@ -170,5 +172,51 @@ struct HelpersSettingsCard: View {
     .onAppear { launchAtLogin = care.launchesAtLogin }
     .onChange(of: lowSpaceAlerts) { _, enabled in if enabled { care.requestAuthorization() } }
     .onChange(of: scanReminders) { _, enabled in if enabled { care.requestAuthorization() } }
+  }
+}
+
+struct AboutSettingsCard: View {
+  @EnvironmentObject private var updates: UpdateService
+  @State private var checking = false
+
+  var body: some View {
+    SurfaceCard {
+      VStack(alignment: .leading, spacing: 10) {
+        HStack {
+          Label("About MacMint", systemImage: "info.circle").font(.headline)
+          Spacer()
+          Text("Version \(UpdateService.currentVersion)").foregroundStyle(.secondary)
+        }
+        HStack {
+          switch updates.status {
+          case .current:
+            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+          case .available(let release):
+            Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
+              .foregroundStyle(AppTheme.accent)
+            Button("Download") { updates.openDownload(release) }.controlSize(.small)
+          case .required(let release, let minimum):
+            Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
+              .foregroundStyle(.orange)
+            Button("Download") { updates.openDownload(release) }.controlSize(.small)
+          }
+          Spacer()
+          Button(checking ? "Checking…" : "Check Now") {
+            checking = true
+            Task {
+              await updates.check()
+              checking = false
+            }
+          }
+          .disabled(checking)
+        }
+        .font(.callout)
+        if let date = updates.lastChecked {
+          Text("Last checked \(date.formatted(.relative(presentation: .named)))")
+            .font(.caption)
+            .foregroundStyle(.tertiary)
+        }
+      }
+    }
   }
 }

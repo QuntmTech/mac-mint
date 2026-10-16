@@ -113,6 +113,11 @@ V2 replaces the basic utility-style presentation with a consumer-facing SwiftUI 
 - stronger review tables, risk badges, selection summaries, filtering, sorting, and contextual actions;
 - polished empty/loading states and clearer destructive confirmations.
 
+## Updates and releases
+
+- The app checks the published release feed (PocketBase `app_releases`, stable channel) at launch and daily. It shows a banner when a newer version exists, and a stronger one when the installed version is below `app_config.client.min_version`. Downloads open in the browser so Gatekeeper verifies them.
+- Tagging `vX.Y.Z` runs the **Release** workflow, which builds, signs with Developer ID, notarizes, staples, and publishes a GitHub release. Without signing secrets it publishes an ad-hoc-signed **pre-release**. See [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## Safety model
 
 1. Cleanup actions move items to **Trash**, never permanently erase them.

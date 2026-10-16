@@ -7,6 +7,7 @@ struct MacCleanerDesktopApp: App {
   @StateObject private var account = AccountStore(supportDirectory: AppPaths.supportDirectory)
   @StateObject private var monitor = SystemMonitor()
   @StateObject private var care = CareService()
+  @StateObject private var updates = UpdateService()
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
 
   var body: some Scene {
@@ -16,10 +17,12 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(account)
         .environmentObject(monitor)
         .environmentObject(care)
+        .environmentObject(updates)
         .tint(AppTheme.accent)
         .frame(minWidth: 1040, minHeight: 700)
         .task {
           care.start()
+          updates.start()
           await account.start()
         }
     }

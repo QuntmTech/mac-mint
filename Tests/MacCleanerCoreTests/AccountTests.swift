@@ -133,3 +133,39 @@ final class RequestBox: @unchecked Sendable {
     return stored
   }
 }
+
+final class ReleaseCheckerTests: XCTestCase {
+  func testVersionOrdering() {
+    XCTAssertLessThan(AppVersion("0.9.3"), AppVersion("0.10.0"))
+    XCTAssertEqual(AppVersion("1.0"), AppVersion("1.0.0"))
+    XCTAssertLessThan(AppVersion("1.2.0-beta"), AppVersion("1.2.1"))
+  }
+
+  func testStatusPrefersRequiredOverAvailable() {
+    let latest = ReleaseInfo(version: "0.6.0", downloadUrl: "https://x")
+    XCTAssertEqual(ReleaseChecker.status(current: "0.6.0", latest: latest, minimum: "0.3.0"), .current)
+    XCTAssertEqual(
+      ReleaseChecker.status(current: "0.5.0", latest: latest, minimum: "0.3.0"), .available(latest))
+    XCTAssertEqual(
+      ReleaseChecker.status(current: "0.2.9", latest: latest, minimum: "0.3.0"),
+      .required(latest, minimum: "0.3.0"))
+  }
+
+  func testCheckDecodesPocketBaseCollections() async throws {
+    let checker = ReleaseChecker(baseURL: URL(string: "https://example.test")!) { request in
+      let path = request.url!.path
+      let body =
+        path.contains("app_releases")
+        ? #"{"items":[{"version":"0.7.0","build":7,"download_url":"https://dl/MacMint.zip","min_os":"14.0"}]}"#
+        : #"{"items":[{"key":"client","value":{"min_version":"0.3.0","offline_grace_days":14}}]}"#
+      return (
+        Data(body.utf8),
+        HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+      )
+    }
+    let status = try await checker.check(currentVersion: "0.5.0")
+    guard case .available(let release) = status else { return XCTFail("expected update, got \(status)") }
+    XCTAssertEqual(release.version, "0.7.0")
+    XCTAssertEqual(release.downloadUrl, "https://dl/MacMint.zip")
+  }
+}

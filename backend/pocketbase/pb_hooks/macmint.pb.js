@@ -6,6 +6,7 @@
 // POST /api/macmint/devices/activate      (user)  { device_id, name?, model?, os_version?, app_version? }
 // POST /api/macmint/devices/deactivate    (user)  { device_id }
 // POST /api/macmint/admin/licenses        (superuser) { count, plan, duration_days?, max_devices?, source?, note?, order_ref? }
+// site_events (anonymous A/B funnel events): `user` is attached from the auth token only.
 //
 // Collections are locked to clients for writes; every entitlement/device change goes through here.
 
@@ -18,6 +19,13 @@ onRecordAfterCreateSuccess((e) => {
   }
   e.next()
 }, "users")
+
+onRecordCreateRequest((e) => {
+  if (e.auth && e.auth.collection().name === "users") {
+    e.record.set("user", e.auth.id)
+  }
+  e.next()
+}, "site_events")
 
 routerAdd("GET", "/api/macmint/me", (e) => {
   const lib = require(`${__hooks}/macmint_lib.js`)
