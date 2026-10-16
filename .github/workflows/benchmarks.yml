@@ -1,0 +1,132 @@
+name: Benchmarks
+
+# Performance gates from the plan, measured on a recorded reference runner:
+#   - peak resident memory < 250 MB per scanner on a 100k-item fixture
+#   - cancellation acknowledged within 1 second
+#   - SHA-256 throughput reported against `shasum -a 256`
+on:
+  workflow_dispatch:
+    inputs:
+      items:
+        description: Fixture size (files)
+        default: "100000"
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  pull_request:
+    paths:
+      - "Sources/MacMintBench/**"
+      - ".github/workflows/benchmarks.yml"
+
+jobs:
+  benchmarks:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      ITEMS: ${{ github.event.inputs.items || '100000' }}
+      FIXTURE: ${{ runner.temp }}/macmint-fixture
+      RSS_LIMIT_MB: "250"
+      CANCEL_LIMIT_MS: "1000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build benchmark tool
+        run: swift build -c release --product macmint-bench
+
+      - name: Build fixture
+        run: |
+          BIN="$(swift build -c release --show-bin-path)/macmint-bench"
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+          /usr/bin/time -p "$BIN" fixture "$FIXTURE" --items "$ITEMS" | tee fixture.json
+
+      - name: Scanners — time and peak memory
+        run: |
+          for scanner in cleanup storage large duplicates; do
+            /usr/bin/time -l "$BIN" run "$FIXTURE" "$scanner" > "run-$scanner.json" 2> "time-$scanner.txt"
+            rss=$(awk '/maximum resident set size/ {print $1}' "time-$scanner.txt")
+            echo "{\"scanner\":\"$scanner\",\"rssBytes\":$rss}" > "rss-$scanner.json"
+            echo "$scanner: $(cat run-$scanner.json) rss=$((rss / 1048576)) MB"
+          done
+
+      - name: Cancellation latency
+        run: |
+          for scanner in cleanup storage large duplicates; do
+            "$BIN" cancel "$FIXTURE" "$scanner" --after 0.3 > "cancel-$scanner.json"
+            echo "$scanner: $(cat cancel-$scanner.json)"
+          done
+
+      - name: Hashing throughput vs shasum
+        run: |
+          head -c 1073741824 /dev/urandom > "$RUNNER_TEMP/hash.bin"
+          "$BIN" hash "$RUNNER_TEMP/hash.bin" > hash.json
+          start=$(python3 -c 'import time; print(time.time())')
+          shasum -a 256 "$RUNNER_TEMP/hash.bin" | awk '{print $1}' > shasum.txt
+          end=$(python3 -c 'import time; print(time.time())')
+          python3 - "$start" "$end" <<'PY'
+          import json, sys
+          start, end = map(float, sys.argv[1:3])
+          ours = json.load(open("hash.json"))
+          reference = open("shasum.txt").read().strip()
+          json.dump({"shasumSeconds": end - start, "match": ours["digest"] == reference}, open("shasum.json", "w"))
+          PY
+          cat hash.json shasum.json
+
+      - name: Report and enforce gates
+        run: |
+          python3 <<'PY'
+          import json, os, sys
+          rss_limit = int(os.environ["RSS_LIMIT_MB"]) * 1048576
+          cancel_limit = float(os.environ["CANCEL_LIMIT_MS"])
+          fixture = json.load(open("fixture.json"))
+          lines = [
+              f"## MacMint benchmarks — {fixture['items']:,} items",
+              "",
+              "| Scanner | Time | Results | Peak memory | Gate < 250 MB | Cancel ack | Gate < 1 s |",
+              "|---|---:|---:|---:|:-:|---:|:-:|",
+          ]
+          failures = []
+          for scanner in ["cleanup", "storage", "large", "duplicates"]:
+              run = json.load(open(f"run-{scanner}.json"))
+              rss = json.load(open(f"rss-{scanner}.json"))["rssBytes"]
+              cancel = json.load(open(f"cancel-{scanner}.json"))
+              rss_ok = rss < rss_limit
+              # A scan that finished before the cancel request cannot be judged; report it.
+              if cancel["finishedBeforeCancel"]:
+                  cancel_cell, cancel_ok = "finished first", True
+              else:
+                  cancel_ok = cancel["ackMilliseconds"] <= cancel_limit
+                  cancel_cell = f"{cancel['ackMilliseconds']:.0f} ms"
+              if not rss_ok: failures.append(f"{scanner} peak memory {rss / 1048576:.0f} MB")
+              if not cancel_ok: failures.append(f"{scanner} cancellation {cancel['ackMilliseconds']:.0f} ms")
+              lines.append(
+                  f"| {scanner} | {run['seconds']:.2f} s | {run['results']:,} | {rss / 1048576:.0f} MB | "
+                  f"{'✅' if rss_ok else '❌'} | {cancel_cell} | {'✅' if cancel_ok else '❌'} |"
+              )
+          ours = json.load(open("hash.json"))
+          ref = json.load(open("shasum.json"))
+          ratio = ref["shasumSeconds"] / ours["seconds"] if ours["seconds"] else 0
+          lines += [
+              "",
+              "### SHA-256 (1 GB random file)",
+              "",
+              "| Implementation | Time | Throughput |",
+              "|---|---:|---:|",
+              f"| MacMint (CryptoKit, streamed) | {ours['seconds']:.2f} s | {ours['megabytesPerSecond']:.0f} MB/s |",
+              f"| shasum -a 256 | {ref['shasumSeconds']:.2f} s | {1024 / ref['shasumSeconds']:.0f} MB/s |",
+              "",
+              f"MacMint is **{ratio:.1f}×** shasum's speed; digests {'match ✅' if ref['match'] else 'DIFFER ❌'}.",
+          ]
+          if not ref["match"]: failures.append("SHA-256 digest mismatch")
+          if failures:
+              lines += ["", "### ❌ Gates failed", ""] + [f"- {f}" for f in failures]
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          sys.exit(1 if failures else 0)
+          PY
+
+      - name: Upload raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks-${{ github.run_id }}
+          path: "*.json"
+          retention-days: 30
