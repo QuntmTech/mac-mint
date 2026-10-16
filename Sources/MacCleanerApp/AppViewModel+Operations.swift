@@ -212,6 +212,7 @@ extension AppViewModel {
   // MARK: Execution
 
   func execute(_ plan: OperationPlan) {
+    guard requireExclusions() else { return }
     let plan = normalizeReview(plan)
     pendingPlan = nil
     guard !isWorking, !isScanning, !plan.isEmpty else { return }

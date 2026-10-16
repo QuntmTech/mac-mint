@@ -22,7 +22,7 @@ extension AppViewModel {
 
   func runSmartCare() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Quick Scan", message: "Checking known storage locations…")
+    guard beginScan(title: "Quick Scan", message: "Checking known storage locations…") else { return }
     scanCompletedAreas = []
     let ignored = ignoredPaths
     let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
@@ -154,7 +154,7 @@ extension AppViewModel {
 
   func scanDownloads() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Downloads", message: "Checking what you've downloaded and never used…")
+    guard beginScan(title: "Downloads", message: "Checking what you've downloaded and never used…") else { return }
     let ignored = ignoredPaths
     currentTask = Task { [weak self] in
       guard let self else { return }

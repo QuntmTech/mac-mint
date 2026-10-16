@@ -73,6 +73,7 @@ final class AppViewModel: ObservableObject {
   var authorizeRemoval: () -> Bool = { false }
 
   func requirePaidAccess() -> Bool {
+    guard requireExclusions() else { return false }
     guard authorizeRemoval() else {
       statusMessage = "Sign in with an active plan to move items. Your selections are kept."
       showingAccount = true
@@ -96,6 +97,8 @@ final class AppViewModel: ObservableObject {
   @Published var showingScanIssues = false
   @Published var recoveryWarnings: [ScanIssue] = []
   @Published var ignoredPaths: Set<String> = []
+  @Published private(set) var exclusionsReady = false
+  @Published private(set) var exclusionLoadError: String?
   var keptQueuePaths: Set<String> = []
   @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
@@ -175,11 +178,16 @@ final class AppViewModel: ObservableObject {
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 
     Task {
-      async let loadedIgnores = ignoreStore.load()
+      do {
+        ignoredPaths = try await ignoreStore.loadChecked()
+        exclusionsReady = true
+      } catch {
+        exclusionLoadError = "Saved exclusions could not be read. Scanning and new removal are paused. Inspect or reset exclusions in Settings; History and Restore remain available."
+        statusMessage = exclusionLoadError!
+      }
       do { history = try await historyStore.loadChecked() }
       catch { recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
         message: "History could not be read. The existing file has been preserved; check recovery records before further cleanup.")) }
-      ignoredPaths = await loadedIgnores
       await recoverInterruptedOperations()
     }
   }
@@ -277,7 +285,7 @@ final class AppViewModel: ObservableObject {
     selectedApp = app
     appLeftovers = []
     selectedLeftoverIDs = []
-    beginScan(title: "Inspecting \(app.name)", message: "Finding related application data…")
+    guard beginScan(title: "Inspecting \(app.name)", message: "Finding related application data…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -313,7 +321,7 @@ final class AppViewModel: ObservableObject {
   /// Spotlight answers first (verified against the disk); `fullScan` walks every folder instead.
   func scanLargeFiles(fullScan: Bool = false) {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Large Files", message: "Scanning \(largeFileRoot.lastPathComponent)…")
+    guard beginScan(title: "Large Files", message: "Scanning \(largeFileRoot.lastPathComponent)…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -354,8 +362,8 @@ final class AppViewModel: ObservableObject {
 
   func scanDuplicates() {
     guard !isScanning, !isWorking else { return }
-    beginScan(
-      title: "Duplicate Finder", message: "Comparing files in \(duplicateRoot.lastPathComponent)…")
+    guard beginScan(
+      title: "Duplicate Finder", message: "Comparing files in \(duplicateRoot.lastPathComponent)…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -464,6 +472,8 @@ final class AppViewModel: ObservableObject {
       do {
         try await ignoreStore.clear()
         ignoredPaths = []
+        exclusionLoadError = nil
+        exclusionsReady = true
         statusMessage = "All exclusions cleared"
       } catch {
         statusMessage = "Could not clear exclusions: \(error.localizedDescription)"
@@ -536,12 +546,22 @@ final class AppViewModel: ObservableObject {
     ]
   }
 
-  func beginScan(title: String, message: String) {
+  func requireExclusions() -> Bool {
+    guard exclusionsReady else {
+      statusMessage = exclusionLoadError ?? "Loading saved exclusions. Try again in a moment."
+      return false
+    }
+    return true
+  }
+
+  func beginScan(title: String, message: String) -> Bool {
+    guard requireExclusions() else { return false }
     isScanning = true
     operationTitle = title
     invalidateAIReview()
     statusMessage = message
     scanIssues = []
+    return true
   }
 
   func finishScan(message: String) {

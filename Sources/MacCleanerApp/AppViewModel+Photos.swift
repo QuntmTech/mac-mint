@@ -77,7 +77,7 @@ extension AppViewModel {
   func scanPhotos() {
     guard !isScanning, !isWorking else { return }
     let source = photoSource
-    beginScan(title: "Photos", message: "Looking for similar, blurry, and screenshot photos…")
+    guard beginScan(title: "Photos", message: "Looking for similar, blurry, and screenshot photos…") else { return }
     photoProgress = (0, 0)
 
     currentTask = Task { [weak self] in
@@ -236,7 +236,7 @@ extension AppViewModel {
 
   func scanOrphans() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Removed Apps", message: "Looking for data left by apps you've removed…")
+    guard beginScan(title: "Removed Apps", message: "Looking for data left by apps you've removed…") else { return }
     let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     let scanner = OrphanScanner()
     currentTask = Task { [weak self] in

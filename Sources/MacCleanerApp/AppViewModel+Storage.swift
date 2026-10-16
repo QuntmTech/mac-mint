@@ -24,7 +24,7 @@ extension AppViewModel {
   func scanStorage() {
     guard !isScanning, !isWorking else { return }
     let root = storageRoot
-    beginScan(title: "Storage", message: "Mapping \(root.lastPathComponent)…")
+    guard beginScan(title: "Storage", message: "Mapping \(root.lastPathComponent)…") else { return }
     storageScannedCount = 0
     let scanner = StorageTreeScanner()
 

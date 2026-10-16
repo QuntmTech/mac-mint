@@ -20,7 +20,7 @@ extension AppViewModel {
 
   func scanDeveloper() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Developer & AI", message: "Inventorying Xcode, package caches, and AI models…")
+    guard beginScan(title: "Developer & AI", message: "Inventorying Xcode, package caches, and AI models…") else { return }
     let roots = devProjectRoots
     let scanner = DeveloperStorageScanner()
 

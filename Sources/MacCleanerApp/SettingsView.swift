@@ -44,7 +44,7 @@ struct SettingsView: View {
               Label("Scan exclusions", systemImage: "hand.raised.fill")
                 .font(.headline)
               Spacer()
-              if !model.ignoredPaths.isEmpty {
+              if !model.ignoredPaths.isEmpty || model.exclusionLoadError != nil {
                 Button("Clear all", role: .destructive) { confirmClear = true }
                   .controlSize(.small)
               }
@@ -55,7 +55,10 @@ struct SettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if model.ignoredPaths.isEmpty {
+            if let error = model.exclusionLoadError {
+              Text(error).foregroundStyle(.orange)
+              Button("Show Exclusion Files") { model.reveal(AppPaths.supportDirectory) }
+            } else if model.ignoredPaths.isEmpty {
               Text("No exclusions saved.")
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 8)
