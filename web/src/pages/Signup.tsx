@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { Alert, AuthCard, Button, Field } from '../components/Form'
 import { useAuth } from '../hooks/useAuth'
 import { errorMessage, pb } from '../lib/pb'
+import { track } from '../lib/track'
 
 export const Signup = () => {
   const [params] = useSearchParams()
@@ -15,6 +16,8 @@ export const Signup = () => {
   const [error, setError] = useState<string | null>(null)
   const code = params.get('code')
   const destination = code ? `/account?code=${encodeURIComponent(code)}` : '/account'
+
+  useEffect(() => track('signup_view'), [])
 
   if (isSignedIn) return <Navigate to={destination} replace />
 
@@ -30,6 +33,7 @@ export const Signup = () => {
       const trimmedEmail = email.trim()
       await pb.collection('users').create({ name: name.trim(), email: trimmedEmail, password, passwordConfirm: password })
       await pb.collection('users').authWithPassword(trimmedEmail, password)
+      track('signup')
       pb.collection('users').requestVerification(trimmedEmail).catch(() => undefined)
       navigate(destination, { replace: true })
     } catch (err) {
