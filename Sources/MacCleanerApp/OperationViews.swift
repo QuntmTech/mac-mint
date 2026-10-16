@@ -7,6 +7,8 @@ struct PlanItemRow: View {
   let item: PlanItem
   var onRemove: (() -> Void)? = nil
   @EnvironmentObject private var model: AppViewModel
+  @State private var expanded = false
+  @State private var childNames: [String] = []
 
   var body: some View {
     HStack(spacing: 11) {
@@ -26,10 +28,30 @@ struct PlanItemRow: View {
             StatusPill(title: "Review", icon: "eye.fill", tint: .orange)
           }
         }
+        Text(item.kind.label + " · " + (item.ownerBundleID ?? "Owner not identified"))
+          .font(.caption2).foregroundStyle(.secondary)
+        Text(item.snapshot?.modified.map { "Last changed " + $0.formatted() } ?? "Change time not recorded")
+          .font(.caption2).foregroundStyle(.tertiary)
         Text(item.reason).font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
         Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
           .truncationMode(.middle)
+        if (try? item.url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+          DisclosureGroup("Inspect folder contents", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("First 100 direct children; use Finder for the complete folder.").foregroundStyle(.secondary)
+              ForEach(childNames, id: \.self) { Text($0).textSelection(.enabled) }
+            }.font(.caption)
+          }
+          .task(id: expanded) {
+            guard expanded else { return }
+            let url = item.url
+            childNames = await Task.detached(priority: .utility) {
+              do { return Array(try FileManager.default.contentsOfDirectory(atPath: url.path).sorted().prefix(100)) }
+              catch { return ["Contents could not be read: " + error.localizedDescription] }
+            }.value
+          }
+        }
       }
       Spacer(minLength: 8)
       Text(ByteFormatter.string(item.expectedBytes))
@@ -151,7 +173,7 @@ struct PlanReviewSheet: View {
       model.dequeue(removed)
     }
     plan = OperationPlanner.plan(title: plan.title, items: remaining,
-      ignoredPaths: model.ignoredPaths, excluded: plan.excluded)
+      ignoredPaths: model.ignoredPaths, excluded: plan.excluded, protecting: plan.keeperConstraints, validationItems: plan.validationItems)
   }
 
   private var header: some View {

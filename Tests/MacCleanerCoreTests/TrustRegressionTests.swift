@@ -191,6 +191,22 @@ final class TrustRegressionTests: XCTestCase {
     XCTAssertFalse(dev.value.contains { $0.group == .projects })
   }
 
+  func testKeeperEvidenceAppliesWhenOnlyAnotherModuleSelectsTheFolder() async throws {
+    let home = try temporaryHome()
+    defer { try? fm.removeItem(at: home) }
+    let kept = try write(home, "Album/keep.jpg")
+    let copy = try write(home, "Album/copy.jpg")
+    let protection = KeeperConstraint(source: copy, keeper: KeeperSnapshot(path: kept.path,
+      identity: FileSystem.fileIdentity(at: kept), snapshot: FileSnapshot.current(kept)))
+    let folder = item(kept.deletingLastPathComponent())
+    let reviewed = OperationPlanner.plan(title: "Storage only", items: [folder], protecting: [protection])
+    XCTAssertTrue(reviewed.items.isEmpty)
+    let raw = OperationPlan(title: "Direct coordinator", items: [folder], protecting: [protection])
+    let report = await OperationExecutor(trashService: FixtureTrash(home: home), safetyPolicy: SafetyPolicy(homeDirectory: home)).run(raw)
+    XCTAssertTrue(report.moved.isEmpty)
+    XCTAssertTrue(fm.fileExists(atPath: kept.path))
+  }
+
   func testActiveDeveloperEvidenceCannotBeOverriddenByCleanerParent() {
     let home = URL(fileURLWithPath: "/Users/test")
     let root = home.appendingPathComponent("Library/Developer/Xcode/DerivedData")

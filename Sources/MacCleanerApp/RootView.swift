@@ -99,7 +99,7 @@ struct RootView: View {
       ScanIssueSheet(issues: model.scanIssues)
     }
     .sheet(item: $model.pendingPlan) { plan in
-      PlanReviewSheet(plan: plan)
+      PlanReviewSheet(plan: model.normalizeReview(plan))
     }
     .sheet(item: $model.lastReport) { report in
       OperationReportSheet(report: report)

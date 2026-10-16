@@ -69,6 +69,7 @@ struct StartupItemsView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
               Text(item.label).fontWeight(.medium)
+              Text(possibleOwner(item.label)).font(.caption2).foregroundStyle(.secondary)
               Text(item.program ?? item.url.path)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -109,4 +110,12 @@ struct StartupItemsView: View {
       }
     }
   }
+  private func possibleOwner(_ label: String) -> String {
+    let matches = model.apps.filter { app in
+      guard let id = app.bundleIdentifier else { return false }
+      return label == id || label.hasPrefix(id + ".")
+    }
+    return matches.first.map { "Possible owner: " + $0.name } ?? "Owner not identified"
+  }
+
 }

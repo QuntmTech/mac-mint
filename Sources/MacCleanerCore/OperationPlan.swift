@@ -179,6 +179,7 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
 public struct KeeperConstraint: Hashable, Sendable {
   public let source: URL
   public let keeper: KeeperSnapshot
+  public init(source: URL, keeper: KeeperSnapshot) { self.source = source; self.keeper = keeper }
 }
 
 public struct OperationPlan: Identifiable, Sendable {
@@ -191,17 +192,19 @@ public struct OperationPlan: Identifiable, Sendable {
   public let excluded: [OperationFailure]
   /// Constraints survive collapsing a selected file into a selected ancestor.
   public let keeperConstraints: [KeeperConstraint]
+  public let validationItems: [PlanItem]
 
   public init(
     id: UUID = UUID(), title: String, items: [PlanItem], covered: [PlanItem] = [],
-    excluded: [OperationFailure] = []
+    excluded: [OperationFailure] = [], protecting: [KeeperConstraint] = [], validationItems: [PlanItem] = []
   ) {
     self.id = id
     self.title = title
     self.items = items
     self.covered = covered
     self.excluded = excluded
-    self.keeperConstraints = (items + covered).compactMap { item in
+    self.validationItems = validationItems
+    self.keeperConstraints = protecting + (items + covered).compactMap { item in
       item.keeper.map { KeeperConstraint(source: item.url, keeper: $0) }
     }
   }
@@ -222,12 +225,14 @@ public enum OperationPlanner {
   /// and moves anything currently excluded into `excluded` so it is never acted on.
   public static func plan(
     title: String, items: [PlanItem], ignoredPaths: Set<String> = [],
-    excluded: [OperationFailure] = []
+    excluded: [OperationFailure] = [], protecting: [KeeperConstraint] = [], validationItems: [PlanItem] = []
   ) -> OperationPlan {
     var rejected = excluded
     var eligible: [PlanItem] = []
     for item in items {
-      if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
+      if protecting.contains(where: { FileSystem.path(URL(fileURLWithPath: $0.keeper.path), isInsideOrEqual: item.url) }) {
+        rejected.append(OperationFailure(url: item.url, message: "This selection includes a copy you are keeping in Duplicates or Photos. Choose another keeper or select smaller items."))
+      } else if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
         rejected.append(OperationFailure(url: item.url, message: "Item is on your exclusion list."))
       } else if FileSystem.containsIgnoredDescendant(item.url, ignoredPaths: ignoredPaths) {
         rejected.append(
@@ -290,6 +295,6 @@ public enum OperationPlanner {
       }
       return threatened
     }
-    return OperationPlan(title: title, items: kept, covered: covered, excluded: rejected)
+    return OperationPlan(title: title, items: kept, covered: covered, excluded: rejected, protecting: protecting, validationItems: validationItems)
   }
 }

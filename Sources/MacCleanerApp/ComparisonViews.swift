@@ -7,6 +7,7 @@ struct DuplicateComparisonSheet: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var preview: URL?
+  @FocusState private var focusedFile: UUID?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
@@ -28,9 +29,10 @@ struct DuplicateComparisonSheet: View {
                 }.map(\.id))
               }
               Button("Preview (Space)") { preview = file.url }
-                .keyboardShortcut(.space, modifiers: [])
               Button("Reveal in Finder") { model.reveal(file.url) }
             }.frame(width: 260, alignment: .leading)
+              .focusable().focused($focusedFile, equals: file.id)
+              .onKeyPress(.space) { preview = file.url; return .handled }
           }
         }.padding(.vertical, 8)
       }

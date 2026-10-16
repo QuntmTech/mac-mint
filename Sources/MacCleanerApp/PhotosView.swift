@@ -231,6 +231,9 @@ private struct PhotoTile: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(photo.url.lastPathComponent)\(isKeeper ? ", kept" : isSelected ? ", selected" : "")")
     .accessibilityAddTraits(.isButton)
+    .accessibilityAction { if !isKeeper { model.togglePhoto(photo) } }
+    .focusable()
+    .onKeyPress(.space) { if !isKeeper { model.togglePhoto(photo) }; return .handled }
   }
 }
 

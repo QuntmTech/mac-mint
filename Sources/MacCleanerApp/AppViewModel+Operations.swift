@@ -48,20 +48,22 @@ extension AppViewModel {
   }
 
   func dequeue(_ item: PlanItem) {
-    let path = item.url.standardizedFileURL.path
-    for index in cleanupTargets.indices where cleanupTargets[index].url.standardizedFileURL.path == path {
+    let path = FileSystem.comparisonPath(item.url)
+    for index in cleanupTargets.indices where FileSystem.comparisonPath(cleanupTargets[index].url) == path {
       cleanupTargets[index].isSelected = false
     }
-    let ids = Set(
-      (duplicateGroups.flatMap(\.files) + largeFiles)
-        .filter { $0.url.standardizedFileURL.path == path }.map(\.id))
-    selectedDuplicateIDs.subtract(ids)
-    selectedLargeFileIDs.subtract(ids)
-    selectedStoragePaths.remove(path)
-    selectedDevIDs.remove(path)
-    selectedPhotoIDs.remove(path)
-    selectedOrphanIDs.remove(path)
-    selectedDownloadIDs.remove(path)
+    let ids = Set((duplicateGroups.flatMap(\.files) + largeFiles).filter {
+      FileSystem.comparisonPath($0.url) == path
+    }.map(\.id))
+    selectedDuplicateIDs.subtract(ids); selectedLargeFileIDs.subtract(ids)
+    func keepingOtherPaths(_ values: Set<String>) -> Set<String> {
+      Set(values.filter { FileSystem.comparisonPath(URL(fileURLWithPath: $0)) != path })
+    }
+    selectedStoragePaths = keepingOtherPaths(selectedStoragePaths)
+    selectedDevIDs = keepingOtherPaths(selectedDevIDs)
+    selectedPhotoIDs = keepingOtherPaths(selectedPhotoIDs)
+    selectedOrphanIDs = keepingOtherPaths(selectedOrphanIDs)
+    selectedDownloadIDs = keepingOtherPaths(selectedDownloadIDs)
   }
 
   func clearQueue() {
@@ -73,6 +75,30 @@ extension AppViewModel {
     selectedPhotoIDs = []
     selectedOrphanIDs = []
     selectedDownloadIDs = []
+  }
+
+  /// One final source of evidence for every module: keepers and conservative ownership
+  /// survive review, normalization, and direct execution from a different screen.
+  func normalizeReview(_ plan: OperationPlan) -> OperationPlan {
+    var protections: [KeeperConstraint] = []
+    for group in duplicateGroups {
+      guard let kept = group.files.first(where: { !selectedDuplicateIDs.contains($0.id) }) else { continue }
+      let keeper = KeeperSnapshot(path: kept.url.path, identity: kept.identity,
+        snapshot: FileSnapshot(size: kept.size, modified: kept.modifiedAt))
+      protections += group.files.filter { $0.id != kept.id }.map { KeeperConstraint(source: $0.url, keeper: keeper) }
+    }
+    for group in photoScan?.similarGroups ?? [] {
+      let kept = keeper(of: group)
+      guard !kept.isLibraryAsset else { continue }
+      let snapshot = KeeperSnapshot(path: kept.url.path, identity: kept.identity,
+        snapshot: FileSnapshot(size: kept.bytes, modified: kept.modified))
+      protections += group.photos.filter { !$0.isLibraryAsset && $0.id != kept.id }.map { KeeperConstraint(source: $0.url, keeper: snapshot) }
+    }
+    let evidence = cleanupTargets.map { PlanItem.cleanup($0) } + devItems.compactMap(PlanItem.developer)
+    let normalized = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered,
+      ignoredPaths: ignoredPaths, excluded: plan.excluded, protecting: protections, validationItems: evidence)
+    return OperationPlan(id: plan.id, title: normalized.title, items: normalized.items, covered: normalized.covered,
+      excluded: normalized.excluded, protecting: protections, validationItems: evidence)
   }
 
   // MARK: Building plans
@@ -184,6 +210,7 @@ extension AppViewModel {
   // MARK: Execution
 
   func execute(_ plan: OperationPlan) {
+    let plan = normalizeReview(plan)
     pendingPlan = nil
     guard !isWorking, !isScanning, !plan.isEmpty else { return }
     guard authorizeRemoval() else {

@@ -250,7 +250,7 @@ public actor OperationExecutor {
     }
     // Normalization may cover a more conservative child. Its ownership, identity and
     // recorded file metadata still constrain the ancestor that would move it.
-    for child in plan.covered where FileSystem.path(child.url, isInsideOrEqual: item.url) {
+    for child in plan.covered + plan.validationItems where FileSystem.path(child.url, isInsideOrEqual: item.url) {
       if let owner = child.ownerBundleID, isAppRunning(owner) {
         return skip("This folder includes data owned by an app that is open. Quit the app and review again.")
       }
