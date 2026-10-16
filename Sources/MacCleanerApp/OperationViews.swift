@@ -130,7 +130,7 @@ struct PlanReviewSheet: View {
         List {
           ForEach(grouped, id: \.0) { source, items in
             Section {
-              ForEach(items) { item in
+              ForEach(items, id: \.url) { item in
                 PlanItemRow(item: item, onRemove: { remove(item) })
                   .contextMenu {
                     Button("Keep this item") { remove(item) }
@@ -385,7 +385,7 @@ struct ReviewQueueView: View {
         List {
           ForEach(grouped, id: \.0) { source, items in
             Section {
-              ForEach(items) { item in
+              ForEach(items, id: \.url) { item in
                 PlanItemRow(item: item) { model.dequeue(item) }
               }
             } header: {

@@ -26,7 +26,7 @@ extension AppViewModel {
   var queuedLargeFiles: [LargeFile] { largeFiles.filter { selectedLargeFileIDs.contains($0.id) } }
 
   /// Unverified preview of what "Review everything" would include.
-  var queuedItems: [PlanItem] {
+  var sourceSelections: [PlanItem] {
     queuedCleanupTargets.map { PlanItem.cleanup($0) }
       + queuedDuplicateFiles.map { PlanItem.duplicate($0.file, keeper: $0.keeper) }
       + queuedLargeFiles.map(PlanItem.largeFile)
@@ -37,17 +37,17 @@ extension AppViewModel {
       + queuedDownloads.map(PlanItem.download)
   }
 
-  var queuedCount: Int {
-    queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
-      + queuedStorageNodes.count + queuedDevItems.count + queuedPhotoFileItems.items.count
-      + queuedOrphans.count + queuedDownloads.count
+  private var queueEstimate: OperationPlan {
+    OperationPlanner.plan(title: "Queue estimate", items: sourceSelections, ignoredPaths: ignoredPaths)
   }
 
-  var queuedBytes: Int64 {
-    OperationPlanner.plan(title: "Queue estimate", items: queuedItems, ignoredPaths: ignoredPaths).totalBytes
-  }
+  var queuedItems: [PlanItem] { queueEstimate.items }
+  var queuedCount: Int { queueEstimate.items.count }
+  var queuedBytes: Int64 { queueEstimate.totalBytes }
 
   func dequeue(_ item: PlanItem) {
+    let covered = sourceSelections.filter { FileSystem.path($0.url, isInsideOrEqual: item.url) }
+    keepQueuedFiles(covered.map(\.url))
     setFileSelection(item.url, selected: false)
     let path = FileSystem.comparisonPath(item.url)
     for index in cleanupTargets.indices where FileSystem.comparisonPath(cleanupTargets[index].url) == path {
@@ -68,7 +68,7 @@ extension AppViewModel {
   }
 
   func clearQueue() {
-    keepQueuedFiles(queuedItems.map(\.url))
+    keepQueuedFiles(sourceSelections.map(\.url))
     deselectAllCleanup()
     selectedDuplicateIDs = []
     selectedLargeFileIDs = []

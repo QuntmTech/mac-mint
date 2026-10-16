@@ -58,7 +58,7 @@ extension AppViewModel {
   }
 
   func synchronizeQueueSelections() {
-    let urls = queuedItems.map(\.url)
+    let urls = sourceSelections.map(\.url)
     for url in urls { setFileSelection(url, selected: true, userChoice: false) }
   }
 

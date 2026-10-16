@@ -36,6 +36,7 @@ enum SmokeTest {
     if !model.selectedLargeFileIDs.contains(b.id) || !model.selectedDownloadIDs.contains(download.id) {
       failures.append("Cross-module queue selection")
     }
+    if model.queuedCount != 1 || model.queuedBytes != 4096 { failures.append("Deduplicated queue totals") }
     model.setFileSelection(b.url, selected: false)
     if !model.selectedLargeFileIDs.isEmpty || !model.selectedDownloadIDs.isEmpty { failures.append("Cross-module keep") }
     model.duplicateGroups = [DuplicateGroup(fingerprint: "fixture", files: [a, b])]
