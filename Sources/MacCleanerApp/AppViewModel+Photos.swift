@@ -208,6 +208,7 @@ extension AppViewModel {
   func removePhotos(where shouldRemove: (PhotoFingerprint) -> Bool) {
     guard let scan = photoScan else { return }
     let photos = scan.photos.filter { !shouldRemove($0) }
+    guard photos.count != scan.photos.count else { return }
     let remaining = Set(photos.map(\.id))
     let groups = scan.similarGroups.compactMap { group -> SimilarPhotoGroup? in
       let members = group.photos.filter { remaining.contains($0.id) }

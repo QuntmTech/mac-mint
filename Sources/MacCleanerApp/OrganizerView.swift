@@ -14,6 +14,7 @@ struct OrganizerView: View {
   @State private var busy = false
   @State private var error: String?
   @State private var confirmation = false
+  @State private var showingActivation = false
   @State private var showHistory = false
   @State private var consentPayload: AIOrganizationRequest?
   @State private var consentText = ""
@@ -56,10 +57,11 @@ struct OrganizerView: View {
     .frame(minWidth: 700, idealWidth: 840, maxWidth: 960, minHeight: 520, idealHeight: 660)
     .task { await loadHistory(); if !SmokeTest.isRequested { await account.refreshAIStatus() } }
     .task(id: proposals) { await validate() }
-    .onChange(of: model.ignoredPaths) { _, _ in Task { await validate() } }
+    .onChange(of: model.ignoredPaths) { _, _ in cancelRequest(); Task { await validate() } }
     .onChange(of: model.aiEnabled) { _, enabled in if !enabled { cancelRequest() } }
     .onChange(of: account.isUnlocked) { _, unlocked in if !unlocked { cancelRequest() } }
     .onDisappear { cancelRequest() }
+    .sheet(isPresented: $showingActivation) { AccountAccessSheet() }
     .sheet(isPresented: $consentSheet) { consentView }
     .alert("Apply \(selected.count) reviewed changes?", isPresented: $confirmation) {
       Button("Cancel", role: .cancel) {}
@@ -194,6 +196,7 @@ struct OrganizerView: View {
     problems = issues; selected.subtract(issues.keys)
   }
   private func prepareAI(_ inventory: OrganizationInventory) {
+    guard account.isUnlocked else { showingActivation = true; return }
     let payload = AIOrganizationRequest(inventory)
     let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     consentText = (try? encoder.encode(payload)).map { String(decoding: $0, as: UTF8.self) } ?? ""
@@ -215,28 +218,25 @@ struct OrganizerView: View {
   }
   private func cancelRequest() { generation = UUID(); requestTask?.cancel(); requestTask = nil; consentPayload = nil; consentSheet = false; busy = false }
   private func apply() {
-    guard let inventory, !busy, !model.isWorking, !model.isScanning, model.exclusionsReady, model.requirePaidAccess() else { return }
+    guard let inventory, !busy, !model.isWorking, !model.isScanning, model.exclusionsReady else { return }
+    guard model.authorizeRemoval() else { showingActivation = true; return }
     let approved = proposals.filter { selected.contains($0.id) }
-    busy = true; model.isWorking = true; error = nil
+    busy = true; error = nil
     Task {
-      defer { busy = false; model.isWorking = false }
+      defer { busy = false }
       do {
-        _ = try await model.organizationStore.apply(inventory, proposals: approved, ignoredPaths: model.ignoredPaths)
+        _ = try await model.applyOrganization(inventory, proposals: approved)
         self.inventory = nil; proposals = []; selected = []; showHistory = true
-        // Files have changed; invalidate affected inventories rather than retain stale selections.
-        model.photoScan = nil; model.selectedPhotoIDs = []; model.storageScan = nil
-        model.largeFiles = []; model.selectedLargeFileIDs = []; model.duplicateGroups = []; model.selectedDuplicateIDs = []
-        model.invalidateAIReview()
       } catch { self.error = error.localizedDescription }
       await loadHistory()
     }
   }
   private func undo(_ record: OrganizationRecord) {
     guard !busy, !model.isWorking else { return }
-    busy = true; model.isWorking = true; error = nil
+    busy = true; error = nil
     Task {
-      defer { busy = false; model.isWorking = false }
-      do { _ = try await model.organizationStore.undo(recordID: record.id) }
+      defer { busy = false }
+      do { _ = try await model.undoOrganization(record.id) }
       catch { self.error = error.localizedDescription }
       await loadHistory()
     }

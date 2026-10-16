@@ -205,6 +205,13 @@ func runScanner(_ name: String, home: URL) async -> ScanResult {
         hash: hash, sharpness: Double(i % 1000), pixelWidth: 3000, pixelHeight: 2000))
     }
     let groups = PhotoAnalysis.group(photos)
+    let scan = PhotoScanResult(photos: photos, similarGroups: groups, blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: Task.isCancelled)
+    // Include the indexes used by rapid queue decisions in the photo memory/cancellation gate.
+    for photo in photos.prefix(1000) {
+      _ = scan.group(containing: photo.id)
+      _ = scan.fileCandidates(named: photo.url.lastPathComponent)
+      _ = scan.selectedPhotos(ids: [photo.id])
+    }
     (results, bytes, cancelled) = (groups.count, groups.reduce(0) { $0 + $1.reclaimableBytes }, Task.isCancelled)
   case "developer":
     let report = await DeveloperStorageScanner(homeDirectory: home).scan(projectRoots: [home.appendingPathComponent("Documents/Projects")])
