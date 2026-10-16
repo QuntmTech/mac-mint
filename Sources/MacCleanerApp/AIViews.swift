@@ -94,7 +94,7 @@ struct ExplainSheet: View {
       AIDisclaimer()
       Text("Sent: “\(target.request.identifier)” and its category. Unrecognized names are omitted. No path or file contents.")
         .font(.caption2)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
       HStack {
         Spacer()
@@ -118,7 +118,7 @@ struct ExplainSheet: View {
     switch verdict {
     case .safe: return StatusPill(title: "Rebuildable cache", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
     case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: AppTheme.warning)
-    case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: .red)
+    case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: AppTheme.danger)
     case .unknown: return StatusPill(title: "Not sure", icon: "questionmark.circle", tint: .gray)
     }
   }
@@ -364,7 +364,7 @@ struct AssistantView: View {
         }
       }
       if turn.role == .assistant {
-        Text("AI-generated — may be wrong").font(.caption2).foregroundStyle(.tertiary)
+        Text("AI-generated — may be wrong").font(.caption2).foregroundStyle(.secondary)
       }
     }
     .frame(maxWidth: .infinity, alignment: turn.role == .user ? .trailing : .leading)
@@ -431,7 +431,7 @@ struct AISettingsCard: View {
           "Automatic context uses sizes, storage categories and recognized app/tool identifiers. Personal folder paths and unrecognized names are omitted. Your typed questions and recent conversation are sent as written to MacMint's server and Anthropic. File contents are never sent. MacMint keeps usage counts for limits; its application database does not store chat transcripts."
         )
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
         DisclosureGroup("Preview automatic chat context") {
           Text(model.previewPayload(model.aiContext)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)

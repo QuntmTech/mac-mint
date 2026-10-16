@@ -223,7 +223,7 @@ struct AboutSettingsCard: View {
         if let date = updates.lastChecked {
           Text("Last checked \(date.formatted(.relative(presentation: .named)))")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
         }
       }
     }

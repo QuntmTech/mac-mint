@@ -20,11 +20,11 @@ struct PerformanceView: View {
             detail: "Across all cores", icon: "cpu", tint: AppTheme.accentText)
           gauge(
             "Swap", value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
-            detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: .blue)
+            detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: AppTheme.info)
           gauge(
             "Free space", value: ByteFormatter.string(monitor.snapshot.freeBytes),
             detail: "of \(ByteFormatter.string(monitor.snapshot.totalBytes))", icon: "internaldrive",
-            tint: monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accentText)
+            tint: monitor.snapshot.diskUsedFraction > 0.9 ? AppTheme.warning : AppTheme.accentText)
         }
 
         diskInsightsCard
@@ -113,7 +113,7 @@ struct PerformanceView: View {
             detail: insights.health == .failing
               ? "The drive reports it may fail soon. Back up now with Time Machine."
               : "Reported by the drive's self-monitoring (SMART).",
-            tint: insights.health == .failing ? .red : insights.health == .verified ? .green : .secondary)
+            tint: insights.health == .failing ? AppTheme.danger : insights.health == .verified ? AppTheme.accentText : .secondary)
           if let fs = insights.fileSystem {
             insightRow("File system", value: fs, detail: "Copies of a file on APFS can share space, so freed space may be less than a file's size.", tint: .secondary)
           }
@@ -156,9 +156,9 @@ struct PerformanceView: View {
 
   private var pressureTint: Color {
     switch monitor.snapshot.pressure {
-    case .normal: return .green
-    case .warning: return .orange
-    case .critical: return .red
+    case .normal: return AppTheme.accentText
+    case .warning: return AppTheme.warning
+    case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
   }

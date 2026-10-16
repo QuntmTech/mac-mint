@@ -68,7 +68,7 @@ struct HistoryView: View {
         .padding(.vertical, 4)
         if entry.restoresThroughPhotos { Button("Open Photos") { PhotoLibraryService.showInPhotos() } }
         ForEach(entry.paths, id: \.self) { path in
-          Text(path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+          Text(path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
       } else {
         ForEach(receipts, id: \.originalPath) { receipt in
@@ -120,14 +120,14 @@ struct HistoryView: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(url.lastPathComponent).font(.callout.weight(.medium)).lineLimit(1)
         Text(entry.restoredLocations?[receipt.originalPath] ?? url.deletingLastPathComponent().path)
-          .font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+          .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
       }
       Spacer()
       Text(ByteFormatter.string(receipt.bytes))
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
       if restored {
-        StatusPill(title: "Restored", icon: "checkmark", tint: .green)
+        StatusPill(title: "Restored", icon: "checkmark", tint: AppTheme.accentText)
         if let destination = entry.restoredLocations?[receipt.originalPath] {
           Button("Show") { model.reveal(URL(fileURLWithPath: destination)) }.controlSize(.small)
         }

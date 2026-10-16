@@ -114,7 +114,7 @@ struct OnboardingView: View {
       .onChange(of: lowSpaceAlerts) { _, enabled in
         if enabled { care.requestAuthorization() }
       }
-      Text("You can change these any time in Settings.").font(.caption).foregroundStyle(.tertiary)
+      Text("You can change these any time in Settings.").font(.caption).foregroundStyle(.secondary)
     }
     .toggleStyle(.switch)
   }

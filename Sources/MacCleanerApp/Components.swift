@@ -248,9 +248,9 @@ struct ScanIssueSheet: View {
 
   private func issueColor(_ severity: ScanIssueSeverity) -> Color {
     switch severity {
-    case .info: return .blue
-    case .warning: return .orange
-    case .error: return .red
+    case .info: return AppTheme.info
+    case .warning: return AppTheme.warning
+    case .error: return AppTheme.danger
     }
   }
 }

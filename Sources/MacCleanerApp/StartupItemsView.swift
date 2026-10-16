@@ -73,7 +73,7 @@ struct StartupItemsView: View {
             if item.runAtLoad {
               StatusPill(title: "Requests run at load", icon: "arrow.clockwise", tint: AppTheme.warning)
             }
-            if item.keepAlive { StatusPill(title: "Requests keep alive", icon: "heart.fill", tint: .red) }
+            if item.keepAlive { StatusPill(title: "Requests keep alive", icon: "heart.fill", tint: AppTheme.danger) }
             Text(item.scope)
               .font(.caption)
               .foregroundStyle(.secondary)

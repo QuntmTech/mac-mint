@@ -31,10 +31,10 @@ struct PlanItemRow: View {
         Text(item.kind.label + " · " + (item.ownerBundleID ?? "Owner not identified"))
           .font(.caption2).foregroundStyle(.secondary)
         Text(item.snapshot?.modified.map { "Last changed " + $0.formatted() } ?? "Change time not recorded")
-          .font(.caption2).foregroundStyle(.tertiary)
+          .font(.caption2).foregroundStyle(.secondary)
         Text(item.reason).font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
-        Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+        Text(item.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
           .truncationMode(.middle)
         if (try? item.url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
           DisclosureGroup("Inspect folder contents", isExpanded: $expanded) {
@@ -284,7 +284,7 @@ struct OperationReportSheet: View {
             .foregroundStyle(.secondary)
           Text("Moving to Trash may not change free space. Emptying Trash, snapshots, clones, and cloud storage affect the eventual savings.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
         }
         Spacer()
       }

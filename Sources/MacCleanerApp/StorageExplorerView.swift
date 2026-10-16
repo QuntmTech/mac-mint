@@ -32,7 +32,7 @@ struct StorageExplorerView: View {
             .foregroundStyle(.secondary)
           Text("Nothing is opened or downloaded — cloud-only files stay in the cloud.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
           Button("Cancel") { model.cancelCurrentOperation() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -88,7 +88,7 @@ struct StorageExplorerView: View {
       HStack(spacing: 4) {
         ForEach(Array(model.storageTrail.enumerated()), id: \.element.id) { index, node in
           if index > 0 {
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
           }
           Button {
             model.storagePath = index == 0 ? nil : node.id
@@ -303,7 +303,7 @@ struct StorageExplorerView: View {
       }
       Spacer()
       Text("Sizes show space used on this disk; freed space appears after emptying the Trash.")
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
     }
     .font(.caption)

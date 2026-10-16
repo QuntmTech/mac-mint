@@ -160,13 +160,13 @@ struct DeveloperView: View {
           Text(item.tool).font(.caption2).foregroundStyle(.secondary)
           costBadge(item.rebuild)
           if item.isActive {
-            StatusPill(title: "In use", icon: "bolt.fill", tint: .blue)
+            StatusPill(title: "In use", icon: "bolt.fill", tint: AppTheme.info)
           }
         }
         Text(item.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         if let date = item.lastUsed {
           Text("Last changed \(date.formatted(.relative(presentation: .named)))")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
         }
       }
       Spacer()
@@ -209,7 +209,7 @@ struct DeveloperView: View {
 
   private func costBadge(_ cost: RebuildCost) -> some View {
     switch cost {
-    case .rebuildable: return StatusPill(title: "Rebuilds", icon: "arrow.triangle.2.circlepath", tint: .green)
+    case .rebuildable: return StatusPill(title: "Rebuilds", icon: "arrow.triangle.2.circlepath", tint: AppTheme.accentText)
     case .redownload: return StatusPill(title: "Re-downloads", icon: "icloud.and.arrow.down", tint: .teal)
     case .review: return StatusPill(title: "Review", icon: "eye.fill", tint: AppTheme.warning)
     }

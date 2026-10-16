@@ -90,7 +90,7 @@ struct PhotosView: View {
       }
       Text("Analysis uses local thumbnails. Default previews stay local; a cloud preview downloads only when you request it.")
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
       Button("Cancel") { model.cancelCurrentOperation() }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

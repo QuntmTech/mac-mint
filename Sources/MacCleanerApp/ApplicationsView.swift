@@ -230,11 +230,11 @@ struct ApplicationsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                   Text(leftover.url.lastPathComponent).fontWeight(.medium)
                   Text(leftover.reason).font(.caption).foregroundStyle(.secondary)
-                  Text(leftover.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                  Text(leftover.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 if leftover.isShared {
-                  StatusPill(title: "Shared", icon: "person.2", tint: .purple)
+                  StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
                 }
                 StatusPill(
                   title: leftover.confidence.rawValue.capitalized,

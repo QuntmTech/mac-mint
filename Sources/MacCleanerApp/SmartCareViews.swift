@@ -22,7 +22,7 @@ struct SmartCareList: View {
           if let ran = model.smartCareRanAt {
             Text("Checked \(ran.formatted(.relative(presentation: .named)))")
               .font(.caption)
-              .foregroundStyle(.tertiary)
+              .foregroundStyle(.secondary)
           }
         }
         AIReviewPanel()
@@ -43,7 +43,7 @@ struct RecommendationRow: View {
   private var tint: Color {
     switch recommendation.confidence {
     case .safe: return AppTheme.accentText
-    case .likely: return .blue
+    case .likely: return AppTheme.info
     case .review: return AppTheme.warning
     }
   }
@@ -79,7 +79,7 @@ struct RecommendationRow: View {
         Text("≈ " + ByteFormatter.string(recommendation.bytes))
           .font(.callout.monospacedDigit().weight(.semibold))
         if recommendation.count > 1 {
-          Text("\(recommendation.count) items").font(.caption2).foregroundStyle(.tertiary)
+          Text("\(recommendation.count) items").font(.caption2).foregroundStyle(.secondary)
         }
       }
 
@@ -273,7 +273,7 @@ struct DownloadsView: View {
         HStack(spacing: 6) {
           Text(item.url.lastPathComponent).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
           if item.usage.neverOpened {
-            StatusPill(title: "Never opened", icon: "hand.thumbsup.fill", tint: .blue)
+            StatusPill(title: "Never opened", icon: "hand.thumbsup.fill", tint: AppTheme.info)
           }
         }
         Text(item.evidence).font(.caption).foregroundStyle(.secondary)

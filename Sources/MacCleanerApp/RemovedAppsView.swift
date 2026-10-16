@@ -97,10 +97,10 @@ struct RemovedAppsView: View {
             tint: item.confidence == .medium ? .green : .orange)
         }
         Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+        Text(item.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         if let modified = item.modified {
           Text("Last changed \(modified.formatted(.relative(presentation: .named)))")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
         }
       }
       Spacer()

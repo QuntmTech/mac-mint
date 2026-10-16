@@ -55,6 +55,7 @@ enum SmokeTest {
     model.isScanning = false
     model.assistantDraft = ""
     model.clearQueue(); model.largeFiles = []; model.downloadItems = []; model.duplicateGroups = []
+    model.statusMessage = "Ready when you are · Local inspection"
 
     let screenshotDirectory = ProcessInfo.processInfo.environment["MACMINT_SCREENSHOT_DIR"].map { URL(fileURLWithPath: $0) }
     if let screenshotDirectory { try? FileManager.default.createDirectory(at: screenshotDirectory, withIntermediateDirectories: true) }
@@ -79,13 +80,16 @@ enum SmokeTest {
           let hosting = NSHostingView(rootView: content)
           hosting.sizingOptions = []
           let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
-            styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            styleMask: [.borderless], backing: .buffered, defer: false)
+          // A content-only capture must not let SwiftUI install a titlebar toolbar
+          // and change the host's content size after layout starts.
           window.isReleasedWhenClosed = false
           window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
           window.contentView = hosting
           window.setContentSize(NSSize(width: width, height: height))
           window.orderFront(nil)
           RunLoop.current.run(until: Date().addingTimeInterval(0.12))
+          hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
           hosting.layoutSubtreeIfNeeded()
           if (name.contains("-Empty-") || name.contains("-Populated-") || name.contains("-Compact-")), layoutProbe.frames.count != 2 {
             failures.append("Missing workspace layout evidence: " + name)
@@ -98,6 +102,7 @@ enum SmokeTest {
           }
           if abs(hosting.bounds.width - width) > 1 || abs(hosting.bounds.height - height) > 1 {
             failures.append("Window exceeded requested size: " + name)
+            print("✗ Host \(name): \(hosting.bounds), expected \(width) × \(height)")
           }
           if let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) {
             hosting.cacheDisplay(in: hosting.bounds, to: bitmap)

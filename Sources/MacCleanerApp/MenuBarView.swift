@@ -94,9 +94,9 @@ struct MenuBarView: View {
 
   private var pressureColor: Color {
     switch monitor.snapshot.pressure {
-    case .normal: return .green
-    case .warning: return .orange
-    case .critical: return .red
+    case .normal: return AppTheme.accentText
+    case .warning: return AppTheme.warning
+    case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
   }
@@ -120,7 +120,7 @@ struct MetricTile: View {
       Text(value).font(.system(.callout, design: .rounded).weight(.bold)).foregroundStyle(tint)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
-      Text(detail).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).minimumScaleFactor(0.7)
+      Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(8)

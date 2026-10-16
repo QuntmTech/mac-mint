@@ -31,7 +31,7 @@ struct DuplicatesView: View {
             .foregroundStyle(.secondary)
           Text("Large files are streamed in chunks to keep memory use bounded.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
           Button("Cancel") { model.cancelCurrentOperation() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -181,7 +181,7 @@ struct DuplicatesView: View {
       }
       Spacer()
       if !selected {
-        StatusPill(title: "Keep", icon: "checkmark", tint: .green)
+        StatusPill(title: "Keep", icon: "checkmark", tint: AppTheme.accentText)
       }
       Text(ByteFormatter.string(file.size))
         .font(.callout.monospacedDigit())
