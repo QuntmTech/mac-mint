@@ -84,11 +84,17 @@ final class AccountLifecycleTests: XCTestCase {
       await fixture.hold(suffix)
       let signingIn = Task { await store.signIn(email: "fixture@example.invalid", password: "fixture") }
       try await waitUntilPaused(fixture)
-      await store.signOut()
+      let signingOut = Task { await store.signOut() }
+      // Sign-out clears local access before waiting for an outstanding activation.
+      for _ in 0..<100 {
+        if store.phase == .signedOut { break }
+        try await Task.sleep(for: .milliseconds(10))
+      }
       XCTAssertEqual(store.phase, .signedOut)
       XCTAssertFalse(store.isBusy)
       await fixture.resumeVerification()
       await signingIn.value
+      await signingOut.value
       XCTAssertEqual(store.phase, .signedOut, suffix)
       XCTAssertNil(tokens.value, suffix)
       XCTAssertFalse(store.isUnlocked, suffix)

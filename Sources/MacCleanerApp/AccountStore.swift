@@ -57,6 +57,7 @@ final class AccountStore: ObservableObject {
   private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
   private var deviceReleaseTask: Task<Void, Never>?
+  private var activationTask: Task<AccountSnapshot, Error>?
 
   init(supportDirectory: URL, client: AccountClient = AccountClient(),
     deviceInfo: DeviceInfo? = nil, tokenStorage: AccountTokenStorage? = nil,
@@ -142,8 +143,10 @@ final class AccountStore: ObservableObject {
     signOutLocally(message: nil)
     if let previousToken {
       let previousRelease = deviceReleaseTask
+      let pendingActivation = activationTask
       let release = Task { [client, deviceInfo] in
         await previousRelease?.value
+        _ = try? await pendingActivation?.value
         try? await client.deactivate(deviceId: deviceInfo.deviceId, token: previousToken)
       }
       deviceReleaseTask = release
@@ -205,7 +208,9 @@ final class AccountStore: ObservableObject {
   /// Registers this Mac and maps the server's answer to a phase.
   private func activate(token: String, generation: UUID) async throws {
     do {
-      let result = try await client.activate(deviceInfo, token: token)
+      let activation = Task { [client, deviceInfo] in try await client.activate(deviceInfo, token: token) }
+      activationTask = activation
+      let result = try await activation.value
       guard generation == sessionGeneration else { return }
       apply(result)
     } catch let error as AccountAPIError where error.code == "no_active_plan" {
