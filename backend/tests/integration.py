@@ -25,7 +25,8 @@ class StripeFixture(BaseHTTPRequestHandler):
         order = fields['metadata[macmint_order]'][0]
         session_id = 'cs_test_' + order
         sessions.setdefault(session_id, dict(id=session_id, metadata=dict(macmint_order=order), client_reference_id=fields['client_reference_id'][0],
-            mode='payment', payment_status='unpaid', currency='usd', amount_total=1900, livemode=False,
+            mode='payment', payment_status='unpaid', status='open', expires_at=int(time.time()) + 3600,
+            currency='usd', amount_total=1900, livemode=False,
             line_items=dict(has_more=False, data=[dict(quantity=1, price=dict(id='price_fixture'))]), url='https://checkout.stripe.com/c/pay/' + session_id))
         self.respond(sessions[session_id])
 
@@ -102,9 +103,19 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert call('/api/macmint/devices/activate', dict(device_id=active), token)[0] == 409
             assert call('/api/macmint/devices/activate', dict(device_id=active, reactivate=True), token)[0] == 200
             print('PASS: concurrent activation respects last slot; removed device requires explicit reactivation')
-            status, checkout = call('/api/macmint/checkout', dict(request_key=str(uuid.uuid4())), token)
+            request_key = str(uuid.uuid4())
+            status, checkout = call('/api/macmint/checkout', dict(request_key=request_key), token)
             assert status == 200, (status, checkout)
             session = next(iter(sessions.values()))
+            assert call('/api/macmint/checkout', dict(request_key=request_key), token) == (200, checkout)
+            session['status'] = 'expired'
+            status, expired = call('/api/macmint/checkout', dict(request_key=request_key), token)
+            assert status == 409 and expired['error'] == 'checkout_expired', (status, expired)
+            session['status'] = 'complete'
+            status, complete = call('/api/macmint/checkout', dict(request_key=request_key), token)
+            assert status == 409 and complete['error'] == 'checkout_complete', (status, complete)
+            assert len(sessions) == 1
+            print('PASS: checkout reuses its saved session; expired and completed retries never create another session')
             def webhook(event_type, valid=True):
                 event = dict(type=event_type, data=dict(object=dict(id=session['id'], metadata=session['metadata'])))
                 raw = json.dumps(event).encode(); timestamp = str(int(time.time()))
@@ -120,6 +131,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert all(status == 200 for status, _ in events), events
             assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == 1
             assert db.execute('SELECT state FROM checkout_orders').fetchone()[0] == 'fulfilled'
+            assert call('/api/macmint/checkout', dict(request_key=request_key), token)[1]['error'] == 'checkout_complete'
             assert db.execute("SELECT id FROM _collections WHERE name='licenses'").fetchone()[0] == 'legacy_licenses'
             db.close()
             print('PASS: real raw-body HMAC, unpaid -> paid fulfillment, 8 duplicate concurrent webhooks grant one license')

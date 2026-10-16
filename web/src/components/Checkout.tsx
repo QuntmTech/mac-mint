@@ -8,6 +8,7 @@ export const Checkout = ({ userId, verified }: { userId: string; verified: boole
   const [offer, setOffer] = useState<Offer | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [completed, setCompleted] = useState(false)
   useEffect(() => {
     let active = true
     pb.send<Offer>('/api/macmint/checkout/config', { method: 'GET' })
@@ -31,6 +32,8 @@ export const Checkout = ({ userId, verified }: { userId: string; verified: boole
       if (destination.protocol !== 'https:' || destination.hostname !== 'checkout.stripe.com') throw new Error('Checkout address could not be verified.')
       window.location.assign(destination.href)
     } catch (err) {
+      const code = (err as { response?: { error?: string } })?.response?.error
+      setCompleted(code === 'checkout_complete')
       setError(errorMessage(err, 'Checkout could not be opened. Retry to resume the same payment session.'))
       setBusy(false)
     }
@@ -40,7 +43,8 @@ export const Checkout = ({ userId, verified }: { userId: string; verified: boole
     <p className="text-sm text-slate-500">One payment. Review the price and payment details in secure Stripe checkout before confirming. Your plan activates after payment confirmation.</p>
     {!verified && <p className="text-sm text-amber-700">Verify your account email before purchasing.</p>}
     {error && <Alert>{error}</Alert>}
-    <Button onClick={purchase} busy={busy} disabled={!verified}>Continue to checkout</Button>
-    {error && <button className="block text-sm underline" onClick={() => { sessionStorage.removeItem(`mm_checkout_${userId}`); setError(null) }}>Start a new checkout attempt</button>}
+    <Button onClick={purchase} busy={busy} disabled={!verified || completed}>Continue to checkout</Button>
+    {completed && <button className="block text-sm underline" onClick={() => window.location.reload()}>Refresh account</button>}
+    {error && !completed && <button className="block text-sm underline" onClick={() => { sessionStorage.removeItem(`mm_checkout_${userId}`); setError(null) }}>Start a new checkout attempt</button>}
   </div>
 }

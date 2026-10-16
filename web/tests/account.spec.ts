@@ -8,6 +8,7 @@ async function backend(page: Page, signedIn = false, verified = true) {
     id: user.id, collectionId: user.collectionId, type: 'auth' }]
     .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.') + '.fixture'
   const state = { user, token, verificationAttempts: 0, verificationFails: false,
+    checkoutError: '' as '' | 'checkout_complete' | 'checkout_expired',
     checkoutRequests: [] as { request_key: string }[], analytics: 0, unexpected: [] as string[] }
   if (signedIn) await page.addInitScript(auth => {
     if (location.origin === 'http://127.0.0.1:4173') localStorage.setItem('pocketbase_auth', JSON.stringify(auth))
@@ -28,6 +29,9 @@ async function backend(page: Page, signedIn = false, verified = true) {
     if (path === '/api/macmint/checkout/config') return respond({ enabled: true, duration_days: 365, max_devices: 3 })
     if (path === '/api/macmint/checkout') {
       state.checkoutRequests.push(route.request().postDataJSON())
+      if (state.checkoutError) return respond({ error: state.checkoutError, message: state.checkoutError === 'checkout_complete'
+        ? 'This checkout is already complete or processing. Refresh your account to check access; do not pay again.'
+        : 'This checkout attempt expired. Start a new checkout attempt to continue.' }, 409)
       return respond({ url: state.checkoutRequests.length === 1 ? 'https://attacker.invalid/checkout' : 'https://checkout.stripe.com/c/pay/cs_test_fixture' })
     }
     if (path.endsWith('/request-verification')) {
@@ -107,5 +111,23 @@ test('invalid reset links give a recoverable error without changing the password
   await expect(page.getByRole('alert')).toContainText('invalid or has expired')
   await page.getByRole('link', { name: 'Request a new link' }).click()
   await expect(page).toHaveURL(/\/forgot-password$/)
+  expect(state.unexpected).toEqual([])
+})
+
+test('completed checkout prevents another payment attempt and expired checkout can restart explicitly', async ({ page }) => {
+  const state = await backend(page, true)
+  state.checkoutError = 'checkout_expired'
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('expired')
+  await page.getByRole('button', { name: 'Start a new checkout attempt' }).click()
+  state.checkoutError = 'checkout_complete'
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('do not pay again')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Refresh account' })).toBeVisible()
+  expect(state.checkoutRequests).toHaveLength(2)
+  expect(state.checkoutRequests[0].request_key).not.toBe(state.checkoutRequests[1].request_key)
   expect(state.unexpected).toEqual([])
 })

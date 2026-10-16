@@ -9,6 +9,7 @@ global.$security = {
   randomStringWithAlphabet: n => 'A'.repeat(n),
 }
 global.$os = { getenv: () => '' }
+global.toString = value => String(value)
 class Row {
   constructor(collection) { this.collection = collection; this.values = {}; this.id = '' }
   set(k, v) { this.values[k] = v }
@@ -20,11 +21,13 @@ function fixture() {
   const rows = [], order = new Row('checkout_orders')
   order.id = 'order1'
   Object.entries({ user: 'user1', price_id: 'price_test', amount_minor: 1900, currency: 'usd', livemode: false,
-    plan: 'pro', duration_days: 365, max_devices: 3, state: 'pending', session_id: 'cs_test_fixture' }).forEach(([k, v]) => order.set(k, v))
+    plan: 'pro', duration_days: 365, max_devices: 3, state: 'pending', session_id: 'cs_test_fixture', created: new Date().toISOString() }).forEach(([k, v]) => order.set(k, v))
   rows.push(order)
   const app = {
     findRecordById(collection, id) { const r = rows.find(r => r.collection === collection && r.id === id); if (!r) throw Error('missing'); return r },
-    findFirstRecordByFilter(collection, filter, args) {
+    findFirstRecordByFilter(collection, filter, args = {}) {
+      if (collection === 'app_config') { const r = new Row(collection); r.set('value', JSON.stringify({ enabled: true, ...order.values })); return r }
+      if (collection === 'app_releases') return new Row(collection)
       if (collection === 'app_secrets') { const r = new Row(collection); r.set('value', 'fixture-only'); return r }
       const r = rows.find(r => r.collection === collection && (!args.u || r.get('user') === args.u)); if (!r) throw Error('missing'); return r
     },
@@ -33,6 +36,7 @@ function fixture() {
     runInTransaction(fn) { fn(this) },
   }
   const session = { id: 'cs_test_fixture', metadata: { macmint_order: order.id }, mode: 'payment', payment_status: 'paid',
+    status: 'open', expires_at: Math.floor(Date.now() / 1000) + 3600, url: 'https://checkout.stripe.com/c/pay/fixture',
     client_reference_id: 'user1', amount_total: 1900, currency: 'usd', livemode: false,
     line_items: { has_more: false, data: [{ quantity: 1, price: { id: 'price_test' } }] } }
   global.$http = { send: () => ({ statusCode: 200, json: session }) }
@@ -68,4 +72,39 @@ test('fulfillment retrieves authoritative state and rejects amount, user, mode, 
   }
   const f = fixture(); f.session.line_items.data[0].price.id = 'price_other'
   assert.throws(() => payments.fulfill(f.app, { id: f.session.id }))
+})
+
+test('retries retrieve the recorded open session without creating another checkout', () => {
+  const f = fixture(); f.session.payment_status = 'unpaid'
+  const requests = []
+  global.$http = { send: req => { requests.push(req); return { statusCode: 200, json: f.session } } }
+  const user = { id: 'user1', get: () => 'fixture@example.invalid' }
+  assert.equal(payments.checkout(f.app, user, 'stable-request'), f.session.url)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].method, 'GET')
+  assert.ok(requests[0].url.endsWith('/checkout/sessions/cs_test_fixture'))
+  f.session.status = 'expired'
+  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_expired')
+  f.session.status = 'complete'
+  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_complete')
+  assert.ok(requests.every(r => r.method === 'GET'))
+})
+
+test('fulfilled and old unbound orders never POST a new session after the retention window', () => {
+  const f = fixture(), user = { id: 'user1', get: () => 'fixture@example.invalid' }
+  let calls = 0
+  global.$http = { send: () => { calls++; throw Error('Must not call provider') } }
+  f.order.set('state', 'fulfilled')
+  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_complete')
+  f.order.set('state', 'created'); f.order.set('session_id', '')
+  f.order.set('created', new Date(Date.now() - 24 * 3600000).toISOString())
+  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_expired')
+  assert.equal(calls, 0)
+})
+
+test('inconsistent lifetime and duration configuration closes checkout', () => {
+  const f = fixture(); f.order.set('plan', 'lifetime')
+  assert.equal(payments.configuration(f.app), null)
+  f.order.set('duration_days', 0)
+  assert.equal(payments.configuration(f.app).plan, 'lifetime')
 })

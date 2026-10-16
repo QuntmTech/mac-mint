@@ -27,6 +27,7 @@ function configuration(app) {
     !/^[a-z]{3}$/.test(cfg.currency || "") || !Number.isInteger(cfg.amount_minor) || cfg.amount_minor <= 0 ||
     ["pro", "lifetime"].indexOf(cfg.plan) < 0 || !Number.isInteger(cfg.duration_days) || cfg.duration_days < 0 ||
     !Number.isInteger(cfg.max_devices) || cfg.max_devices < 1 || cfg.max_devices > 100 || typeof cfg.livemode !== "boolean") return null
+  if ((cfg.plan === "lifetime") !== (cfg.duration_days === 0)) return null
   if (!secret(app, "stripe_restricted_key", "STRIPE_RESTRICTED_KEY") || !secret(app, "stripe_webhook_secret", "STRIPE_WEBHOOK_SECRET")) return null
   // Customers must have a validated consumer build to download before checkout opens.
   try { app.findFirstRecordByFilter("app_releases", "published = true && validated = true && notarized = true && channel = 'stable'") }
@@ -58,6 +59,17 @@ function checkout(app, user, key) {
   if (!cfg) throw Error("Checkout is not open yet.")
   const client = new StripeClient(app)
   const order = orderForRequest(app, user, key, cfg)
+  if (order.get("state") === "fulfilled") throw { code: "checkout_complete" }
+  // Retrieve an existing session instead of POSTing again. Stripe can prune idempotency
+  // keys after 24 hours; the durable order/session association lasts beyond that window.
+  if (order.get("session_id")) {
+    const existing = client.send("GET", "checkout/sessions/" + encodeURIComponent(order.get("session_id")))
+    return checkoutURL(existing, order, user)
+  }
+  // If a response was lost before its session ID committed, only retry within Stripe's
+  // guaranteed retention window. Never create an orphan replacement for an old order.
+  const created = Date.parse(String(order.get("created") || ""))
+  if (!Number.isFinite(created) || Date.now() - created >= 23 * 3600000) throw { code: "checkout_expired" }
   const price = client.send("GET", "prices/" + encodeURIComponent(order.get("price_id")))
   if (!price.active || price.type !== "one_time" || price.unit_amount !== order.get("amount_minor") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
   const session = client.send("POST", "checkout/sessions", {
@@ -67,7 +79,7 @@ function checkout(app, user, key) {
     success_url: "https://macmint.co/account?checkout=processing", cancel_url: "https://macmint.co/account?checkout=cancelled",
     integration_identifier: "macmint_hosted_" + order.id.slice(0, 8).replace(/\d/g, n => "abcdefghij"[Number(n)]),
   }, "macmint-order-" + order.id)
-  if (!/^cs_[A-Za-z0-9_]+$/.test(session.id || "") || !/^https:\/\/checkout\.stripe\.com\//.test(session.url || "")) throw Error("Checkout could not be opened.")
+  if (!/^cs_[A-Za-z0-9_]+$/.test(session.id || "")) throw Error("Checkout could not be opened.")
   app.runInTransaction(tx => {
     const current = tx.findRecordById("checkout_orders", order.id)
     if (current.get("session_id") && current.get("session_id") !== session.id) throw Error("Checkout conflict")
@@ -75,6 +87,16 @@ function checkout(app, user, key) {
     if (current.get("state") !== "fulfilled") current.set("state", "pending")
     tx.save(current)
   })
+  return checkoutURL(session, app.findRecordById("checkout_orders", order.id), user)
+}
+function checkoutURL(session, order, user) {
+  if (session.id !== order.get("session_id") || session.mode !== "payment" ||
+      session.client_reference_id !== user.id || !session.metadata || session.metadata.macmint_order !== order.id ||
+      session.livemode !== order.get("livemode")) throw Error("Checkout session mismatch")
+  if (session.status === "complete" || session.payment_status === "paid") throw { code: "checkout_complete" }
+  if (session.status === "expired" || session.expires_at * 1000 <= Date.now() || order.get("state") === "failed") throw { code: "checkout_expired" }
+  if (session.status !== "open" || !Number.isFinite(session.expires_at) ||
+      !/^https:\/\/checkout\.stripe\.com\//.test(session.url || "")) throw Error("Checkout could not be opened.")
   return session.url
 }
 function fulfill(app, session) {

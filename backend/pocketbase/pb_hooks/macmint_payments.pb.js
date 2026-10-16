@@ -13,7 +13,11 @@ routerAdd("POST", "/api/macmint/checkout", e => {
   const key = String(lib.body(e).request_key || "")
   if (!/^[a-f0-9-]{36}$/.test(key)) return e.json(400, { error: "bad_request", message: "Missing checkout request ID." })
   try { return e.json(200, { url: payments.checkout(e.app, e.auth, key) }) }
-  catch (_) { return e.json(503, { error: "checkout_unavailable", message: "Checkout could not be opened. Please try again later." }) }
+  catch (error) {
+    if (error.code === "checkout_complete") return e.json(409, { error: "checkout_complete", message: "This checkout is already complete or processing. Refresh your account to check access; do not pay again." })
+    if (error.code === "checkout_expired") return e.json(409, { error: "checkout_expired", message: "This checkout attempt expired. Start a new checkout attempt to continue." })
+    return e.json(503, { error: "checkout_unavailable", message: "Checkout could not be opened. Please try again later." })
+  }
 }, $apis.requireAuth("users"))
 
 routerAdd("POST", "/api/macmint/stripe/webhook", e => {
