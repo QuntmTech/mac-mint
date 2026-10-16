@@ -84,6 +84,9 @@ struct RootView: View {
     } message: { conflict in
       Text(conflict.message)
     }
+    .sheet(isPresented: $model.showingCommandPalette) {
+      CommandPalette()
+    }
     .sheet(isPresented: $showingOnboarding) {
       OnboardingView()
     }

@@ -129,6 +129,12 @@ struct LargeFilesView: View {
       .frame(width: 150)
 
       Spacer()
+      if model.largeFilesViaSpotlight, !model.largeFiles.isEmpty {
+        StatusPill(title: "From Spotlight", icon: "bolt.fill", tint: AppTheme.accentText)
+          .help("Instant results from the Spotlight index, each re-checked on disk. Run a full scan to include unindexed folders.")
+        Button("Full Scan") { model.scanLargeFiles(fullScan: true) }
+          .disabled(model.isScanning || model.isWorking)
+      }
       Button(model.isScanning ? "Scanning…" : "Scan") { model.scanLargeFiles() }
         .buttonStyle(.borderedProminent)
         .disabled(model.isScanning || model.isWorking)

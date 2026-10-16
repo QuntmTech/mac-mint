@@ -153,6 +153,11 @@ struct DeveloperView: View {
         Color.clear.frame(width: 20)
       }
 
+      OwnerIcon(
+        hint: OwnerResolver.toolBundleIDs[item.tool].map { OwnerHint(bundleID: $0, displayName: item.tool) }
+          ?? item.url.flatMap { OwnerResolver.hint(for: $0) },
+        fallbackSymbol: "hammer", size: 28)
+
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(item.title).fontWeight(.medium).lineLimit(1)

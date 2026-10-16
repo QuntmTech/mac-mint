@@ -89,7 +89,13 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Related-data deletion is restricted to known user Library support roots.
 - App and selected leftovers move to Trash; running apps must be quit first, and related data stays untouched if moving the app fails.
 
+### Polish
+- **Owners:** cleanup and developer rows show the app that owns the data (name and icon), from explicit owners, bundle-ID folder names, or a curated list of well-known caches.
+- **⌘K command palette:** jump to any screen, run common actions, or find an item from current results.
+- **Disk insights** (Performance): drive health (SMART), file system, purgeable space, and local Time Machine snapshots. These are explained, never "cleaned".
+
 ### Large Files
+- Instant results from the Spotlight index, each re-checked on disk and with the same exclusions applied. Falls back to a full walk, and **Full Scan** includes unindexed folders.
 - User-selectable scan root.
 - Configurable thresholds: 100 MB, 500 MB, 1 GB, or 5 GB.
 - `~/Library` and `.Trash` are excluded from generic review scans.

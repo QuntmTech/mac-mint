@@ -63,6 +63,8 @@ final class AppViewModel: ObservableObject {
   @Published var lastScanDate: Date?
   @Published var lastScanDuration: TimeInterval?
   @Published var selectedLargeFileIDs: Set<UUID> = []
+  @Published var largeFilesViaSpotlight = false
+  @Published var showingCommandPalette = false
   @Published var storageRoot = FileManager.default.homeDirectoryForCurrentUser
   @Published var storageScan: StorageScan?
   @Published var storagePath: String?
@@ -257,12 +259,29 @@ final class AppViewModel: ObservableObject {
       : "Could not request \(app.name) to quit"
   }
 
-  func scanLargeFiles() {
+  /// Spotlight answers first (verified against the disk); `fullScan` walks every folder instead.
+  func scanLargeFiles(fullScan: Bool = false) {
     guard !isScanning, !isWorking else { return }
     beginScan(title: "Large Files", message: "Scanning \(largeFileRoot.lastPathComponent)…")
 
     currentTask = Task { [weak self] in
       guard let self else { return }
+      if !fullScan,
+        let instant = await SpotlightLargeFiles.search(
+          in: largeFileRoot, minimumSize: largeFileMinimum, excludedRoots: defaultReviewExclusions,
+          ignoredPaths: ignoredPaths)
+      {
+        guard !Task.isCancelled else {
+          finishCancelledOperation()
+          return
+        }
+        largeFiles = instant
+        largeFilesViaSpotlight = true
+        selectedLargeFileIDs = []
+        scanIssues = []
+        finishScan(message: "Found \(instant.count) large file(s) instantly via Spotlight")
+        return
+      }
       let report = await largeFileFinder.findReport(
         in: [largeFileRoot],
         minimumSize: largeFileMinimum,
@@ -274,6 +293,7 @@ final class AppViewModel: ObservableObject {
         return
       }
       largeFiles = report.value
+      largeFilesViaSpotlight = false
       selectedLargeFileIDs = []
       scanIssues = report.issues
       lastScanDuration = report.duration
