@@ -309,7 +309,8 @@ final class MacCleanerCoreTests: XCTestCase {
 private actor RecordingTrashService: TrashService {
   private(set) var urls: [URL] = []
 
-  func trash(_ url: URL) async throws {
+  func trash(_ url: URL) async throws -> URL? {
     urls.append(url)
+    return nil
   }
 }

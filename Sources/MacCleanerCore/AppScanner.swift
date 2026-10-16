@@ -27,14 +27,14 @@ public actor AppScanner {
   public func installedAppsReport(extraRoots: [URL] = []) async -> ScanReport<[AppRecord]> {
     let started = Date()
     var records: [AppRecord] = []
-    var issues: [ScanIssue] = []
+    let collector = IssueCollector()
     var seen: Set<String> = []
 
     for root in applicationRoots + extraRoots {
       if Task.isCancelled {
         return ScanReport(
-          value: sort(records), issues: issues, duration: Date().timeIntervalSince(started),
-          wasCancelled: true)
+          value: sort(records), issues: collector.issues,
+          duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
       guard fileManager.fileExists(atPath: root.path) else { continue }
 
@@ -46,47 +46,55 @@ public actor AppScanner {
           ],
           options: [.skipsHiddenFiles, .skipsPackageDescendants],
           errorHandler: { url, error in
-            issues.append(
+            collector.append(
               ScanIssue(area: "Applications", path: url.path, message: error.localizedDescription))
             return true
           }
         )
       else {
-        issues.append(
+        collector.append(
           ScanIssue(
             area: "Applications", path: root.path,
             message: "Could not enumerate this Applications folder."))
         continue
       }
 
-      for case let url as URL in enumerator {
-        if Task.isCancelled {
-          return ScanReport(
-            value: sort(records), issues: issues, duration: Date().timeIntervalSince(started),
-            wasCancelled: true)
-        }
-        guard url.pathExtension.lowercased() == "app" else { continue }
-        let path = url.standardizedFileURL.path
-        guard seen.insert(path).inserted else { continue }
+      var apps: [URL] = []
+      FileSystem.walk(enumerator) { url in
+        if Task.isCancelled { return .stop }
+        guard url.pathExtension.lowercased() == "app" else { return .continue }
+        if seen.insert(url.standardizedFileURL.path).inserted { apps.append(url) }
+        return .skipDescendants
+      }
+      for url in apps {
+        if Task.isCancelled { break }
         records.append(record(for: url))
       }
     }
 
     return ScanReport(
-      value: sort(records), issues: issues, duration: Date().timeIntervalSince(started))
+      value: sort(records), issues: collector.issues, duration: Date().timeIntervalSince(started),
+      wasCancelled: Task.isCancelled)
   }
 
-  public func leftovers(for app: AppRecord, ignoredPaths: Set<String> = []) async -> [AppLeftover] {
-    await leftoversReport(for: app, ignoredPaths: ignoredPaths).value
+  public func leftovers(
+    for app: AppRecord, otherBundleIDs: Set<String> = [], ignoredPaths: Set<String> = []
+  ) async -> [AppLeftover] {
+    await leftoversReport(for: app, otherBundleIDs: otherBundleIDs, ignoredPaths: ignoredPaths)
+      .value
   }
 
-  public func leftoversReport(for app: AppRecord, ignoredPaths: Set<String> = []) async
-    -> ScanReport<[AppLeftover]>
-  {
+  /// `otherBundleIDs` are the bundle identifiers of every other installed app. They keep a
+  /// sibling (e.g. `com.vendor.app.pro` vs `com.vendor.app`) from being matched as this app's data.
+  public func leftoversReport(
+    for app: AppRecord, otherBundleIDs: Set<String> = [], ignoredPaths: Set<String> = []
+  ) async -> ScanReport<[AppLeftover]> {
     let started = Date()
     let roots = leftoverRoots()
     let bundleID = app.bundleIdentifier?.lowercased()
+    let others = Set(otherBundleIDs.map { $0.lowercased() }).subtracting(bundleID.map { [$0] } ?? [])
     let appTokens = meaningfulTokens(in: app.name)
+    let context = MatchContext(bundleID: bundleID, appTokens: appTokens, otherBundleIDs: others)
     var matches: [AppLeftover] = []
     var issues: [ScanIssue] = []
     var seen: Set<String> = []
@@ -111,7 +119,7 @@ public actor AppScanner {
           let entryPath = entry.standardizedFileURL.path
           guard !isIgnored(entryPath, ignoredPaths: ignoredPaths) else { continue }
 
-          if let match = match(entry, app: app, bundleID: bundleID, appTokens: appTokens),
+          if let match = match(entry, root: root, context: context),
             seen.insert(entryPath).inserted
           {
             matches.append(match)
@@ -134,7 +142,7 @@ public actor AppScanner {
               guard !isIgnored(childPath, ignoredPaths: ignoredPaths),
                 seen.insert(childPath).inserted
               else { continue }
-              if let match = match(child, app: app, bundleID: bundleID, appTokens: appTokens) {
+              if let match = match(child, root: root, context: context) {
                 matches.append(match)
               }
             }
@@ -166,8 +174,7 @@ public actor AppScanner {
       name: name,
       bundleIdentifier: bundle?.bundleIdentifier,
       version: version,
-      bundleSize: FileSystem.itemSize(
-        at: url, fileManager: fileManager, skipPackageDescendants: false),
+      bundleSize: FileSystem.itemSize(at: url, fileManager: fileManager),
       lastModified: modified
     )
   }
@@ -195,38 +202,109 @@ public actor AppScanner {
     return (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
   }
 
-  private func match(_ url: URL, app: AppRecord, bundleID: String?, appTokens: Set<String>)
-    -> AppLeftover?
-  {
-    let filename = url.lastPathComponent.lowercased()
-    let compact = filename.filter { $0.isLetter || $0.isNumber || $0 == "." }
+  struct MatchContext {
+    let bundleID: String?
+    let appTokens: Set<String>
+    let otherBundleIDs: Set<String>
+  }
 
-    if let bundleID {
-      let bundleCompact = bundleID.filter { $0.isLetter || $0.isNumber || $0 == "." }
-      if compact == bundleCompact || compact.hasPrefix(bundleCompact + ".")
-        || compact.hasSuffix("." + bundleCompact) || compact.contains("." + bundleCompact + ".")
-      {
-        return AppLeftover(
-          url: url,
-          size: FileSystem.itemSize(at: url, fileManager: fileManager),
-          confidence: .high,
-          reason: "Path contains the exact app bundle identifier."
-        )
+  /// File-name suffixes macOS appends to a bundle identifier for per-app data.
+  private static let dataSuffixes = [".plist", ".savedstate", ".binarycookies"]
+
+  static func stem(of filename: String) -> String {
+    var stem = filename.lowercased()
+    var stripped = true
+    while stripped {
+      stripped = false
+      for suffix in dataSuffixes where stem.hasSuffix(suffix) {
+        stem.removeLast(suffix.count)
+        stripped = true
+      }
+    }
+    return stem
+  }
+
+  /// Group containers are named "<TEAMID>.<id>" or "group.<id>".
+  static func groupContainerID(_ stem: String) -> String? {
+    if stem.hasPrefix("group.") { return String(stem.dropFirst("group.".count)) }
+    let parts = stem.split(separator: ".", maxSplits: 1)
+    guard parts.count == 2, parts[0].count == 10, parts[0].allSatisfy({ $0.isLetter || $0.isNumber })
+    else { return nil }
+    return String(parts[1])
+  }
+
+  /// True when `id` belongs to `owner` itself or to one of its nested helpers/extensions.
+  private static func id(_ id: String, isOwnedBy owner: String) -> Bool {
+    id == owner || id.hasPrefix(owner + ".")
+  }
+
+  /// The most specific installed app identifier that owns `id`, if it is not this app.
+  private static func belongsToOtherApp(_ id: String, context: MatchContext) -> Bool {
+    let ownerLength = context.bundleID.map { Self.id(id, isOwnedBy: $0) ? $0.count : -1 } ?? -1
+    return context.otherBundleIDs.contains { other in
+      Self.id(id, isOwnedBy: other) && other.count > ownerLength
+    }
+  }
+
+  private func match(_ url: URL, root: URL, context: MatchContext) -> AppLeftover? {
+    let stem = Self.stem(of: url.lastPathComponent)
+    let inGroupContainers = root.lastPathComponent == "Group Containers"
+
+    if let bundleID = context.bundleID {
+      let candidateID = inGroupContainers ? (Self.groupContainerID(stem) ?? stem) : stem
+      if Self.belongsToOtherApp(candidateID, context: context) { return nil }
+
+      if candidateID == bundleID {
+        return leftover(
+          url,
+          confidence: inGroupContainers ? .medium : .high,
+          reason: inGroupContainers
+            ? "App group container for this app; other apps from the developer may share it."
+            : "Named with this app's exact bundle identifier.",
+          isShared: inGroupContainers)
+      }
+      if candidateID.hasPrefix(bundleID + ".") {
+        return leftover(
+          url, confidence: .medium,
+          reason: "Appears to belong to a helper or extension of this app (\(candidateID)).",
+          isShared: inGroupContainers)
+      }
+      if inGroupContainers, sharesVendor(candidateID, with: bundleID) {
+        return leftover(
+          url, confidence: .low,
+          reason: "Shared container from the same developer; it may be used by other apps.",
+          isShared: true)
       }
     }
 
-    let fileTokens = meaningfulTokens(in: filename)
-    let overlap = appTokens.intersection(fileTokens)
-    if !appTokens.isEmpty, overlap.count == appTokens.count {
-      return AppLeftover(
-        url: url,
-        size: FileSystem.itemSize(at: url, fileManager: fileManager),
-        confidence: .medium,
-        reason: "Path tokens match the application name; review before removal."
-      )
+    let fileTokens = meaningfulTokens(in: stem)
+    let overlap = context.appTokens.intersection(fileTokens)
+    if !context.appTokens.isEmpty, overlap.count == context.appTokens.count {
+      return leftover(
+        url, confidence: .medium,
+        reason: "Name matches the application name; review before removal.",
+        isShared: inGroupContainers)
     }
 
     return nil
+  }
+
+  private func sharesVendor(_ id: String, with bundleID: String) -> Bool {
+    let vendor = bundleID.split(separator: ".").prefix(2)
+    guard vendor.count == 2 else { return false }
+    return id.split(separator: ".").prefix(2) == vendor
+  }
+
+  private func leftover(
+    _ url: URL, confidence: MatchConfidence, reason: String, isShared: Bool
+  ) -> AppLeftover {
+    AppLeftover(
+      url: url,
+      size: FileSystem.itemSize(at: url, fileManager: fileManager),
+      confidence: confidence,
+      reason: reason,
+      isShared: isShared
+    )
   }
 
   private func meaningfulTokens(in value: String) -> Set<String> {
@@ -247,7 +325,7 @@ public actor AppScanner {
 
   private func sort(_ matches: [AppLeftover]) -> [AppLeftover] {
     matches.sorted { lhs, rhs in
-      if lhs.confidence != rhs.confidence { return lhs.confidence == .high }
+      if lhs.confidence != rhs.confidence { return lhs.confidence.rank < rhs.confidence.rank }
       return lhs.size > rhs.size
     }
   }

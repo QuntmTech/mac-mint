@@ -43,19 +43,26 @@ public actor CleanupScanner {
         continue
       }
 
-      let size = FileSystem.itemSize(at: rule.url, fileManager: fileManager)
-      guard size > 0 else { continue }
-      results.append(
-        CleanupTarget(
-          category: rule.category,
-          url: rule.url,
-          displayName: rule.name,
-          detail: rule.url.path,
-          size: size,
-          risk: rule.risk,
-          reason: rule.reason,
-          isSelected: rule.risk == .safe
-        ))
+      for piece in FileSystem.eligiblePieces(
+        of: rule.url, ignoredPaths: ignoredPaths, fileManager: fileManager)
+      {
+        if Task.isCancelled { break }
+        let measurement = FileSystem.measure(at: piece, fileManager: fileManager)
+        issues.append(contentsOf: accessIssues(measurement, area: rule.name, url: piece))
+        guard measurement.bytes > 0 else { continue }
+        let isWholeRule = piece.standardizedFileURL == rule.url.standardizedFileURL
+        results.append(
+          CleanupTarget(
+            category: rule.category,
+            url: piece,
+            displayName: isWholeRule ? rule.name : "\(rule.name): \(piece.lastPathComponent)",
+            detail: piece.path,
+            size: measurement.bytes,
+            risk: rule.risk,
+            reason: rule.reason,
+            isSelected: rule.risk == .safe
+          ))
+      }
     }
 
     let value = deduplicated(results).sorted { lhs, rhs in
@@ -63,8 +70,8 @@ public actor CleanupScanner {
       return lhs.size > rhs.size
     }
     return ScanReport(
-      value: value, issues: issues, duration: Date().timeIntervalSince(started), wasCancelled: false
-    )
+      value: value, issues: issues, duration: Date().timeIntervalSince(started),
+      wasCancelled: Task.isCancelled)
   }
 
   private func scanChildren(for rule: CleanupRule, ignoredPaths: Set<String>) -> (
@@ -76,24 +83,32 @@ public actor CleanupScanner {
         includingPropertiesForKeys: nil,
         options: [.skipsHiddenFiles]
       )
-      let items = entries.compactMap { url -> CleanupTarget? in
-        guard !rule.excludedChildNames.contains(url.lastPathComponent),
-          !isIgnored(url, ignoredPaths: ignoredPaths)
-        else { return nil }
-        let size = FileSystem.itemSize(at: url, fileManager: fileManager)
-        guard size > 0 else { return nil }
-        return CleanupTarget(
-          category: rule.category,
-          url: url,
-          displayName: url.lastPathComponent,
-          detail: rule.name,
-          size: size,
-          risk: rule.risk,
-          reason: rule.reason,
-          isSelected: rule.risk == .safe
-        )
+      var items: [CleanupTarget] = []
+      var issues: [ScanIssue] = []
+      for entry in entries where !rule.excludedChildNames.contains(entry.lastPathComponent) {
+        for piece in FileSystem.eligiblePieces(
+          of: entry, ignoredPaths: ignoredPaths, fileManager: fileManager)
+        {
+          if Task.isCancelled { return (items, issues) }
+          let measurement = FileSystem.measure(at: piece, fileManager: fileManager)
+          issues.append(contentsOf: accessIssues(measurement, area: rule.name, url: piece))
+          guard measurement.bytes > 0 else { continue }
+          items.append(
+            CleanupTarget(
+              category: rule.category,
+              url: piece,
+              displayName: piece == entry
+                ? entry.lastPathComponent
+                : "\(entry.lastPathComponent)/\(piece.lastPathComponent)",
+              detail: rule.name,
+              size: measurement.bytes,
+              risk: rule.risk,
+              reason: rule.reason,
+              isSelected: rule.risk == .safe
+            ))
+        }
       }
-      return (items, [])
+      return (items, issues)
     } catch {
       return (
         [], [ScanIssue(area: rule.name, path: rule.url.path, message: error.localizedDescription)]
@@ -148,6 +163,19 @@ public actor CleanupScanner {
         ]
       )
     }
+  }
+
+  private func accessIssues(_ measurement: SizeMeasurement, area: String, url: URL) -> [ScanIssue]
+  {
+    guard !measurement.isComplete else { return [] }
+    let detail = measurement.firstError.map { " (\($0))" } ?? ""
+    return [
+      ScanIssue(
+        area: area, path: url.path,
+        message:
+          "\(measurement.inaccessibleCount) item(s) could not be read; size shown is a minimum.\(detail)"
+      )
+    ]
   }
 
   private func isIgnored(_ url: URL, ignoredPaths: Set<String>) -> Bool {

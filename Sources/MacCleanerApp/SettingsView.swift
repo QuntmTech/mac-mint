@@ -13,6 +13,8 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
         }
 
+        AccountSettingsCard()
+
         SurfaceCard {
           VStack(alignment: .leading, spacing: 12) {
             Label("Safety model", systemImage: "checkmark.shield.fill")
@@ -93,7 +95,8 @@ struct SettingsView: View {
             Label("Privacy", systemImage: "hand.raised.square")
               .font(.headline)
             settingRow("Telemetry", value: "None")
-            settingRow("Network calls", value: "None in base")
+            settingRow("Network calls", value: "Account & license checks only")
+            settingRow("Files or scan results uploaded", value: "Never")
             settingRow("Cleanup history", value: "Local JSON")
             settingRow("Exclusions", value: "Local JSON")
           }

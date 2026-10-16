@@ -11,7 +11,7 @@ var targets: [Target] = [
 ]
 
 #if os(macOS)
-products.append(.executable(name: "MacCleaner", targets: ["MacCleanerApp"]))
+products.append(.executable(name: "MacMint", targets: ["MacCleanerApp"]))
 targets.append(
     .executableTarget(
         name: "MacCleanerApp",
@@ -21,7 +21,7 @@ targets.append(
 #endif
 
 let package = Package(
-    name: "MacCleanerHybridBase",
+    name: "MacMint",
     platforms: [.macOS(.v14)],
     products: products,
     targets: targets

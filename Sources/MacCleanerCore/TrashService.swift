@@ -1,7 +1,8 @@
 import Foundation
 
 public protocol TrashService: Sendable {
-  func trash(_ url: URL) async throws
+  /// Moves `url` to the Trash and returns where it ended up (the name can change on collision).
+  func trash(_ url: URL) async throws -> URL?
 }
 
 public enum TrashServiceError: LocalizedError {
@@ -16,7 +17,7 @@ public enum TrashServiceError: LocalizedError {
 
 public struct UnsupportedTrashService: TrashService {
   public init() {}
-  public func trash(_ url: URL) async throws { throw TrashServiceError.unsupported }
+  public func trash(_ url: URL) async throws -> URL? { throw TrashServiceError.unsupported }
 }
 
 public actor CleanupEngine {
@@ -34,20 +35,42 @@ public actor CleanupEngine {
     self.fileManager = fileManager
   }
 
-  public func execute(_ targets: [CleanupTarget]) async -> CleanupResult {
+  /// Re-validates every selected target against the current exclusions and safety policy
+  /// immediately before moving it. Stops between items when the task is cancelled.
+  public func execute(_ targets: [CleanupTarget], ignoredPaths: Set<String> = []) async
+    -> CleanupResult
+  {
     var moved: [URL] = []
     var failed: [OperationFailure] = []
+    var receipts: [TrashReceipt] = []
     var attempted: Int64 = 0
     var bytesMoved: Int64 = 0
+    var cancelled = false
 
     for target in targets where target.isSelected {
-      if Task.isCancelled { break }
+      if Task.isCancelled {
+        cancelled = true
+        break
+      }
       attempted += target.size
 
       guard fileManager.fileExists(atPath: target.url.path) else {
         failed.append(
           OperationFailure(
             url: target.url, message: "Item no longer exists; it may already have been removed."))
+        continue
+      }
+
+      if FileSystem.isIgnored(target.url, ignoredPaths: ignoredPaths) {
+        failed.append(
+          OperationFailure(url: target.url, message: "Item is on your exclusion list."))
+        continue
+      }
+      if FileSystem.containsIgnoredDescendant(target.url, ignoredPaths: ignoredPaths) {
+        failed.append(
+          OperationFailure(
+            url: target.url,
+            message: "Folder contains an excluded item. Rescan to clean around it."))
         continue
       }
 
@@ -66,15 +89,19 @@ public actor CleanupEngine {
       // Re-read size immediately before the move. The scan can be stale by the time the user acts.
       let currentSize = FileSystem.itemSize(at: target.url, fileManager: fileManager)
       do {
-        try await trashService.trash(target.url)
+        let trashURL = try await trashService.trash(target.url)
         moved.append(target.url)
-        bytesMoved += currentSize > 0 ? currentSize : target.size
+        bytesMoved += currentSize
+        receipts.append(
+          TrashReceipt(
+            originalPath: target.url.path, trashPath: trashURL?.path, bytes: currentSize))
       } catch {
         failed.append(OperationFailure(url: target.url, message: error.localizedDescription))
       }
     }
 
     return CleanupResult(
-      movedToTrash: moved, failed: failed, bytesAttempted: attempted, bytesMoved: bytesMoved)
+      movedToTrash: moved, failed: failed, bytesAttempted: attempted, bytesMoved: bytesMoved,
+      receipts: receipts, wasCancelled: cancelled)
   }
 }

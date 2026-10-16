@@ -6,7 +6,8 @@ struct AppTheme {
   static let cardPadding: CGFloat = 18
   static let pagePadding: CGFloat = 26
 
-  static var accent: Color { Color.accentColor }
+  /// MacMint brand green (#10B981).
+  static let accent = Color(red: 0.063, green: 0.725, blue: 0.506)
   static var panel: Color { Color(nsColor: .controlBackgroundColor).opacity(0.72) }
   static var elevated: Color { Color(nsColor: .windowBackgroundColor).opacity(0.88) }
   static var border: Color { Color.primary.opacity(0.08) }

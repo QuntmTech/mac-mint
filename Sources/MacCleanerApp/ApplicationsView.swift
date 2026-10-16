@@ -157,7 +157,7 @@ struct ApplicationsView: View {
             VStack(alignment: .leading, spacing: 3) {
               Text("Related files").font(.headline)
               Text(
-                "Exact bundle-ID matches are selected automatically. Name matches stay review-only."
+                "Exact bundle-ID matches are selected automatically. Helpers, shared containers, and name matches stay review-only."
               )
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -202,6 +202,9 @@ struct ApplicationsView: View {
                   Text(leftover.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
                 Spacer()
+                if leftover.isShared {
+                  StatusPill(title: "Shared", icon: "person.2", tint: .purple)
+                }
                 StatusPill(
                   title: leftover.confidence.rawValue.capitalized,
                   icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
