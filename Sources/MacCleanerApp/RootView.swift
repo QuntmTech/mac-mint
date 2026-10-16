@@ -79,49 +79,11 @@ struct RootView: View {
       .safeAreaInset(edge: .top, spacing: 0) {
         VStack(spacing: 0) {
           updateBanner
-          if !model.selectedSection.tabs.isEmpty {
-            HStack(spacing: 4) {
-              ForEach(model.selectedSection.tabs) { section in
-                Button { model.selectedSection = section } label: {
-                  HStack(spacing: 6) {
-                    Image(systemName: section.icon).font(.system(size: 11))
-                    Text(section.rawValue).font(.system(size: 12, weight: model.selectedSection == section ? .semibold : .medium))
-                  }.padding(.horizontal, 13).padding(.vertical, 8)
-                    .foregroundStyle(model.selectedSection == section ? AppTheme.accentText : Color.secondary)
-                    .background(model.selectedSection == section ? AppTheme.surface : .clear,
-                      in: RoundedRectangle(cornerRadius: 8))
-                    .contentShape(RoundedRectangle(cornerRadius: 8))
-                }.buttonStyle(.plain)
-                  .accessibilityAddTraits(model.selectedSection == section ? .isSelected : [])
-              }
-              Spacer(minLength: 0)
-            }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 10)
-              .background(AppTheme.canvas).overlay(alignment: .bottom) { Divider().opacity(0.5) }
-          }
+          workspaceBar
         }
       }
       .safeAreaInset(edge: .bottom) {
         operationBar
-      }
-    }
-    .toolbar {
-      ToolbarItemGroup {
-        Button { model.selectedSection = .review } label: {
-          HStack(spacing: 7) {
-            Image(systemName: "checklist")
-            Text("Review")
-            if model.queuedCount > 0 {
-              Text("\(model.queuedCount)").font(.caption.weight(.semibold))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(AppTheme.selection, in: Capsule())
-            }
-          }
-        }
-        .help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
-        if account.aiAvailable { Button { model.selectedSection = .assistant } label: { Label("Ask MacMint", systemImage: "sparkles") } }
-        Button { model.showingAccount = true } label: {
-          Label(account.isUnlocked ? "Account" : "Get Pro", systemImage: "person.crop.circle")
-        }
       }
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
@@ -175,6 +137,53 @@ struct RootView: View {
         model.runSmartScan()
       }
     }
+  }
+
+  private var workspaceBar: some View {
+    HStack(spacing: 6) {
+      if model.selectedSection.tabs.isEmpty {
+        Label("Your workspace", systemImage: "square.grid.2x2").font(.caption).foregroundStyle(.secondary)
+      } else {
+        ForEach(model.selectedSection.tabs) { section in
+          Button { model.selectedSection = section } label: {
+            HStack(spacing: 6) {
+              Image(systemName: section.icon).font(.system(size: 11))
+              Text(section.rawValue).font(.system(size: 12, weight: model.selectedSection == section ? .semibold : .medium))
+            }.padding(.horizontal, 11).padding(.vertical, 8)
+              .foregroundStyle(model.selectedSection == section ? AppTheme.accentText : Color.secondary)
+              .background(model.selectedSection == section ? AppTheme.surface : .clear, in: RoundedRectangle(cornerRadius: 8))
+              .contentShape(RoundedRectangle(cornerRadius: 8))
+          }.buttonStyle(.plain).accessibilityAddTraits(model.selectedSection == section ? .isSelected : [])
+        }
+      }
+      Spacer(minLength: 8)
+      if account.aiAvailable {
+        Button { model.selectedSection = .assistant } label: {
+          Image(systemName: "sparkles").font(.system(size: 15)).frame(width: 30, height: 30)
+        }.buttonStyle(.plain).foregroundStyle(AppTheme.accentText)
+          .help("Ask MacMint").accessibilityLabel("Ask MacMint")
+      }
+      Button { model.selectedSection = .review } label: {
+        HStack(spacing: 7) {
+          Image(systemName: "checklist")
+          Text("Review").fontWeight(.medium)
+          if model.queuedCount > 0 {
+            Text("\(model.queuedCount)").font(.system(size: 10, weight: .semibold)).monospacedDigit()
+              .foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2)
+              .background(AppTheme.accent, in: Capsule())
+          }
+        }.font(.system(size: 12)).padding(.horizontal, 11).padding(.vertical, 8)
+          .foregroundStyle(AppTheme.accentText)
+          .background(model.queuedCount > 0 || model.selectedSection == .review ? AppTheme.selection : AppTheme.surface,
+            in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8))
+      }.buttonStyle(.plain).help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
+      Button { model.showingAccount = true } label: {
+        Image(systemName: "person.crop.circle").font(.system(size: 19)).frame(width: 32, height: 32)
+      }.buttonStyle(.plain).foregroundStyle(.secondary)
+        .help(account.isUnlocked ? "Account" : "Connect your MacMint account")
+        .accessibilityLabel(account.isUnlocked ? "Account" : "Connect your MacMint account")
+    }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 10)
+      .background(AppTheme.canvas).overlay(alignment: .bottom) { Divider().opacity(0.5) }
   }
 
   private var sidebarBrand: some View {
