@@ -104,14 +104,17 @@ public actor OperationExecutor {
   private let journalDirectory: URL?
   /// Custom model/cache locations configured through environment variables (e.g. HF_HUB_CACHE).
   private let developerRoots: [URL]
+  private let isAppRunning: @Sendable (String) -> Bool
 
   public init(
     trashService: any TrashService,
     safetyPolicy: SafetyPolicy = SafetyPolicy(),
     fileManager: FileManager = .default,
     journalDirectory: URL? = nil,
-    developerRoots: [URL] = DeveloperStorageScanner.configuredRoots()
+    developerRoots: [URL] = DeveloperStorageScanner.configuredRoots(),
+    isAppRunning: @escaping @Sendable (String) -> Bool = { _ in false }
   ) {
+    self.isAppRunning = isAppRunning
     self.trashService = trashService
     self.safetyPolicy = safetyPolicy
     self.fileManager = fileManager
@@ -164,6 +167,11 @@ public actor OperationExecutor {
       return ItemOutcome(
         item: item, status: .skipped,
         message: "Left untouched because the item it belongs to was not moved.")
+    }
+    if let owner = item.ownerBundleID, isAppRunning(owner) {
+      return ItemOutcome(
+        item: item, status: .skipped,
+        message: "The app that uses this data is open. Quit it and try again.")
     }
     guard fileManager.fileExists(atPath: item.url.path) || isSymlink(item.url) else {
       return ItemOutcome(

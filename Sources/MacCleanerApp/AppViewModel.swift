@@ -11,6 +11,7 @@ final class AppViewModel: ObservableObject {
     case cleaner = "Cleaner"
     case storage = "Storage"
     case developer = "Developer & AI"
+    case performance = "Performance"
     case applications = "Applications"
     case largeFiles = "Large Files"
     case duplicates = "Duplicates"
@@ -27,6 +28,7 @@ final class AppViewModel: ObservableObject {
       case .cleaner: return "trash.circle"
       case .storage: return "chart.pie"
       case .developer: return "hammer"
+      case .performance: return "gauge.with.dots.needle.33percent"
       case .applications: return "app.dashed"
       case .largeFiles: return "externaldrive"
       case .duplicates: return "square.on.square"
@@ -164,6 +166,9 @@ final class AppViewModel: ObservableObject {
       scanIssues = summary.issues
       lastScanDate = summary.scannedAt
       lastScanDuration = summary.duration
+      if !summary.wasCancelled {
+        UserDefaults.standard.set(summary.scannedAt, forKey: CareService.Keys.lastScanDate)
+      }
       finishScan(
         message: summary.wasCancelled
           ? "Scan stopped"

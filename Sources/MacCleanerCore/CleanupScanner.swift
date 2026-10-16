@@ -60,7 +60,8 @@ public actor CleanupScanner {
             size: measurement.bytes,
             risk: rule.risk,
             reason: rule.reason,
-            isSelected: rule.risk == .safe
+            isSelected: rule.risk == .safe,
+            ownerBundleID: rule.ownerBundleID
           ))
       }
     }
@@ -104,7 +105,8 @@ public actor CleanupScanner {
               size: measurement.bytes,
               risk: rule.risk,
               reason: rule.reason,
-              isSelected: rule.risk == .safe
+              isSelected: rule.risk == .safe,
+              ownerBundleID: rule.ownerBundleID
             ))
         }
       }

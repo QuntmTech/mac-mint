@@ -39,6 +39,13 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - **Docker Desktop's disk image** is shown with `docker system prune` as the way to reclaim it.
 - Each item says whether it rebuilds, re-downloads, or needs review. Anything touched in the last 3 days is marked "In use" and never preselected.
 
+### Performance, menu bar, and reminders
+- **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
+- **Optional menu bar companion** with the same readings and quick actions. It only samples while it's open.
+- **Opt-in low-space alerts and weekly scan reminders:** at most once a day, never 10 pm–8 am, and they never clean anything automatically.
+- **First-run onboarding** with a Full Disk Access check, plus an optional "Open at login" setting (SMAppService).
+- **Browser caches** for Chrome, Firefox, Edge, Brave, Arc, Vivaldi, Opera, and Safari. A browser's cache is skipped while that browser is open.
+
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.
 - Safe-by-default selection; review items are opt-in; restricted items cannot be selected.

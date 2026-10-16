@@ -241,3 +241,30 @@ final class OperationTests: XCTestCase {
     return root
   }
 }
+
+final class RunningOwnerTests: XCTestCase {
+  func testItemsOwnedByARunningAppAreSkipped() async throws {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    let cache = home.appendingPathComponent("Library/Caches/BraveSoftware/Brave-Browser")
+    try fm.createDirectory(at: cache, withIntermediateDirectories: true)
+    try Data(repeating: 1, count: 4096).write(to: cache.appendingPathComponent("data_0"))
+
+    let targets = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scan()
+    let brave = try XCTUnwrap(targets.first { $0.displayName == "Brave cache" })
+    XCTAssertEqual(brave.category, .browserCaches)
+    XCTAssertEqual(brave.ownerBundleID, "com.brave.Browser")
+    XCTAssertFalse(
+      targets.contains { $0.category == .userCaches && $0.url.path.contains("BraveSoftware") },
+      "browser caches are not double-listed as generic app caches")
+
+    let executor = OperationExecutor(
+      trashService: MovingTrashService(trashDirectory: home.appendingPathComponent(".Trash")),
+      safetyPolicy: SafetyPolicy(homeDirectory: home),
+      isAppRunning: { $0 == "com.brave.Browser" })
+    let report = await executor.run(OperationPlanner.plan(title: "t", items: [PlanItem.cleanup(brave)]))
+    XCTAssertEqual(report.outcomes.first?.status, .skipped)
+    XCTAssertTrue(fm.fileExists(atPath: cache.path))
+  }
+}

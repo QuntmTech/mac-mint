@@ -4,7 +4,9 @@ import SwiftUI
 struct RootView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
+  @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @State private var showingIssues = false
+  @State private var showingOnboarding = false
 
   var body: some View {
     NavigationSplitView {
@@ -41,6 +43,7 @@ struct RootView: View {
         case .cleaner: CleanerView()
         case .storage: StorageExplorerView()
         case .developer: DeveloperView()
+        case .performance: PerformanceView()
         case .applications: ApplicationsView()
         case .largeFiles: LargeFilesView()
         case .duplicates: DuplicatesView()
@@ -75,8 +78,15 @@ struct RootView: View {
     } message: { conflict in
       Text(conflict.message)
     }
+    .sheet(isPresented: $showingOnboarding) {
+      OnboardingView()
+    }
     .onAppear {
-      if model.cleanupTargets.isEmpty { model.runSmartScan() }
+      if !onboardingDone {
+        showingOnboarding = true
+      } else if model.cleanupTargets.isEmpty {
+        model.runSmartScan()
+      }
     }
   }
 
