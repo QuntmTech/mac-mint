@@ -54,7 +54,7 @@ func option(_ name: String, in args: [String]) -> String? {
   return args[index + 1]
 }
 
-let fm = FileManager.default
+nonisolated(unsafe) let fm = FileManager.default
 
 nonisolated(unsafe) var createdDirectories: Set<String> = []
 
