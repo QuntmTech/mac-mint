@@ -4,8 +4,8 @@ import MacCleanerCore
 /// AI calls go through the signed-in session; the server holds the Anthropic key and enforces
 /// plan, limits, and the kill switch.
 extension AccountStore {
-  private func requireToken(feature: String) throws -> String {
-    guard UserDefaults.standard.bool(forKey: AppViewModel.aiEnabledKey) else {
+  private func requireToken(feature: String, separatelyConsented: Bool = false) throws -> String {
+    guard separatelyConsented || UserDefaults.standard.bool(forKey: AppViewModel.aiEnabledKey) else {
       throw AccountAPIError(status: 403, code: "ai_consent", message: "Enable optional AI in Settings before sending a request.")
     }
     guard isUnlocked else { throw AccountAPIError(status: 402, code: "plan_required", message: "AI requests require an active MacMint plan. Local inspection and recovery remain available.") }
@@ -20,6 +20,12 @@ extension AccountStore {
   func refreshAIStatus() async {
     aiStatus = await client.aiStatus()
     aiAvailable = aiStatus.enabled
+  }
+
+  /// The organizer's frozen payload is approved separately on every request.
+  func aiOrganize(_ request: AIOrganizationRequest) async throws -> AIOrganizationResponse {
+    await refreshAIStatus()
+    return try await client.organize(request, token: requireToken(feature: "organize", separatelyConsented: true))
   }
 
   func aiExplain(_ request: AIExplainRequest) async throws -> AIExplainResponse {

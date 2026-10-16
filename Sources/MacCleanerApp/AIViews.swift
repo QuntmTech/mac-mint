@@ -428,7 +428,7 @@ struct AISettingsCard: View {
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
         Text(
-          "Automatic context uses sizes, storage categories and recognized app/tool identifiers. Personal folder paths and unrecognized names are omitted. Your typed questions and recent conversation are sent as written to MacMint's server and Anthropic. File contents are never sent. MacMint keeps usage counts for limits; its application database does not store chat transcripts."
+          "Automatic context uses sizes, storage categories and recognized app/tool identifiers. Personal folder paths and unrecognized names are omitted. Your typed questions and recent conversation are sent as written to MacMint's server and Anthropic. File contents are never sent. The separate Organizer asks before each request to share the displayed file and destination-folder names. MacMint keeps usage counts for limits; its application database does not store chat transcripts."
         )
         .font(.caption)
         .foregroundStyle(.secondary)

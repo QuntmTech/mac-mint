@@ -162,3 +162,23 @@ routerAdd("POST", "/api/macmint/admin/ai-reconcile", (e) => {
     return e.json(200, { ok: true })
   } catch (err) { return ai.handleError(e, err) }
 }, $apis.requireSuperuserAuth())
+
+// Separate, explicit name-sharing consent in the client; disabled until staging validation.
+routerAdd("POST", "/api/macmint/ai/organize", (e) => {
+  const ai = require(`${__hooks}/macmint_ai_lib.js`)
+  const organizer = require(`${__hooks}/macmint_organization.js`)
+  try { e.response.header().set("Cache-Control", "no-store") } catch (_) {}
+  if (!ai.requirePlan(e)) return ai.fail(e, 402, "no_active_plan", "AI organization needs an active MacMint plan.")
+  const off = ai.disabled(e.app, "organize")
+  if (off) return ai.fail(e, off[0], off[1], off[2])
+  let inventory
+  try { inventory = organizer.input(ai.body(e)) }
+  catch (_) { return ai.fail(e, 400, "bad_request", "That file inventory could not be used.") }
+  try {
+    const result = ai.request(e.app, e.auth.id, "organize", organizer.system, inventory, organizer.schema, 6000)
+    let proposals
+    try { proposals = organizer.output(result.output, inventory) }
+    catch (_) { return ai.fail(e, 502, "invalid_ai_response", "The suggestions could not be validated. No files were changed.") }
+    return e.json(200, { proposals, model: result.model })
+  } catch (err) { return ai.handleError(e, err) }
+}, $apis.requireAuth("users"))

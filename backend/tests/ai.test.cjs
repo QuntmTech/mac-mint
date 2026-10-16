@@ -146,3 +146,14 @@ test('known uncharged failures release both allowance and global capacity', () =
   assert.equal(db.rows('ai_daily_budgets')[0].get('reserved_tokens'), 0)
   assert.equal(db.rows('ai_daily_budgets')[0].get('reserved_micro_usd'), 0)
 })
+
+
+test('organization requires an explicit feature flag and reserves its own allowance', () => {
+  const db = database()
+  assert.equal(ai.disabled(db, 'organize')[1], 'ai_disabled')
+  cfg.features = { organize: true }
+  assert.equal(ai.disabled(db, 'organize'), null)
+  for (let i = 0; i < 8; i++) ai.reserve(db, 'u1', 'organize', ai.MODELS.organize, 100, 100)
+  assert.throws(() => ai.reserve(db, 'u1', 'organize', ai.MODELS.organize, 100, 100), e => e.code === 'ai_daily_limit')
+  assert.equal(db.rows('ai_usage')[0].get('organize'), 8)
+})

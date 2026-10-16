@@ -3,6 +3,7 @@ import SwiftUI
 
 struct HistoryView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var showOrganization = false
   @State private var expanded: Set<UUID> = []
 
   private var totalBytes: Int64 { model.history.reduce(0) { $0 + $1.bytes } }
@@ -10,6 +11,7 @@ struct HistoryView: View {
   var body: some View {
     VStack(spacing: 0) {
       PageHeader(title: "History", subtitle: "Every operation, with its recovery status. Restore Trash items here and library photos in Photos.") {
+        Button("Organization history") { showOrganization = true }
         if !model.history.isEmpty {
           StatusPill(title: ByteFormatter.string(totalBytes) + " handled", icon: "clock.arrow.circlepath", tint: AppTheme.accentText)
         }
@@ -36,6 +38,7 @@ struct HistoryView: View {
         .listStyle(.inset)
       }
     }
+    .sheet(isPresented: $showOrganization) { OrganizerView(historyOnly: true) }
   }
 
   private func entryRow(_ entry: HistoryEntry) -> some View {

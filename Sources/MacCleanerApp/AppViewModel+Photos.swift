@@ -39,7 +39,7 @@ extension AppViewModel {
     photoScan?.group(containing: photo.id)
   }
 
-  var selectedPhotos: [PhotoFingerprint] { allScannedPhotos.filter { selectedPhotoIDs.contains($0.id) } }
+  var selectedPhotos: [PhotoFingerprint] { photoScan?.selectedPhotos(ids: selectedPhotoIDs) ?? [] }
 
   var selectedPhotoBytes: Int64 { selectedPhotos.reduce(0) { $0 + $1.bytes } }
 

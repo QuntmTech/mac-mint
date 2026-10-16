@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StorageExplorerView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var showOrganizer = false
   @State private var hovered: String?
   @State private var focused: String?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -43,6 +44,7 @@ struct StorageExplorerView: View {
           actionTitle: "Map storage", action: { model.scanStorage() })
       }
     }
+    .sheet(isPresented: $showOrganizer) { OrganizerView() }
   }
 
   // MARK: Header
@@ -50,6 +52,7 @@ struct StorageExplorerView: View {
   private var header: some View {
     PageHeader(title: "Storage", subtitle: "Explore your disk, folder by folder. Select items for a closer look.") {
       HStack(spacing: 8) {
+      Button { showOrganizer = true } label: { Label("Organize…", systemImage: "folder.badge.gearshape") }
       if !FileSystem.path(model.storageRoot, isInsideOrEqual: FileManager.default.homeDirectoryForCurrentUser) {
         StatusPill(title: "Inspection only", icon: "eye", tint: .secondary)
       }

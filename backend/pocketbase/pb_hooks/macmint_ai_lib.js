@@ -15,10 +15,11 @@
 const PROMPT_VERSION = "v2"
 const MODELS = {
   explain: "claude-haiku-4-5-20251001",
+  organize: "claude-haiku-4-5-20251001",
   review: "claude-opus-5-5",
   ask: "claude-opus-5-5",
 }
-const DAILY_LIMITS = { explain: 150, review: 8, ask: 30 }
+const DAILY_LIMITS = { explain: 150, review: 8, ask: 30, organize: 8 }
 const DEFAULT_GLOBAL_TOKEN_BUDGET = 3000000
 const CACHE_TTL_DAYS = 30
 const HTTP_TIMEOUT_SECONDS = 30
@@ -109,7 +110,7 @@ const PRICES = {
 
 function disabled(app, feature) {
   const cfg = config(app)
-  if (cfg.enabled !== true || (cfg.features && cfg.features[feature] === false)) {
+  if (cfg.enabled !== true || (cfg.features && cfg.features[feature] === false) || (feature === "organize" && (!cfg.features || cfg.features.organize !== true))) {
     return [503, "ai_disabled", "AI features are turned off right now."]
   }
   return null

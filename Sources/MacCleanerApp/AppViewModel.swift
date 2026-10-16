@@ -168,6 +168,7 @@ final class AppViewModel: ObservableObject {
   private let duplicateFinder = DuplicateFinder()
   let safetyPolicy = SafetyPolicy()
   let duplicateVerifier = DuplicateRemovalVerifier()
+  let organizationStore: OrganizationStore
   let historyStore: HistoryStore
   let supportDirectory: URL
   var operationJournalDirectory: URL { supportDirectory.appendingPathComponent("Operations", isDirectory: true) }
@@ -178,6 +179,7 @@ final class AppViewModel: ObservableObject {
   init(supportDirectory: URL? = nil) {
     let support = supportDirectory ?? AppPaths.supportDirectory
     self.supportDirectory = support
+    organizationStore = OrganizationStore(directory: support.appendingPathComponent("Organization"))
     historyStore = HistoryStore(url: support.appendingPathComponent("history.json"))
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 

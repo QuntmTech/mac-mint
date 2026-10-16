@@ -53,6 +53,8 @@ class Provider(BaseHTTPRequestHandler):
             output = dict(answer='Inspect and review locally.', actions=[
                 dict(label='Open Storage', destination='storage'),
                 dict(label='Run malicious command', destination='shortcuts://remove-everything')])
+        elif 'proposals' in schema:
+            output = dict(proposals=[dict(fileID='f0', folderID='d1', name='Invoice 2026.pdf', reason='File by its existing name')])
         elif 'headline' in schema:
             output = dict(headline='Review the findings', notes=[dict(id='caches', order=1, note='Rebuildable')],
                 insights=[], cautions=[])
@@ -157,6 +159,22 @@ with ExitStack() as stack:
     assert db.execute("SELECT actual_tokens FROM ai_requests WHERE feature='ask'").fetchone()[0] == 370
     assert db.execute("SELECT spent_micro_usd FROM ai_daily_budgets").fetchone()[0] == 1090
     print('PASS: authenticated AI route strips automatic personal names, limits navigation and accounts for cache tokens')
+
+    inventory = dict(files=[dict(id='f0', name='Jane Invoice.pdf')], folders=[dict(id='root', name='This folder'),dict(id='d1', name='Documents')])
+    count = len(SENT)
+    assert call('/api/macmint/ai/organize', inventory, token)[0] == 503
+    assert len(SENT) == count, 'Unenabled organization reached provider'
+    call('/__test/config', dict(ai=dict(enabled=True, features=dict(organize=True))))
+    status, organized = call('/api/macmint/ai/organize', inventory, token)
+    assert status == 200 and organized['proposals'][0]['fileID'] == 'f0', (status, organized)
+    sent_names = json.loads(SENT[-1]['messages'][0]['content'].split('\n\n', 1)[1])
+    assert sent_names == inventory and 'path' not in json.dumps(sent_names)
+    assert db.execute("SELECT organize FROM ai_usage").fetchone()[0] == 1
+    Provider.mode = 'wrong-shape'
+    assert call('/api/macmint/ai/organize', inventory, token)[0] == 502
+    Provider.mode = 'ok'
+    call('/__test/config', dict(ai=dict(enabled=True)))
+    print('PASS: organization flag, authenticated structured proposals, name-only payload and transactional allowance')
 
     status, _ = call('/api/macmint/ai/explain', dict(kind='library-item', identifier='Jane jane@example.invalid.pages', location='Caches'), token)
     assert status == 200

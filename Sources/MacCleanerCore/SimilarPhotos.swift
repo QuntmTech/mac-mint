@@ -246,6 +246,7 @@ public enum PhotoAnalysis {
 public struct PhotoScanResult: Sendable {
   public let generation = UUID()
   private let groupIndex: [String: Int]
+  private let photoIndex: [String: Int]
   private let fileNameIndex: [String: [Int]]
   public let photos: [PhotoFingerprint]
   public let similarGroups: [SimilarPhotoGroup]
@@ -265,6 +266,7 @@ public struct PhotoScanResult: Sendable {
       for photo in group.photos where index[photo.id] == nil { index[photo.id] = offset }
     }
     self.groupIndex = index
+    self.photoIndex = Dictionary(photos.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
     var names: [String: [Int]] = [:]
     for (offset, photo) in photos.enumerated() where !photo.isLibraryAsset {
       names[photo.url.lastPathComponent.lowercased(), default: []].append(offset)
@@ -282,6 +284,10 @@ public struct PhotoScanResult: Sendable {
   /// Repeated selection and review must not scan every group for every photo.
   public func group(containing photoID: String) -> SimilarPhotoGroup? {
     groupIndex[photoID].map { similarGroups[$0] }
+  }
+
+  public func selectedPhotos(ids: Set<String>) -> [PhotoFingerprint] {
+    ids.compactMap { photoIndex[$0] }.sorted().map { photos[$0] }
   }
 
   /// Narrows alias-aware selection matching without traversing the full library per click.

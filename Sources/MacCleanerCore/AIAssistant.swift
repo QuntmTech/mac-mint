@@ -149,7 +149,7 @@ public struct AIStatus: Sendable {
   public let features: [String: Bool]
   public let reachable: Bool
   public init(enabled: Bool, features: [String: Bool] = [:], reachable: Bool = true) { self.enabled = enabled; self.features = features; self.reachable = reachable }
-  public func allows(_ feature: String) -> Bool { enabled && features[feature] != false }
+  public func allows(_ feature: String) -> Bool { enabled && (feature == "organize" ? features[feature] == true : features[feature] != false) }
 }
 
 // MARK: - Client
@@ -170,6 +170,10 @@ extension AccountClient {
       "POST", "/api/macmint/ai/ask", token: token,
       json: AIAskRequest(question: String(question.prefix(600)), history: Array(history.suffix(6)), context: context),
       timeout: 45)
+  }
+
+  public func organize(_ request: AIOrganizationRequest, token: String) async throws -> AIOrganizationResponse {
+    try await send("POST", "/api/macmint/ai/organize", token: token, json: request, timeout: 45)
   }
 
   /// Server kill switch (public app_config record `ai`). Off when unreachable.

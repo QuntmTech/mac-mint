@@ -167,6 +167,7 @@ extension SimilarPhotosTests {
     let scan = PhotoScanResult(photos: [a,b], similarGroups: [group], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
     XCTAssertEqual(scan.group(containing: b.id)?.keeper.id, a.id)
     XCTAssertNil(scan.group(containing: "absent"))
+    XCTAssertEqual(scan.selectedPhotos(ids: [b.id, "absent"]).map(\.id), [b.id])
     XCTAssertEqual(Set(scan.fileCandidates(named: "a.jpg").map(\.id)), [a.id,b.id])
     XCTAssertTrue(scan.fileCandidates(named: "missing.jpg").isEmpty)
   }
