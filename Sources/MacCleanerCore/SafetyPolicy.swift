@@ -103,6 +103,45 @@ public struct SafetyPolicy: Sendable {
       : (false, "Target is outside the allowlisted location for \(category.rawValue).")
   }
 
+  /// Developer and AI storage: known tool caches, or build-output folders inside projects
+  /// (projects may live under Documents, so the personal-folder block does not apply here).
+  public func developerArtifactDecision(for url: URL, extraRoots: [URL] = []) -> (
+    allowed: Bool, reason: String
+  ) {
+    let candidate = url.standardizedFileURL
+    let path = candidate.path
+    let home = homeDirectory.path
+    if isSystemOwned(candidate) { return (false, "System-owned location is protected by the app.") }
+    guard path != home, path.hasPrefix(home + "/") else {
+      return (false, "Developer cleanup is limited to your home folder.")
+    }
+    if isSymlink(candidate) { return (false, "Symbolic links are not removed.") }
+    if isInside(candidate, roots: developerRoots() + extraRoots) {
+      return (true, "Inside a known developer or AI cache.")
+    }
+    let library = homeDirectory.appendingPathComponent("Library").standardizedFileURL.path
+    let parent = candidate.deletingLastPathComponent().path
+    if !path.hasPrefix(library + "/"), parent != home,
+      DeveloperStorageScanner.projectArtifactNames.contains(candidate.lastPathComponent)
+    {
+      return (true, "Build output folder inside a project.")
+    }
+    return (false, "Not a recognised developer cache or build folder.")
+  }
+
+  private func developerRoots() -> [URL] {
+    [
+      "Library/Developer/Xcode/DerivedData", "Library/Developer/Xcode/Archives",
+      "Library/Developer/Xcode/iOS DeviceSupport", "Library/Developer/Xcode/watchOS DeviceSupport",
+      "Library/Developer/Xcode/tvOS DeviceSupport", "Library/Developer/Xcode/visionOS DeviceSupport",
+      "Library/Developer/CoreSimulator/Caches", ".npm/_cacache", "Library/pnpm/store",
+      "Library/Caches/Yarn", "Library/Caches/Homebrew", "Library/Caches/pip",
+      "Library/Caches/CocoaPods", "Library/Caches/org.swift.swiftpm", ".bun/install/cache",
+      ".gradle/caches", ".m2/repository", ".cargo/registry/cache", ".lmstudio/models",
+      ".cache/lm-studio/models", ".cache/huggingface/hub",
+    ].map { homeDirectory.appendingPathComponent($0) }
+  }
+
   /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
   public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
     let candidate = url.standardizedFileURL

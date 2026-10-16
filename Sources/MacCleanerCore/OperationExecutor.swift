@@ -102,17 +102,21 @@ public actor OperationExecutor {
   private let safetyPolicy: SafetyPolicy
   private let fileManager: FileManager
   private let journalDirectory: URL?
+  /// Custom model/cache locations configured through environment variables (e.g. HF_HUB_CACHE).
+  private let developerRoots: [URL]
 
   public init(
     trashService: any TrashService,
     safetyPolicy: SafetyPolicy = SafetyPolicy(),
     fileManager: FileManager = .default,
-    journalDirectory: URL? = nil
+    journalDirectory: URL? = nil,
+    developerRoots: [URL] = DeveloperStorageScanner.configuredRoots()
   ) {
     self.trashService = trashService
     self.safetyPolicy = safetyPolicy
     self.fileManager = fileManager
     self.journalDirectory = journalDirectory
+    self.developerRoots = developerRoots
   }
 
   public func run(
@@ -211,6 +215,8 @@ public actor OperationExecutor {
       return safetyPolicy.appLeftoverDecision(for: item.url)
     case .duplicateCopy, .reviewedFile:
       return safetyPolicy.reviewedFileDecision(for: item.url)
+    case .developerArtifact:
+      return safetyPolicy.developerArtifactDecision(for: item.url, extraRoots: developerRoots)
     }
   }
 

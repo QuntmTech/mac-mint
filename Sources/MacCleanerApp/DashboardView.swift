@@ -114,7 +114,7 @@ struct DashboardView: View {
 
   private var moduleGrid: some View {
     LazyVGrid(
-      columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14
+      columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 14
     ) {
       moduleCard(
         title: "Storage",
@@ -123,6 +123,14 @@ struct DashboardView: View {
         value: model.storageScan.map { ByteFormatter.string($0.root.allocatedBytes) + " mapped" }
           ?? "Map my Mac",
         section: .storage)
+      moduleCard(
+        title: "Developer & AI",
+        detail: "Xcode build data, package caches, project build folders, and local AI models.",
+        icon: "hammer",
+        value: model.devItems.isEmpty
+          ? "Find clutter"
+          : ByteFormatter.string(model.devItems.reduce(0) { $0 + $1.bytes }) + " found",
+        section: .developer)
       moduleCard(
         title: "Applications",
         detail: "Inspect app bundles and related Library data before uninstalling.",

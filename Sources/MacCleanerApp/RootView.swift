@@ -40,6 +40,7 @@ struct RootView: View {
         case .review: ReviewQueueView()
         case .cleaner: CleanerView()
         case .storage: StorageExplorerView()
+        case .developer: DeveloperView()
         case .applications: ApplicationsView()
         case .largeFiles: LargeFilesView()
         case .duplicates: DuplicatesView()
