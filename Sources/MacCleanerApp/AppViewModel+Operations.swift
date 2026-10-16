@@ -30,10 +30,12 @@ extension AppViewModel {
     queuedCleanupTargets.map { PlanItem.cleanup($0) }
       + queuedDuplicateFiles.map { PlanItem.duplicate($0.file, keeper: $0.keeper) }
       + queuedLargeFiles.map(PlanItem.largeFile)
+      + queuedStorageNodes.map(PlanItem.storage)
   }
 
   var queuedCount: Int {
     queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
+      + queuedStorageNodes.count
   }
 
   var queuedBytes: Int64 {
@@ -52,12 +54,14 @@ extension AppViewModel {
         .filter { $0.url.standardizedFileURL.path == path }.map(\.id))
     selectedDuplicateIDs.subtract(ids)
     selectedLargeFileIDs.subtract(ids)
+    selectedStoragePaths.remove(path)
   }
 
   func clearQueue() {
     deselectAllCleanup()
     selectedDuplicateIDs = []
     selectedLargeFileIDs = []
+    selectedStoragePaths = []
   }
 
   // MARK: Building plans
@@ -92,6 +96,7 @@ extension AppViewModel {
       let items =
         model.queuedCleanupTargets.map { PlanItem.cleanup($0) } + duplicates.items
         + model.queuedLargeFiles.map(PlanItem.largeFile)
+        + model.queuedStorageNodes.map(PlanItem.storage)
       return OperationPlanner.plan(
         title: "Review queue", items: items, ignoredPaths: model.ignoredPaths,
         excluded: duplicates.skipped)
@@ -227,6 +232,7 @@ extension AppViewModel {
       let path = url.standardizedFileURL.path
       return movedPaths.contains { path == $0 || path.hasPrefix($0 + "/") }
     }
+    pruneStorage(movedPaths)
     cleanupTargets.removeAll { gone($0.url) }
     largeFiles.removeAll { gone($0.url) }
     selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))

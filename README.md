@@ -21,6 +21,12 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Supports cancellation instead of forcing a long scan to finish.
 - Honors persisted scan exclusions.
 
+### Storage Explorer
+- A squarified **treemap** plus a sorted size list of any folder or drive, with breadcrumbs and click-to-dive.
+- Counts space actually used on the disk; hard links once; app/library packages as single items sized with their contents.
+- Never crosses onto other drives, never opens or downloads cloud-only files (they're counted separately), and lists unreadable folders instead of hiding them.
+- Select files or folders to send them through the same review → Trash → restore pipeline.
+
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.
 - Safe-by-default selection; review items are opt-in; restricted items cannot be selected.
