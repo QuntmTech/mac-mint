@@ -81,6 +81,8 @@ final class OrganizationTests: XCTestCase {
     try Data("broken".utf8).write(to: corrupt)
     do { _ = try await restarted.history(); XCTFail("Corruption must be visible") } catch {}
     XCTAssertTrue(fm.fileExists(atPath: corrupt.path))
+    let partial = try await restarted.historyReport()
+    XCTAssertEqual(partial.records.count, 1); XCTAssertEqual(partial.warnings.count, 1)
   }
   func testInspectionIsShallowAndLimitedAndSkipsManagedPackagesAndRepositories() async throws {
     let (home, root) = try fixture(); defer { try? fm.removeItem(at: home) }

@@ -66,6 +66,11 @@ public struct OrganizationRecord: Codable, Identifiable, Sendable {
 
 private struct OrganizationMoveUncertain: Error {}
 
+public struct OrganizationHistory: Sendable {
+  public let records: [OrganizationRecord]
+  public let warnings: [String]
+}
+
 public struct OrganizationError: LocalizedError, Sendable {
   public let errorDescription: String?
   init(_ message: String) { errorDescription = message }
@@ -179,9 +184,21 @@ public actor OrganizationStore {
   }
 
   public func history() throws -> [OrganizationRecord] {
-    guard try FileSystem.entryExists(at: directory) else { return [] }
-    return try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
-      .map { try recover(JSONDecoder().decode(OrganizationRecord.self, from: Data(contentsOf: $0))) }.sorted { $0.date > $1.date }
+    let report = try historyReport()
+    guard report.warnings.isEmpty else { throw OrganizationError(report.warnings.joined(separator: " ")) }
+    return report.records
+  }
+  public func historyReport() throws -> OrganizationHistory {
+    guard try FileSystem.entryExists(at: directory) else { return OrganizationHistory(records: [], warnings: []) }
+    var records: [OrganizationRecord] = [], warnings: [String] = []
+    for url in try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) where url.pathExtension == "json" {
+      do {
+        let record = try JSONDecoder().decode(OrganizationRecord.self, from: Data(contentsOf: url))
+        do { records.append(try recover(record)) }
+        catch { records.append(record); warnings.append("An interrupted record could not be reconciled. Its evidence has been preserved.") }
+      } catch { warnings.append("An organization record could not be read. It has been preserved for diagnosis.") }
+    }
+    return OrganizationHistory(records: records.sorted { $0.date > $1.date }, warnings: warnings)
   }
   public func undo(recordID: UUID) throws -> OrganizationRecord {
     let url = directory.appendingPathComponent(recordID.uuidString + ".json")

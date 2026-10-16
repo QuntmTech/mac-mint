@@ -32,6 +32,7 @@ struct OrganizerView: View {
       if let error {
         Label(error, systemImage: "exclamationmark.triangle").font(.callout)
           .foregroundStyle(AppTheme.warning).textSelection(.enabled).padding(14)
+        Button("Show organization records in Finder") { model.reveal(model.supportDirectory.appendingPathComponent("Organization")) }.padding(.bottom, 8)
       }
       if showHistory || historyOnly { historyContent }
       else if let inventory { proposalContent(inventory) }
@@ -242,7 +243,11 @@ struct OrganizerView: View {
     }
   }
   private func loadHistory() async {
-    do { records = try await model.organizationStore.history() }
+    do {
+      let report = try await model.organizationStore.historyReport()
+      records = report.records
+      if !report.warnings.isEmpty { self.error = report.warnings.joined(separator: " ") }
+    }
     catch { self.error = "Organization records could not be read. They have been preserved. " + error.localizedDescription }
   }
 }
