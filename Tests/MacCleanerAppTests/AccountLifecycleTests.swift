@@ -73,13 +73,114 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertFalse(store.isUnlocked)
     XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("account.json").path))
   }
+
+  func testDelayedAuthenticationAndActivationCannotUndoSignOut() async throws {
+    for suffix in ["auth-with-password", "/activate"] {
+      let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: folder) }
+      let fixture = AccountFixture(), tokens = TestTokens()
+      let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+        deviceInfo: device, tokenStorage: tokens.storage)
+      await fixture.hold(suffix)
+      let signingIn = Task { await store.signIn(email: "fixture@example.invalid", password: "fixture") }
+      try await waitUntilPaused(fixture)
+      await store.signOut()
+      XCTAssertEqual(store.phase, .signedOut)
+      XCTAssertFalse(store.isBusy)
+      await fixture.resumeVerification()
+      await signingIn.value
+      XCTAssertEqual(store.phase, .signedOut, suffix)
+      XCTAssertNil(tokens.value, suffix)
+      XCTAssertFalse(store.isUnlocked, suffix)
+    }
+  }
+
+  func testSlowRemoteSignOutDoesNotRetainAccessOrEraseANewerSignIn() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.hold("/deactivate")
+    let signingOut = Task { await store.signOut() }
+    try await waitUntilPaused(fixture)
+    XCTAssertEqual(store.phase, .signedOut)
+    XCTAssertFalse(store.isUnlocked)
+    XCTAssertNil(tokens.value)
+    let newSignIn = Task { await store.signIn(email: "fixture@example.invalid", password: "fixture") }
+    await fixture.resumeVerification()
+    await signingOut.value
+    await newSignIn.value
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertEqual(tokens.value, "fixture-token")
+  }
+
+  func testVerifiedAccessSurvivesCacheWriteFailureAndReportsIt() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    // A file where the support directory should be guarantees failure even as root.
+    try Data().write(to: folder)
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertTrue(store.infoMessage?.contains("offline access could not be saved") == true)
+    await fixture.goOffline()
+    await store.refreshAccess()
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertTrue(store.isOffline)
+  }
+
+  func testOfflineCacheIsBoundToTheStoredSession() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    let first = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
+    await first.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.goOffline()
+    let restarted = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
+    await restarted.start()
+    XCTAssertTrue(restarted.isUnlocked)
+    tokens.value = "another-account-token"
+    let different = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
+    await different.start()
+    XCTAssertFalse(different.isUnlocked)
+  }
+
+  func testRepeatedSubmitDoesNotLaunchOverlappingAuthentication() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await fixture.hold("auth-with-password")
+    let first = Task { await store.signIn(email: "fixture@example.invalid", password: "fixture") }
+    try await waitUntilPaused(fixture)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    let count = await fixture.authentications
+    XCTAssertEqual(count, 1)
+    await fixture.resumeVerification()
+    await first.value
+    XCTAssertTrue(store.isUnlocked)
+  }
+
+  private func waitUntilPaused(_ fixture: AccountFixture) async throws {
+    for _ in 0..<200 {
+      if await fixture.isPaused { return }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTFail("The intended network boundary was not reached")
+  }
 }
 
 @MainActor
 private final class TestTokens {
   var value: String?
   var storage: AccountTokenStorage {
-    AccountTokenStorage(load: { self.value }, save: { self.value = $0 }, delete: { self.value = nil })
+    AccountTokenStorage(load: { self.value }, save: { self.value = $0; return true }, delete: { self.value = nil })
   }
 }
 
@@ -94,18 +195,21 @@ private actor AccountFixture {
   var offline = false
   var removed = false
   var activations = 0
-  private var shouldPause = false
+  var authentications = 0
+  private var pauseSuffix: String?
   private var pending: CheckedContinuation<Void, Never>?
   var isPaused: Bool { pending != nil }
   func goOffline() { offline = true }
   func removeDevice() { removed = true }
-  func holdNextVerification() { shouldPause = true }
+  func holdNextVerification() { hold("/me") }
+  func hold(_ suffix: String) { pauseSuffix = suffix }
   func resumeVerification() { pending?.resume(); pending = nil }
   func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
     if offline { throw URLError(.notConnectedToInternet) }
     let path = request.url!.path
-    if path.hasSuffix("/me"), shouldPause {
-      shouldPause = false
+    if path.hasSuffix("auth-with-password") { authentications += 1 }
+    if let suffix = pauseSuffix, path.hasSuffix(suffix) {
+      pauseSuffix = nil
       await withCheckedContinuation { pending = $0 }
     }
     var body: [String: Any] = [:]
