@@ -160,7 +160,15 @@ final class AppViewModel: ObservableObject {
         return
       }
 
-      cleanupTargets = summary.cleanupTargets
+      cleanupTargets = summary.cleanupTargets.map { target in
+        var target = target
+        if let owner = target.ownerBundleID,
+          !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty
+        {
+          target.isSelected = false
+        }
+        return target
+      }
       apps = summary.apps
       startupItems = summary.startupItems
       scanIssues = summary.issues
