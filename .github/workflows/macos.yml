@@ -1,0 +1,19 @@
+name: macOS build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift version
+        run: swift --version
+      - name: Core tests
+        run: swift test
+      - name: Build desktop app
+        run: swift build -c release --product MacCleaner
+      - name: Package local app bundle
+        run: NO_OPEN=1 ./scripts/build_app.sh

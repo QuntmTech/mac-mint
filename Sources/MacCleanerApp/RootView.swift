@@ -1,0 +1,154 @@
+import MacCleanerCore
+import SwiftUI
+
+struct RootView: View {
+  @EnvironmentObject private var model: AppViewModel
+  @State private var showingIssues = false
+
+  var body: some View {
+    NavigationSplitView {
+      VStack(spacing: 0) {
+        sidebarBrand
+          .padding(.horizontal, 12)
+          .padding(.top, 12)
+          .padding(.bottom, 8)
+
+        List(
+          AppViewModel.Section.allCases,
+          selection: Binding(
+            get: { Optional(model.selectedSection) },
+            set: { if let section = $0 { model.selectedSection = section } }
+          )
+        ) { section in
+          Label(section.rawValue, systemImage: section.icon)
+            .font(.callout.weight(.medium))
+            .padding(.vertical, 4)
+            .tag(section)
+        }
+        .listStyle(.sidebar)
+
+        sidebarFooter
+          .padding(12)
+      }
+      .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 260)
+    } detail: {
+      Group {
+        switch model.selectedSection {
+        case .dashboard: DashboardView()
+        case .cleaner: CleanerView()
+        case .applications: ApplicationsView()
+        case .largeFiles: LargeFilesView()
+        case .duplicates: DuplicatesView()
+        case .startup: StartupItemsView()
+        case .history: HistoryView()
+        case .settings: SettingsView()
+        }
+      }
+      .background(Color(nsColor: .windowBackgroundColor))
+      .safeAreaInset(edge: .bottom) {
+        operationBar
+      }
+    }
+    .sheet(isPresented: $showingIssues) {
+      ScanIssueSheet(issues: model.scanIssues)
+    }
+    .onAppear {
+      if model.cleanupTargets.isEmpty { model.runSmartScan() }
+    }
+  }
+
+  private var sidebarBrand: some View {
+    HStack(spacing: 11) {
+      ZStack {
+        RoundedRectangle(cornerRadius: 11, style: .continuous)
+          .fill(
+            LinearGradient(
+              colors: [AppTheme.accent, AppTheme.accent.opacity(0.65)],
+              startPoint: .topLeading,
+              endPoint: .bottomTrailing
+            )
+          )
+          .frame(width: 38, height: 38)
+        Image(systemName: "sparkles")
+          .font(.system(size: 17, weight: .bold))
+          .foregroundStyle(.white)
+      }
+      VStack(alignment: .leading, spacing: 1) {
+        Text("Mac Cleaner")
+          .font(.headline)
+        Text("Hybrid Base V2")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      Spacer()
+    }
+  }
+
+  private var sidebarFooter: some View {
+    let stats = model.volumeStats
+    let fraction = stats.total > 0 ? min(1, Double(stats.used) / Double(stats.total)) : 0
+    return VStack(alignment: .leading, spacing: 8) {
+      HStack {
+        Text("Macintosh HD")
+          .font(.caption.weight(.semibold))
+        Spacer()
+        Text(ByteFormatter.string(stats.free) + " free")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      ProgressView(value: fraction)
+        .progressViewStyle(.linear)
+      Text("Trash-first • Local-only")
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+    .padding(12)
+    .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+  }
+
+  private var operationBar: some View {
+    HStack(spacing: 10) {
+      if model.isScanning || model.isWorking {
+        ProgressView().controlSize(.small)
+      } else {
+        Image(
+          systemName: model.scanIssues.isEmpty
+            ? "checkmark.circle.fill" : "exclamationmark.triangle.fill"
+        )
+        .foregroundStyle(model.scanIssues.isEmpty ? .green : .orange)
+      }
+
+      VStack(alignment: .leading, spacing: 1) {
+        if let title = model.operationTitle {
+          Text(title).font(.caption.weight(.semibold))
+        }
+        Text(model.statusMessage)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
+
+      Spacer()
+
+      if model.isScanning {
+        Button("Cancel") { model.cancelCurrentOperation() }
+          .controlSize(.small)
+      }
+
+      if !model.scanIssues.isEmpty {
+        Button {
+          showingIssues = true
+        } label: {
+          Label(
+            "\(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")",
+            systemImage: "exclamationmark.triangle")
+        }
+        .controlSize(.small)
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(.bar)
+    .overlay(alignment: .top) { Divider() }
+  }
+}
