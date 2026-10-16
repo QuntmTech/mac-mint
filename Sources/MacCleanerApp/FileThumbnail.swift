@@ -1,5 +1,5 @@
 import AppKit
-import QuickLookThumbnailing
+@preconcurrency import QuickLookThumbnailing
 import SwiftUI
 
 /// Quick Look thumbnail for a file (image, video, PDF…), falling back to the Finder icon.
