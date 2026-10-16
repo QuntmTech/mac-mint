@@ -25,10 +25,11 @@ struct SmartCareList: View {
               .foregroundStyle(.tertiary)
           }
         }
+        AIReviewPanel()
         Divider()
-        ForEach(model.recommendations) { recommendation in
+        ForEach(model.displayedRecommendations) { recommendation in
           RecommendationRow(recommendation: recommendation)
-          if recommendation.id != model.recommendations.last?.id { Divider() }
+          if recommendation.id != model.displayedRecommendations.last?.id { Divider() }
         }
       }
     }
@@ -69,6 +70,7 @@ struct RecommendationRow: View {
           .foregroundStyle(.secondary)
           .lineLimit(3)
           .fixedSize(horizontal: false, vertical: true)
+        AIRecommendationNote(recommendationID: recommendation.id)
       }
 
       Spacer(minLength: 8)

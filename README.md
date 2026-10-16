@@ -8,7 +8,8 @@ MacMint requires a signed-in account with an active plan. Purchases on macmint.c
 
 - Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
 - The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
-- Only account and license checks touch the network. Files, paths, and scan results never leave the Mac.
+- Account and license checks touch the network. File contents and personal file names never leave the Mac.
+- Optional AI features (off until the user turns them on) send an anonymized summary — item names like `com.spotify.client`, sizes, categories, app names, and home-relative folder paths with the account name and emails removed — to the PocketBase server, which calls Anthropic. See [MacMint AI](#macmint-ai).
 
 V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming SHA-256, duplicate detection, application scanner, startup inventory, history, and safety policy) and upgrades it in-place for stronger reliability, safer destructive operations, better scan visibility, exclusions, cancellation, richer review flows, and a substantially more polished desktop interface.
 
@@ -132,8 +133,17 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ### Exclusions + privacy
 - Persisted local exclusions used by cleanup, app-leftover, duplicate, and large-file scans. An exclusion inside a cache folder splits that folder instead of letting the parent be removed whole.
-- No telemetry. Network use is limited to account sign-in and license checks.
+- No telemetry. Network use is limited to account sign-in, license checks, and optional AI requests the user starts.
 - Cleanup history (with Trash locations for each moved item) and exclusions are local JSON files under `~/Library/Application Support/MacMint`.
+
+## MacMint AI
+
+Advisory only: AI never selects, changes risk, skips review, or removes anything. Every answer is labelled "AI-generated — may be wrong", and MacMint's `SafetyPolicy` verdict is shown above the AI's.
+
+- **Explain with AI…** (Cleaner, Removed Apps, Developer, Storage inside `~/Library`, Startup Items): sends only the item name and its Library area. Claude Haiku 4.5; strict identifiers (bundle ids, launchd labels) are cached server-side for 30 days.
+- **Review with AI** (Smart Care): suggested order, a note per recommendation, cautions, and insights. The "AI order" toggle changes display order only. Claude Opus 5.5.
+- **Ask MacMint**: chat over an anonymized summary of the latest scans (`AIContextBuilder`); suggested actions can only navigate. Claude Opus 5.5.
+- Server: `backend/pocketbase/pb_hooks/macmint_ai.pb.js` + `macmint_ai_lib.js`. Requires an active plan; rate limits, per-user daily caps, a global daily token budget, and a kill switch (`app_config` key `ai` → `{"enabled": false}`) that the app respects. The Anthropic key lives only on the server (env `ANTHROPIC_API_KEY` or the superuser-only `app_secrets` collection). `ai_usage` stores counts and tokens only.
 
 ## V2 user interface
 

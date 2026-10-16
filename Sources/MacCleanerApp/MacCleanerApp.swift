@@ -30,6 +30,7 @@ struct MacCleanerDesktopApp: App {
           care.start()
           updates.start()
           await account.start()
+          await account.refreshAIStatus()
         }
     }
     .windowStyle(.automatic)

@@ -18,7 +18,7 @@ struct RootView: View {
           .padding(.bottom, 8)
 
         List(
-          AppViewModel.Section.allCases,
+          AppViewModel.Section.allCases.filter { $0 != .assistant || account.aiAvailable },
           selection: Binding(
             get: { Optional(model.selectedSection) },
             set: { if let section = $0 { model.selectedSection = section } }
@@ -44,6 +44,7 @@ struct RootView: View {
         case .cleaner: CleanerView()
         case .storage: StorageExplorerView()
         case .developer: DeveloperView()
+        case .assistant: AssistantView()
         case .photos: PhotosView()
         case .removedApps: RemovedAppsView()
         case .downloads: DownloadsView()
@@ -84,6 +85,12 @@ struct RootView: View {
       Button("Cancel", role: .cancel) {}
     } message: { conflict in
       Text(conflict.message)
+    }
+    .sheet(item: $model.explainTarget) { target in
+      ExplainSheet(target: target)
+    }
+    .sheet(isPresented: $model.aiConsentPending) {
+      AIConsentSheet()
     }
     .sheet(isPresented: $model.showingCommandPalette) {
       CommandPalette()
@@ -129,7 +136,7 @@ struct RootView: View {
       }
       ProgressView(value: fraction)
         .progressViewStyle(.linear)
-      Text("Trash-first • Local-only")
+      Text("Trash-first • Scans stay local")
         .font(.caption2)
         .foregroundStyle(.tertiary)
     }

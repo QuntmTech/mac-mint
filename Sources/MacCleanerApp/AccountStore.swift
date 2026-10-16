@@ -24,11 +24,13 @@ final class AccountStore: ObservableObject {
   @Published private(set) var isBusy = false
   @Published var errorMessage: String?
   @Published var infoMessage: String?
+  /// Server kill switch for AI features (app_config `ai`); off until confirmed.
+  @Published var aiAvailable = false
 
   let deviceInfo: DeviceInfo
-  private let client: AccountClient
+  let client: AccountClient
   private let cacheURL: URL
-  private var token: String?
+  private(set) var token: String?
   private var recheckTask: Task<Void, Never>?
 
   init(supportDirectory: URL, client: AccountClient = AccountClient()) {

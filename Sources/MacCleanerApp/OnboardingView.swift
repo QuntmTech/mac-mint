@@ -65,7 +65,7 @@ struct OnboardingView: View {
       Text("Welcome to MacMint").font(.system(size: 28, weight: .bold, design: .rounded))
       point("checkmark.shield.fill", "Safe by design", "Only rebuildable caches are preselected. Personal files always need your review.")
       point("arrow.uturn.backward.circle.fill", "Everything is undoable", "Items go to the Trash with a receipt — restore any of them from History.")
-      point("lock.fill", "Private", "Scans run on your Mac. File names and contents never leave it.")
+      point("lock.fill", "Private", "Scans run on your Mac. File contents never leave it, and optional AI features only see anonymized summaries.")
     }
   }
 

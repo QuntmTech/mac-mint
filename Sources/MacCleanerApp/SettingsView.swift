@@ -15,6 +15,8 @@ struct SettingsView: View {
 
         AccountSettingsCard()
 
+        AISettingsCard()
+
         HelpersSettingsCard()
 
         AboutSettingsCard()
@@ -100,8 +102,9 @@ struct SettingsView: View {
             Label("Privacy", systemImage: "hand.raised.square")
               .font(.headline)
             settingRow("Telemetry", value: "None")
-            settingRow("Network calls", value: "Account & license checks only")
-            settingRow("Files or scan results uploaded", value: "Never")
+            settingRow("Network calls", value: model.aiEnabled ? "Account, license & AI requests" : "Account & license checks only")
+            settingRow("File contents or personal file names uploaded", value: "Never")
+            settingRow("AI summaries", value: model.aiEnabled ? "Anonymized, only when you ask" : "Off")
             settingRow("Cleanup history", value: "Local JSON")
             settingRow("Exclusions", value: "Local JSON")
           }
