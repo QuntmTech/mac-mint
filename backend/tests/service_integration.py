@@ -197,9 +197,17 @@ with ExitStack() as stack:
     call('/__test/config', dict(ai=dict(enabled=True)))
     print('PASS: organization flag, authenticated structured proposals, name-only payload and transactional allowance')
 
-    status, _ = call('/api/macmint/ai/explain', dict(kind='library-item', identifier='Jane jane@example.invalid.pages', location='Caches'), token)
-    assert status == 200
-    assert 'jane@example.invalid' not in json.dumps(SENT[-1])
+    count = len(SENT)
+    explained = db.execute("SELECT explain FROM ai_usage").fetchone()[0]
+    for kind, name in [('library-item', 'Jane jane@example.invalid.pages'), ('developer-tool', 'Jane secret tool'), ('launch-agent', 'com.jane.private')]:
+        status, local = call('/api/macmint/ai/explain', dict(kind=kind, identifier=name, location='Caches'), token)
+        assert status == 200 and local['model'] == 'local' and local['explanation']['verdict'] == 'unknown', (status, local)
+    assert len(SENT) == count, 'Placeholder explanations reached the provider'
+    assert db.execute("SELECT explain FROM ai_usage").fetchone()[0] == explained
+    assert db.execute("SELECT COUNT(*) FROM ai_requests WHERE feature='explain'").fetchone()[0] == 0
+    status, known = call('/api/macmint/ai/explain', dict(kind='library-item', identifier='com.spotify.client', location='Caches'), token)
+    assert status == 200 and known['model'] != 'local' and len(SENT) == count + 1, known
+    print('PASS: unrecognized explain placeholders are answered locally with zero provider calls and no allowance')
     status, _ = call('/api/macmint/ai/review', dict(recommendations=[dict(id='caches', title='秘密', detail='jane@example.invalid', bytes=100)]), token)
     assert status == 200
     assert 'jane@example.invalid' not in json.dumps(SENT[-1])

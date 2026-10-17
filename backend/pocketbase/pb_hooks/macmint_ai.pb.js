@@ -28,6 +28,7 @@ routerAdd("POST", "/api/macmint/ai/explain", (e) => {
 
   const off = ai.disabled(e.app, "explain")
   if (off) return ai.fail(e, off[0], off[1], off[2])
+  if (privacy.isPlaceholder(identifier)) return e.json(200, { explanation: privacy.localExplanation(kind), cached: false, model: "local" })
 
   const cacheable = ai.isCacheable(kind, identifier)
   const key = ai.cacheKey(kind, location, identifier)

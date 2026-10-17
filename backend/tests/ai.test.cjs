@@ -242,3 +242,15 @@ test('stale pending and uncertain reservations are flagged once and never freed'
     [['uncertain', true], ['pending', true], ['settled', false], ['uncertain', false]])
 })
 
+test('unrecognized explain placeholders are answered locally in the explanation shape', () => {
+  for (const kind of ['library-item', 'launch-agent', 'developer-tool']) {
+    const name = privacy.identifier(kind, 'Jane private project')
+    assert.equal(privacy.isPlaceholder(name), true)
+    const local = privacy.localExplanation(kind)
+    assert.deepEqual(Object.keys(local).sort(), ai.EXPLAIN_SCHEMA.required.slice().sort())
+    assert.ok(ai.EXPLAIN_SCHEMA.properties.category.enum.includes(local.category))
+    assert.deepEqual([local.verdict, local.confidence], ['unknown', 'low'])
+  }
+  assert.equal(privacy.isPlaceholder(privacy.identifier('library-item', 'com.spotify.client')), false)
+  assert.equal(privacy.isPlaceholder(privacy.identifier('developer-tool', 'Xcode')), false)
+})
