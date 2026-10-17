@@ -75,16 +75,25 @@ public struct AccountSnapshot: Codable, Hashable, Sendable {
   public let devices: [RegisteredDevice]
   public let device: RegisteredDevice?
   public let serverTime: String?
+  /// Signed offline evidence for the requesting Mac (see EntitlementAssertion.swift). Absent from
+  /// servers that predate it and when this Mac isn't an active device of an active plan.
+  public let entitlementAssertion: String?
 
   public init(
     user: AccountUser, entitlement: Entitlement, devices: [RegisteredDevice] = [],
-    device: RegisteredDevice? = nil, serverTime: String? = nil
+    device: RegisteredDevice? = nil, serverTime: String? = nil, entitlementAssertion: String? = nil
   ) {
     self.user = user
     self.entitlement = entitlement
     self.devices = devices
     self.device = device
     self.serverTime = serverTime
+    self.entitlementAssertion = entitlementAssertion
+  }
+
+  /// The display copy kept for offline use carries no evidence of its own.
+  public var withoutAssertion: AccountSnapshot {
+    AccountSnapshot(user: user, entitlement: entitlement, devices: devices, device: device, serverTime: serverTime)
   }
 }
 
@@ -159,7 +168,9 @@ public struct CachedAccess: Codable, Hashable, Sendable {
 public enum AccessPolicy {
   public static let defaultOfflineGraceDays = 14
 
-  /// Whether a previously verified entitlement may unlock the app while the server is unreachable.
+  /// How long an online verification made by this running app keeps it unlocked. It is held in
+  /// memory only; after a restart, offline access requires a signed assertion
+  /// (`OfflineEntitlementPolicy`), because a file on disk can be edited.
   public static func allowsOffline(
     _ cached: CachedAccess?, now: Date = Date(), graceDays: Int = defaultOfflineGraceDays
   ) -> Bool {
@@ -216,12 +227,17 @@ public struct AccountClient: Sendable {
       body: ["email": email.trimmingCharacters(in: .whitespaces)])
   }
 
-  public func me(token: String) async throws -> AccountSnapshot {
-    try await send("GET", "/api/macmint/me", token: token)
+  /// `deviceId` asks the server for a signed offline assertion for that Mac.
+  public func me(token: String, deviceId: String? = nil) async throws -> AccountSnapshot {
+    try await send(
+      "GET", "/api/macmint/me", token: token, bodyData: nil,
+      query: deviceId.map { [URLQueryItem(name: "device_id", value: $0)] } ?? [])
   }
 
-  public func redeem(code: String, token: String) async throws -> AccountSnapshot {
-    try await send("POST", "/api/macmint/redeem", token: token, body: ["code": code])
+  public func redeem(code: String, token: String, deviceId: String? = nil) async throws -> AccountSnapshot {
+    var body = ["code": code]
+    if let deviceId { body["device_id"] = deviceId }
+    return try await send("POST", "/api/macmint/redeem", token: token, body: body)
   }
 
   public func activate(_ device: DeviceInfo, token: String) async throws -> AccountSnapshot {
@@ -281,9 +297,15 @@ public struct AccountClient: Sendable {
   }
 
   private func send<T: Decodable>(
-    _ method: String, _ path: String, token: String?, bodyData: Data?, timeout: TimeInterval = 20
+    _ method: String, _ path: String, token: String?, bodyData: Data?, timeout: TimeInterval = 20,
+    query: [URLQueryItem] = []
   ) async throws -> T {
-    var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    var url = baseURL.appendingPathComponent(path)
+    if !query.isEmpty, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      components.queryItems = query
+      url = components.url ?? url
+    }
+    var request = URLRequest(url: url)
     request.httpMethod = method
     request.timeoutInterval = timeout
     request.setValue("application/json", forHTTPHeaderField: "Accept")
