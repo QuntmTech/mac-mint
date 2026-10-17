@@ -184,7 +184,7 @@ final class AppViewModel: ObservableObject {
   private let largeFileFinder = LargeFileFinder()
   private let duplicateFinder = DuplicateFinder()
   let safetyPolicy = SafetyPolicy()
-  let duplicateVerifier = DuplicateRemovalVerifier()
+  var duplicateVerifier = DuplicateRemovalVerifier()
   let organizationStore: OrganizationStore
   let historyStore: HistoryStore
   let supportDirectory: URL
@@ -253,6 +253,7 @@ final class AppViewModel: ObservableObject {
   func runSmartScan() { runSmartCare() }
 
   func cancelCurrentOperation() {
+    if isPreparingPlan, !isScanning, !isWorking { cancelPlanPreparation(); return }
     guard isScanning || isWorking else { return }
     currentTask?.cancel()
     statusMessage = isWorking ? "Stopping after the current item…" : "Stopping scan…"
@@ -566,6 +567,13 @@ final class AppViewModel: ObservableObject {
 
   func beginScan(title: String, message: String) -> Bool {
     guard requireExclusions() else { return false }
+    // A scan replaces the findings a pending or preparing review was built from.
+    guard !isPreparingPlan, pendingPlan == nil else {
+      statusMessage = isPreparingPlan
+        ? "A review is being prepared. Cancel it or wait for it before starting a scan."
+        : "Finish or cancel the open review before starting a scan."
+      return false
+    }
     isScanning = true
     operationTitle = title
     invalidateAIReview()

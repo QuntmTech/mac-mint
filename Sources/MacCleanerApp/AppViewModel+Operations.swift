@@ -237,7 +237,10 @@ extension AppViewModel {
   }
 
   private func presentPlan(_ plan: OperationPlan) {
-    guard !isWorking, !isScanning else { return }
+    guard !isWorking, !isScanning else {
+      statusMessage = "Another operation is running. Your selections are kept; review them when it finishes."
+      return
+    }
     guard !plan.isEmpty || !plan.excluded.isEmpty else {
       statusMessage = "Nothing selected to review"
       return
@@ -249,15 +252,32 @@ extension AppViewModel {
     message: String, _ build: @escaping @MainActor (AppViewModel) async -> OperationPlan
   ) {
     guard !isWorking, !isScanning, !isPreparingPlan else { return }
+    planPreparationGeneration &+= 1
+    let generation = planPreparationGeneration
     isPreparingPlan = true
+    operationTitle = "Preparing review"
     statusMessage = message
-    Task { [weak self] in
+    planPreparationTask = Task { [weak self] in
       guard let self else { return }
       let plan = await build(self)
+      // Cancellation already cleared the busy state; a late plan is never presented.
+      guard !Task.isCancelled, generation == planPreparationGeneration else { return }
+      planPreparationTask = nil
       isPreparingPlan = false
-      statusMessage = "Ready"
+      operationTitle = nil
+      statusMessage = "Review ready"
       presentPlan(plan)
     }
+  }
+
+  func cancelPlanPreparation() {
+    guard isPreparingPlan else { return }
+    planPreparationGeneration &+= 1
+    planPreparationTask?.cancel()
+    planPreparationTask = nil
+    isPreparingPlan = false
+    operationTitle = nil
+    statusMessage = "Review preparation cancelled. Your selections are kept."
   }
 
   /// Re-verifies selected duplicate copies (live keeper, unchanged content) before planning.
@@ -265,8 +285,15 @@ extension AppViewModel {
     let groups = duplicateGroups
     let selection = selectedDuplicateIDs
     guard !selection.isEmpty else { return ([], []) }
+    let preparation = planPreparationGeneration
     let verified = await duplicateVerifier.plan(
-      groups: groups, selectedIDs: selection, ignoredPaths: ignoredPaths)
+      groups: groups, selectedIDs: selection, ignoredPaths: ignoredPaths
+    ) { checked, total in
+      Task { @MainActor [weak self] in
+        guard let self, self.isPreparingPlan, self.planPreparationGeneration == preparation else { return }
+        self.statusMessage = "Verifying duplicate copies… \(checked.formatted()) of \(total.formatted()) groups"
+      }
+    }
     let approvedIDs = Set(verified.approved.map(\.id))
     let items = groups.flatMap { group -> [PlanItem] in
       let keeper = group.files.first { !selection.contains($0.id) }

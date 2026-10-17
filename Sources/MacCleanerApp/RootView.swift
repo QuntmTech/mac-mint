@@ -320,7 +320,7 @@ struct RootView: View {
           .frame(width: 140)
       }
 
-      if model.isScanning || model.isWorking {
+      if model.isScanning || model.isWorking || model.isPreparingPlan {
         Button(model.isWorking ? "Stop" : "Cancel") { model.cancelCurrentOperation() }
           .controlSize(.small)
       }
