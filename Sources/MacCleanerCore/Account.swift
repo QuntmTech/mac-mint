@@ -216,8 +216,9 @@ public struct AccountClient: Sendable {
   public typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
   public static let defaultBaseURL = URL(string: "https://macmint.cloudpod.pro")!
-  /// Total deadline for one account request, including retries inside URLSession.
-  public static let resourceTimeout: TimeInterval = 45
+  /// Total deadline for one request, including retries inside URLSession. Above the longest
+  /// per-request timeout (45 s AI review/ask) so it only cuts off requests that are stuck.
+  public static let resourceTimeout: TimeInterval = 60
 
   /// Account traffic carries bearer tokens and entitlements: no disk/URL cache, cookies or
   /// cached responses, and a hard total deadline.
