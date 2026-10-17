@@ -1,14 +1,16 @@
 /// <reference path="../pb_data/types.d.ts" />
 // MacMint account + licensing API.
 //
-// GET  /api/macmint/me                    (user)  account, entitlement, devices
-// POST /api/macmint/redeem                (user)  { code } -> unlocks Pro
-// POST /api/macmint/devices/activate      (user)  { device_id, name?, model?, os_version?, app_version? }
+// GET  /api/macmint/me?device_id=          (user)  account, entitlement, devices
+// POST /api/macmint/redeem                (user)  { code, device_id? } -> unlocks Pro
+// POST /api/macmint/devices/activate      (user)  { device_id, reactivate?, name?, model?, os_version?, app_version? }
 // POST /api/macmint/devices/deactivate    (user)  { device_id }
 // POST /api/macmint/admin/licenses        (superuser) { count, plan, duration_days?, max_devices?, source?, note?, order_ref? }
 // site_events (anonymous A/B funnel events): `user` is attached from the auth token only.
 //
 // Collections are locked to clients for writes; every entitlement/device change goes through here.
+// When device_id names an active device of an active plan, responses also carry a signed
+// `entitlement_assertion` for offline access (macmint_entitlement.js). The field is additive.
 
 onRecordAfterCreateSuccess((e) => {
   const lib = require(`${__hooks}/macmint_lib.js`)
@@ -29,15 +31,20 @@ onRecordCreateRequest((e) => {
 
 routerAdd("GET", "/api/macmint/me", (e) => {
   const lib = require(`${__hooks}/macmint_lib.js`)
+  const entitlements = require(`${__hooks}/macmint_entitlement.js`)
   lib.noStore(e)
-  return e.json(200, lib.mePayload(e.app, e.auth))
+  let deviceId = ""
+  try { deviceId = String(e.requestInfo().query["device_id"] || "").trim() } catch (err) { deviceId = "" }
+  return e.json(200, entitlements.attach(e.app, lib.mePayload(e.app, e.auth), deviceId))
 }, $apis.requireAuth("users"))
 
 routerAdd("POST", "/api/macmint/redeem", (e) => {
   const lib = require(`${__hooks}/macmint_lib.js`)
+  const entitlements = require(`${__hooks}/macmint_entitlement.js`)
   lib.noStore(e)
   const user = e.auth
-  const code = lib.normalizeCode(lib.body(e).code)
+  const input = lib.body(e)
+  const code = lib.normalizeCode(input.code)
   if (code.length < 12 || code.length > 64) {
     return e.json(400, { error: "invalid_code", message: "Enter the full redemption code from your purchase email." })
   }
@@ -85,7 +92,7 @@ routerAdd("POST", "/api/macmint/redeem", (e) => {
     lib.logEvent(e.app, "redeem_failed", user.id, { reason: failure.error })
     return e.json(failure.status, { error: failure.error, message: failure.message })
   }
-  const payload = lib.mePayload(e.app, user)
+  const payload = entitlements.attach(e.app, lib.mePayload(e.app, user), String(input.device_id || "").trim())
   payload.redeemed = true
   payload.already_redeemed = alreadyRedeemed
   return e.json(200, payload)
@@ -93,6 +100,7 @@ routerAdd("POST", "/api/macmint/redeem", (e) => {
 
 routerAdd("POST", "/api/macmint/devices/activate", (e) => {
   const lib = require(`${__hooks}/macmint_lib.js`)
+  const entitlements = require(`${__hooks}/macmint_entitlement.js`)
   lib.noStore(e)
   const user = e.auth
   const data = lib.body(e)
@@ -104,7 +112,7 @@ routerAdd("POST", "/api/macmint/devices/activate", (e) => {
   try {
     data.device_id = deviceId
     const device = lib.activateDevice(e.app, user, data)
-    const payload = lib.mePayload(e.app, user)
+    const payload = entitlements.attach(e.app, lib.mePayload(e.app, user), deviceId)
     payload.device = device
     return e.json(200, payload)
   } catch (err) {
