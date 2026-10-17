@@ -212,10 +212,15 @@ extension AppViewModel {
   // MARK: Execution
 
   func execute(_ plan: OperationPlan) {
-    guard requireExclusions() else { return }
+    // Refuse before closing the review, so a refused confirmation never looks like it ran.
+    guard !isWorking, !isScanning else {
+      statusMessage = "Another task is still running. Your review is kept; confirm again when it finishes."
+      return
+    }
+    guard requireExclusions(), requireRecoveryReady(), requireReadableHistory() else { return }
     let plan = normalizeReview(plan)
     pendingPlan = nil
-    guard !isWorking, !isScanning, !plan.isEmpty else { return }
+    guard !plan.isEmpty else { return }
     guard authorizeRemoval() else {
       deferredPlan = plan
       Task { await Task.yield(); showingAccount = true }
@@ -227,11 +232,14 @@ extension AppViewModel {
     operationProgress = OperationProgress(
       completed: 0, total: plan.items.count, currentName: nil, bytesMoved: 0)
     let excluded = ignoredPaths
+    // Owner hints from folder names are lowercased; LaunchServices lookups may not be.
+    let runningAtStart = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
     let executor = OperationExecutor(
       trashService: MacTrashService(), safetyPolicy: safetyPolicy,
       journalDirectory: operationJournalDirectory,
       isAppRunning: { bundleID in
-        !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
+        runningAtStart.contains(bundleID.lowercased())
+          || !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
       })
 
     currentTask = Task { [weak self] in
@@ -335,6 +343,22 @@ extension AppViewModel {
       }
     }
     statusMessage = "Reconciled \(committed) operation records; \(reports.count - committed) still need a History commit — see History"
+  }
+
+  /// Organizer intents interrupted by a crash are reconciled at launch, not only when the Organizer opens.
+  func reconcileInterruptedOrganization() async {
+    do {
+      let report = try await organizationStore.historyReport()
+      recoveryWarnings += report.warnings.map { ScanIssue(area: "Organization", path: nil, message: $0) }
+      let uncertain = report.records.flatMap(\.items).filter { $0.state == .uncertain }.count
+      if uncertain > 0 {
+        recoveryWarnings.append(ScanIssue(area: "Organization", path: nil,
+          message: "\(uncertain) organized file(s) need verification. Open Storage → Organize → History to inspect them."))
+      }
+    } catch {
+      recoveryWarnings.append(ScanIssue(area: "Organization", path: nil,
+        message: "Organization records could not be read. They have been preserved; Undo remains available from Storage → Organize."))
+    }
   }
 
   // MARK: Recovery
