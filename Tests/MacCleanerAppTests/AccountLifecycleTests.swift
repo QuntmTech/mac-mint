@@ -422,6 +422,26 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertEqual(count, 5, "Without valid access every activation checks again")
   }
 
+  func testLateAIStatusAfterSignOutIsIgnored() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await store.refreshAIStatus()
+    XCTAssertTrue(store.aiAvailable)
+    await fixture.hold("app_config/records")
+    let refreshing = Task { await store.refreshAIStatus() }
+    try await waitUntilPaused(fixture)
+    await store.signOut()
+    XCTAssertFalse(store.aiAvailable)
+    await fixture.resumeVerification()
+    await refreshing.value
+    XCTAssertFalse(store.aiAvailable, "The late response belongs to the signed-out session")
+    XCTAssertFalse(store.aiStatus.enabled)
+  }
+
   func testRepeatedSubmitDoesNotLaunchOverlappingAuthentication() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }

@@ -18,8 +18,12 @@ extension AccountStore {
   }
 
   func refreshAIStatus() async {
-    aiStatus = await client.aiStatus()
-    aiAvailable = aiStatus.enabled
+    let generation = sessionGeneration
+    let status = await client.aiStatus()
+    // A response that arrives after sign-out (or a newer sign-in) must not re-enable AI.
+    guard generation == sessionGeneration else { return }
+    aiStatus = status
+    aiAvailable = status.enabled
   }
 
   /// The organizer's frozen payload is approved separately on every request.

@@ -87,7 +87,8 @@ final class AccountStore: ObservableObject {
   private var offlineRecord: OfflineEntitlementRecord?
   /// Latest time this Mac has seen; blocks winding the clock back to stretch offline access.
   private var highWater: Date?
-  private var sessionGeneration = UUID()
+  /// Changes on every sign-in/out; late responses from an older session compare and drop out.
+  private(set) var sessionGeneration = UUID()
   private var lastVerification: Date?
   private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
