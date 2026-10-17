@@ -322,6 +322,40 @@ private struct DeviceRemovedPanel: View {
   }
 }
 
+private struct AccessLapsedPanel: View {
+  @EnvironmentObject private var account: AccountStore
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Label("MacMint Pro needs to be checked again", systemImage: "clock.badge.exclamationmark")
+        .font(.title3.bold())
+      Text(account.isOffline
+        ? "This Mac has been offline longer than MacMint Pro allows without a check, or your access period ended. Connect to the internet and check again."
+        : "Your access period may have ended. Check again to confirm your plan for this Mac.")
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      Button {
+        Task { await account.retry() }
+      } label: {
+        HStack {
+          if account.isBusy || account.phase == .checking { ProgressView().controlSize(.small) }
+          Text("Check Again").frame(maxWidth: .infinity)
+        }
+      }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .disabled(account.isBusy)
+      HStack {
+        Button("Buy MacMint") { account.openPurchasePage() }
+        Spacer()
+        Button("Sign Out") { Task { await account.signOut() } }
+      }
+      .buttonStyle(.link)
+      .tint(AppTheme.accentText)
+      .font(.callout)
+    }
+  }
+}
+
 private struct FailurePanel: View {
   @EnvironmentObject private var account: AccountStore
   let message: String
@@ -421,6 +455,7 @@ struct AccountAccessSheet: View {
       Button("Continue inspecting locally") { dismiss() }.padding()
       Group {
         switch account.phase {
+        case .active where account.accessLapsed: GateScaffold { AccessLapsedPanel() }
         case .active: Text("MacMint Pro is active. Return to review to confirm your selection.").padding(32)
         case .checking: ProgressView("Checking account…").padding(50)
         case .signedOut: GateScaffold { AuthForm() }

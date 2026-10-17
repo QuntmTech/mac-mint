@@ -115,6 +115,13 @@ final class AccountStore: ObservableObject {
 
   var isOffline: Bool { phase == .active(offline: true) }
 
+  /// Access was granted earlier but its window has since passed (plan expiry or the offline
+  /// window). The phase stays `.active` until the next check, so the UI must offer one.
+  var accessLapsed: Bool {
+    if case .active = phase { return !isUnlocked }
+    return false
+  }
+
   // MARK: Lifecycle
 
   func start() async {

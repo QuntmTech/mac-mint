@@ -30,6 +30,25 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertFalse(store.isUnlocked)
   }
 
+  func testLapsedAccessIsReportedAndCheckAgainVerifies() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), clock = TestClock(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertFalse(store.accessLapsed)
+    clock.advance(14 * 86_400 + 1)
+    XCTAssertEqual(store.phase, .active(offline: false))
+    XCTAssertFalse(store.isUnlocked)
+    XCTAssertTrue(store.accessLapsed, "Still .active, but the sheet must offer Check Again")
+    await store.retry()
+    let checks = await fixture.verifications
+    XCTAssertEqual(checks, 1)
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertFalse(store.accessLapsed)
+  }
+
   func testForegroundVerificationDoesNotReactivateRemovedDevice() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
