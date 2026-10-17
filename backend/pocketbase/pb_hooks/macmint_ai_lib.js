@@ -21,8 +21,16 @@ const MODELS = {
 }
 const DAILY_LIMITS = { explain: 150, review: 8, ask: 30, organize: 8 }
 const DEFAULT_GLOBAL_TOKEN_BUDGET = 3000000
+const DEFAULT_USER_DAILY_USD_CAP = 1.5
 const CACHE_TTL_DAYS = 30
 const HTTP_TIMEOUT_SECONDS = 30
+// Review and organization generate long structured answers. A 30 s cut-off abandoned
+// requests the provider had already accepted, leaving them as uncertain reservations.
+const LONG_HTTP_TIMEOUT_SECONDS = 90
+const TIMEOUTS = { explain: HTTP_TIMEOUT_SECONDS, ask: HTTP_TIMEOUT_SECONDS, review: LONG_HTTP_TIMEOUT_SECONDS, organize: LONG_HTTP_TIMEOUT_SECONDS }
+// Message framing and the structured-output grammar, on top of the serialized request.
+const INPUT_OVERHEAD_TOKENS = 1024
+const STALE_RESERVATION_MS = 3600000
 
 const DESTINATIONS = [
   "dashboard", "review", "cleaner", "storage", "developer", "downloads", "photos", "removedApps",
@@ -84,6 +92,18 @@ function config(app) {
   }
 }
 
+// Budgets, caps and models are private (app_config key "ai_limits", public = false). Older
+// installations kept them in the public "ai" record; those values remain a fallback.
+function limits(app) {
+  const result = {}
+  const legacy = config(app)
+  for (const key of Object.keys(legacy)) if (key !== "enabled" && key !== "features") result[key] = legacy[key]
+  let record = null
+  try { record = jsonField(app.findFirstRecordByFilter("app_config", "key = 'ai_limits'").get("value")) } catch (_) {}
+  if (record && typeof record === "object" && !Array.isArray(record)) Object.assign(result, record)
+  return result
+}
+
 function usageRecord(app, userId, day) {
   try {
     return app.findFirstRecordByFilter("ai_usage", "user = {:u} && day = {:d}", { u: userId, d: day })
@@ -117,7 +137,7 @@ function disabled(app, feature) {
 }
 
 function effectiveModel(app, feature) {
-  const cfg = config(app)
+  const cfg = limits(app)
   const model = (cfg.models && cfg.models[feature]) || MODELS[feature]
   if (!Object.prototype.hasOwnProperty.call(PRICES, model)) throw { status: 503, code: "ai_model_config" }
   return model
@@ -146,7 +166,7 @@ function dailyBudget(app, day) {
 }
 
 function capacityError(code) {
-  return { status: code === "ai_daily_limit" ? 429 : 503, code: code }
+  return { status: code === "ai_daily_limit" || code === "ai_user_budget" ? 429 : 503, code: code }
 }
 
 function positive(value, fallback) {
@@ -156,21 +176,30 @@ function positive(value, fallback) {
   return n
 }
 
+// A user's open (pending or uncertain) reservations for the day still count against them.
+function outstandingUserReservations(app, userId, day) {
+  const rows = app.findRecordsByFilter("ai_requests", "user = {:u} && day = {:d} && (state = 'pending' || state = 'uncertain')", "", 1000, 0, { u: userId, d: day }) || []
+  return rows.reduce((sum, row) => sum + Number(row.get("reserved_micro_usd") || 0), 0)
+}
+
 // Only counts, model, dates, and budgets are persisted. Never store questions or summaries.
 function reserve(app, userId, feature, model, inputUpperBound, maxOutput) {
   let reservation
   app.runInTransaction((tx) => {
     const off = disabled(tx, feature)
     if (off) throw { status: off[0], code: off[1] }
-    const cfg = config(tx)
+    const cfg = limits(tx)
     const tokenBudget = positive($os.getenv("AI_DAILY_TOKEN_BUDGET") || cfg.daily_token_budget, DEFAULT_GLOBAL_TOKEN_BUDGET)
     const moneyBudget = positive($os.getenv("AI_DAILY_USD_BUDGET") || cfg.daily_usd_budget, 20) * 1000000
+    const userCap = positive($os.getenv("AI_USER_DAILY_USD_CAP") || cfg.user_daily_usd_cap, DEFAULT_USER_DAILY_USD_CAP) * 1000000
     const day = today()
     const usage = usageRecord(tx, userId, day)
     if (Number(usage.get(feature) || 0) >= DAILY_LIMITS[feature]) throw capacityError("ai_daily_limit")
     const budget = dailyBudget(tx, day), prices = PRICES[model]
     const tokens = inputUpperBound + maxOutput
     const cost = Math.ceil(inputUpperBound * Math.max(prices.input, prices.write) + maxOutput * prices.output)
+    // One account cannot drain the shared pool: spend plus open reservations stay under the cap.
+    if (Number(usage.get("spent_micro_usd") || 0) + outstandingUserReservations(tx, userId, day) + cost > userCap) throw capacityError("ai_user_budget")
     if (Number(budget.get("used_tokens") || 0) + Number(budget.get("reserved_tokens") || 0) + tokens > tokenBudget ||
         Number(budget.get("spent_micro_usd") || 0) + Number(budget.get("reserved_micro_usd") || 0) + cost > moneyBudget) {
       throw capacityError("ai_capacity")
@@ -235,14 +264,25 @@ function settle(app, id, usage, knownNoCharge) {
   })
 }
 
+// Conservative input estimate without a second provider request. Claude averages about
+// 3.5-4 characters per token for English and JSON, so count ASCII at 3 characters per
+// token; other text can approach a token per UTF-16 unit, so count those at 2. Digit-heavy
+// text can tokenize denser, so this is not a strict bound: settlement records actual usage
+// and the shared budget can overshoot by at most a fraction of the requests in flight. The
+// old 4-tokens-per-character bound reserved 10-15x actual usage and starved the shared pool.
+// No tools, images, fast mode, or regional pricing are used.
+function inputUpperBound(text) {
+  let ascii = 0
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) < 128) ascii++
+  return Math.ceil(ascii / 3) + (text.length - ascii) * 2 + INPUT_OVERHEAD_TOKENS
+}
+
 function request(app, userId, feature, system, data, schema, maxTokens) {
   const model = effectiveModel(app, feature)
-  // Four bytes per UTF-16 code unit + provider/schema overhead conservatively bounds input
-  // tokens without a second provider request. No tools, images, fast mode, or regional pricing.
-  const upper = JSON.stringify({ system, data, schema }).length * 4 + 8192
+  const upper = inputUpperBound(JSON.stringify({ system, data, schema }))
   const reservation = reserve(app, userId, feature, model, upper, maxTokens)
   let result
-  try { result = claude(app, model, system, data, schema, maxTokens) }
+  try { result = claude(app, model, system, data, schema, maxTokens, TIMEOUTS[feature] || HTTP_TIMEOUT_SECONDS) }
   catch (err) {
     try { settle(app, reservation, err.usage, err.noCharge === true) }
     catch (_) { throw { status: 503, code: "ai_accounting" } }
@@ -269,7 +309,17 @@ function apiKey(app) {
   }
 }
 
-function claude(app, model, system, data, schema, maxTokens) {
+// $http.send throws Go transport errors as text. "dial tcp" covers DNS failure, refused
+// and unreachable connections (including via a proxy), and "x509:" a rejected certificate:
+// both fail before any request byte is written, so the provider cannot have billed them.
+// Timeouts ("context deadline exceeded") and resets may follow an accepted request and
+// stay uncertain; a TLS handshake timeout is indistinguishable and is treated the same.
+function neverConnected(err) {
+  const text = String((err && (err.message || err.value)) || err || "")
+  return /\bdial tcp\b|\bx509: /.test(text)
+}
+
+function claude(app, model, system, data, schema, maxTokens, timeout) {
   const key = apiKey(app)
   if (!key) throw { status: 503, code: "ai_not_configured", noCharge: true }
   let res
@@ -277,7 +327,7 @@ function claude(app, model, system, data, schema, maxTokens) {
     res = $http.send({
       url: "https://api.anthropic.com/v1/messages",
       method: "POST",
-      timeout: HTTP_TIMEOUT_SECONDS,
+      timeout: timeout || HTTP_TIMEOUT_SECONDS,
       headers: {
         "x-api-key": key,
         "anthropic-version": "2023-06-01",
@@ -299,6 +349,7 @@ function claude(app, model, system, data, schema, maxTokens) {
       }),
     })
   } catch (err) {
+    if (neverConnected(err)) throw { status: 503, code: "ai_unreachable", noCharge: true }
     throw { status: 503, code: "ai_timeout" }
   }
   if (res.statusCode === 429 || res.statusCode === 529) throw { status: 503, code: "ai_busy", noCharge: true }
@@ -319,6 +370,8 @@ function claude(app, model, system, data, schema, maxTokens) {
 const ERROR_MESSAGES = {
   ai_disabled: "AI features are turned off right now.",
   ai_daily_limit: "You've reached today's limit for this AI feature. It resets tomorrow.",
+  ai_user_budget: "You've reached today's AI usage limit for your account. It resets tomorrow.",
+  ai_unreachable: "The AI service couldn't be reached. Please try again.",
   ai_capacity: "AI has reached today's token or spending budget. Please try tomorrow.",
   ai_model_config: "AI model configuration needs attention.",
   ai_accounting: "AI usage could not be safely recorded. Please try later.",
@@ -332,6 +385,27 @@ function handleError(e, err) {
   const status = (err && err.status) || 500
   const code = (err && err.code) || "ai_error"
   return fail(e, status, code, ERROR_MESSAGES[code] || "Something went wrong with the AI request.")
+}
+
+// Pending or uncertain reservations older than an hour are flagged once for operator
+// reconciliation (POST /api/macmint/admin/ai-reconcile). Nothing is freed automatically:
+// an uncertain request may have been billed.
+function flagStaleReservations(app, nowMillis) {
+  const now = nowMillis || Date.now()
+  const cutoff = new Date(now - STALE_RESERVATION_MS).toISOString().replace("T", " ")
+  const rows = app.findRecordsByFilter("ai_requests", "(state = 'pending' || state = 'uncertain') && created < {:c} && flagged_at = ''", "created", 500, 0, { c: cutoff }) || []
+  let flagged = 0
+  for (const row of rows) {
+    // Re-read inside a transaction so a concurrent settlement is never overwritten.
+    app.runInTransaction(tx => {
+      const current = tx.findRecordById("ai_requests", row.id)
+      // Date fields return a wrapper object even when unset; its string form is "" then.
+      if (["pending", "uncertain"].indexOf(String(current.get("state"))) < 0 || String(current.get("flagged_at") || "")) return
+      current.set("flagged_at", new Date(now).toISOString()); tx.save(current); flagged++
+    })
+  }
+  if (flagged) app.logger().warn("macmint: AI reservations need operator reconciliation", "count", flagged)
+  return flagged
 }
 
 // ---------- explain cache ----------
@@ -508,7 +582,8 @@ function requirePlan(e) {
 
 module.exports = {
   PROMPT_VERSION, MODELS, DESTINATIONS, LOCATIONS, KINDS, DAILY_LIMITS,
-  today, clip, body, fail, disabled, request, reserve, settle, meteredUsage, effectiveModel, PRICES, handleError,
+  today, clip, body, fail, disabled, limits, request, reserve, settle, meteredUsage, effectiveModel, PRICES, handleError,
+  inputUpperBound, neverConnected, flagStaleReservations, TIMEOUTS,
   cacheKey, isCacheable, cachedExplanation, storeExplanation, oneOf, cleanActions, requirePlan,
   EXPLAIN_SYSTEM, EXPLAIN_SCHEMA, REVIEW_SYSTEM, REVIEW_SCHEMA, ASK_SYSTEM, ASK_SCHEMA,
 }

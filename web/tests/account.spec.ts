@@ -13,7 +13,7 @@ async function backend(page: Page, signedIn = false, verified = true) {
     statusOffer: undefined as { amount_minor: number; currency: string; plan: string; duration_days: number; max_devices: number } | undefined,
     offer: { enabled: true, amount_minor: 7900, currency: 'usd', duration_days: 365, max_devices: 3 },
     configFails: false, configWait: Promise.resolve(), checkoutWait: Promise.resolve(),
-    status: 'pending' as 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'not_found',
+    status: 'pending' as 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'refunded' | 'disputed' | 'not_found',
     statusCanStartNew: false, statusFails: false, statusRequests: [] as string[],
     active: false, accountRequests: 0,
     checkoutRequests: [] as { request_key: string }[], analytics: 0, unexpected: [] as string[] }
@@ -261,7 +261,7 @@ test('an expiry message or unrecognized checkout cannot authorize replacing a pe
   expect(state.unexpected).toEqual([])
 })
 
-for (const terminal of ['expired', 'failed'] as const) {
+for (const terminal of ['expired', 'failed', 'refunded'] as const) {
   test(`a processing return can start anew after server-confirmed ${terminal}`, async ({ page }) => {
     const state = await backend(page, true)
     await retainCheckout(page)
@@ -278,6 +278,20 @@ for (const terminal of ['expired', 'failed'] as const) {
     expect(state.unexpected).toEqual([])
   })
 }
+
+test('a disputed payment pauses access and blocks another payment without polling forever', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  state.status = 'disputed'; state.statusCanStartNew = false
+  await page.goto('/account?checkout=processing')
+  await expect(page.getByRole('alert').filter({ hasText: 'disputed' })).toBeVisible()
+  await expect(page.getByText('Payment confirmation is processing')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  await page.waitForTimeout(3500)
+  expect(state.statusRequests).toHaveLength(1)
+  expect(state.checkoutRequests).toHaveLength(0)
+  expect(state.unexpected).toEqual([])
+})
 
 test('resuming a saved order does not substitute the current offer terms', async ({ page }) => {
   const state = await backend(page, true)
