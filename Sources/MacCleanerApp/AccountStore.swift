@@ -357,7 +357,7 @@ final class AccountStore: ObservableObject {
     return AccessPolicy.allowsOffline(cachedAccess, now: date)
   }
 
-  /// `quiet` re-checks keep an unlocked app usable through transient network failures.
+  /// `quiet` re-checks keep an unlocked app usable through any failure that isn't definitive.
   private func verify(refreshToken: Bool, quiet: Bool) async {
     guard !isVerifying, !isBusy else { return }
     isVerifying = true

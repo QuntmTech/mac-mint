@@ -69,6 +69,6 @@ Pure-JS Ed25519 is slow under Goja. Measured with the real PocketBase 0.40.5 int
 
 - **Binary patching or a debugger** can skip any client-side check. Code signing and notarization prove origin, not integrity at runtime.
 - **Local TLS interception**: someone who installs their own root CA and rewrites `/me` can fake an online "active" answer (or strip the assertion), because unsigned online answers are still accepted for compatibility. That access lasts for the running app only. A later release can require assertions online once every production server signs.
-- **Clock and Keychain games**: restoring an older copy of the Keychain item and winding the clock back can reuse an assertion's window, but never before its `issued_at`. Doing so repeatedly means keeping the Mac's clock wrong and the server unreachable.
+- **Clock and Keychain games**: restoring an older copy of the Keychain item and winding the clock back can reuse an assertion's window, but never before its `issued_at`. Doing so repeatedly means keeping the Mac's clock wrong and the server unreachable. Conversely, a Mac whose clock runs more than five minutes behind the server cannot use offline access until its clock is corrected (online access is unaffected).
 - **Device cloning**: the device ID is a random UUID in user defaults, not a hardware identifier. Copying it and the Keychain item to another Mac copies offline access for at most one window.
 - **Server key exposure** and **server CPU** as described above.
