@@ -71,7 +71,7 @@ function checkoutStatus(app, user, key) {
   try { order = app.findFirstRecordByFilter("checkout_orders", "user = {:u} && request_key = {:k}", { u: user.id, k: key }) }
   catch (_) { return { state: "not_found", can_start_new: false } }
   const state = String(order.get("state"))
-  if (["created", "pending", "fulfilled", "failed", "expired"].indexOf(state) < 0) throw Error("Unknown checkout state")
+  if (["created", "pending", "fulfilled", "failed", "expired", "refunded", "disputed"].indexOf(state) < 0) throw Error("Unknown checkout state")
   const result = { state, can_start_new: state === "failed" || state === "expired" }
   const snapshot = { enabled: true }
   for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode"]) snapshot[field] = order.get(field)
@@ -187,7 +187,13 @@ function fulfillSession(app, full) {
   app.runInTransaction(tx => {
     const order = tx.findRecordById("checkout_orders", orderId)
     verifyOrderSession(order, full)
-    if (order.get("state") === "fulfilled") return
+    // A refunded or disputed payment never regains access from a replayed success event.
+    if (REVERSED.indexOf(order.get("state")) >= 0) return
+    if (order.get("state") === "fulfilled") {
+      // Older fulfilled orders learn their payment intent from a replayed event.
+      if (!order.get("payment_intent") && PAYMENT_INTENT.test(full.payment_intent || "")) { order.set("payment_intent", full.payment_intent); tx.save(order) }
+      return
+    }
     const license = new Record(tx.findCollectionByNameOrId("licenses"))
     license.set("code", lib.generateCode()); license.set("code_hint", "")
     for (const field of ["plan", "duration_days", "max_devices"]) license.set(field, order.get(field))
@@ -196,13 +202,17 @@ function fulfillSession(app, full) {
     tx.save(license)
     const entitlement = lib.ensureEntitlement(tx, order.get("user"))
     lib.applyLicense(entitlement, license); tx.save(entitlement)
-    order.set("session_id", full.id); order.set("state", "fulfilled"); tx.save(order)
+    order.set("session_id", full.id); order.set("state", "fulfilled")
+    if (PAYMENT_INTENT.test(full.payment_intent || "")) order.set("payment_intent", full.payment_intent)
+    tx.save(order)
     lib.logEvent(tx, "checkout_fulfilled", order.get("user"), { order: order.id, session: full.id })
   })
   return true
 }
 function recordTerminalSession(app, session, state) {
-  const full = authoritativeSession(app, session)
+  return applyTerminal(app, authoritativeSession(app, session), state)
+}
+function applyTerminal(app, full, state) {
   // Duplicate or out-of-order terminal events cannot downgrade a successful payment.
   if (full.payment_status === "paid") return fulfillSession(app, full)
   if (state === "expired" && full.status !== "expired") return false
@@ -211,9 +221,197 @@ function recordTerminalSession(app, session, state) {
   app.runInTransaction(tx => {
     const order = tx.findRecordById("checkout_orders", full.metadata.macmint_order)
     verifyOrderSession(order, full)
-    if (order.get("state") === "fulfilled") return
+    if (["fulfilled"].concat(REVERSED).indexOf(order.get("state")) >= 0) return
     order.set("session_id", full.id); order.set("state", state); tx.save(order)
   })
   return true
 }
-module.exports = { StripeClient, secret, configuration, validConfiguration, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession }
+
+// ---------- refunds, disputes and operator recovery ----------
+
+const REVERSED = ["refunded", "disputed"]
+const PAYMENT_INTENT = /^pi_[A-Za-z0-9_]+$/
+function timestamp(value) {
+  const parsed = Date.parse(String(value || "").trim().replace(" ", "T"))
+  return Number.isFinite(parsed) ? parsed : null
+}
+function lib() { return require(`${__hooks}/macmint_lib.js`) }
+function orderLicense(app, order) {
+  if (!order.get("session_id")) return null
+  try { return app.findFirstRecordByFilter("licenses", "order_ref = {:s} && source = 'stripe'", { s: order.get("session_id") }) }
+  catch (_) { return null }
+}
+// Rebuilds a license-derived entitlement from the user's remaining redeemed licenses,
+// replaying the same extension rule as applyLicense in redemption order. Operator-set
+// (manual) entitlements are not derived from licenses and are left for review.
+function recomputeEntitlement(app, userId) {
+  const shared = lib()
+  const ent = shared.ensureEntitlement(app, userId)
+  if (String(ent.get("source")) === "manual") {
+    shared.logEvent(app, "entitlement_review", userId, { reason: "manual_entitlement" })
+    return shared.entitlementPayload(ent)
+  }
+  const licenses = app.findRecordsByFilter("licenses", "redeemed_by = {:u} && status = 'redeemed'", "redeemed_at,created", 1000, 0, { u: userId }) || []
+  let expires = 0, lifetime = false, devices = 0, last = null
+  for (const license of licenses) {
+    const at = timestamp(license.get("redeemed_at")) || Date.now()
+    const days = Number(license.get("duration_days") || 0)
+    if (String(license.get("plan")) === "lifetime" || days <= 0) lifetime = true
+    else if (!lifetime) expires = Math.max(expires, at) + days * 86400000
+    devices = Math.max(devices, Number(license.get("max_devices") || shared.DEFAULT_MAX_DEVICES))
+    last = license
+  }
+  if (!last) {
+    ent.set("plan", "free"); ent.set("status", "revoked"); ent.set("expires_at", ""); ent.set("max_devices", 0); ent.set("license", "")
+  } else {
+    ent.set("plan", "pro"); ent.set("status", "active"); ent.set("expires_at", lifetime ? "" : new Date(expires).toISOString())
+    ent.set("max_devices", devices); ent.set("license", last.id)
+    ent.set("source", String(last.get("source")) === "demo" ? "demo" : "license")
+  }
+  app.save(ent)
+  return shared.entitlementPayload(ent)
+}
+// Marks the order, revokes its license and recomputes access in one transaction.
+// Replays are no-ops; a partial refund only flags the order for operator review.
+function applyReversal(app, orderId, kind, details) {
+  let outcome
+  app.runInTransaction(tx => {
+    const order = tx.findRecordById("checkout_orders", orderId)
+    const state = String(order.get("state"))
+    if (REVERSED.indexOf(state) >= 0) { outcome = { result: "unchanged", state }; return }
+    if (details.payment_intent && !order.get("payment_intent")) order.set("payment_intent", details.payment_intent)
+    if (kind === "partial_refund") {
+      const refunded = Math.max(Number(order.get("refunded_minor") || 0), Math.floor(Number(details.refunded_minor) || 0))
+      if (order.get("attention") === "partial_refund" && Number(order.get("refunded_minor") || 0) === refunded) { outcome = { result: "unchanged", state }; return }
+      order.set("refunded_minor", refunded); order.set("attention", "partial_refund"); tx.save(order)
+      lib().logEvent(tx, "checkout_partial_refund", order.get("user"), { order: order.id, refunded_minor: refunded })
+      outcome = { result: "review", state }
+      return
+    }
+    if (kind === "refunded") order.set("refunded_minor", Math.floor(Number(details.refunded_minor) || Number(order.get("amount_minor")) || 0))
+    order.set("state", kind); order.set("reversed_at", new Date().toISOString()); tx.save(order)
+    const license = orderLicense(tx, order)
+    let entitlement = null
+    if (license) {
+      if (license.get("status") !== "revoked") { license.set("status", "revoked"); tx.save(license) }
+      if (license.get("redeemed_by")) entitlement = recomputeEntitlement(tx, license.get("redeemed_by"))
+    }
+    lib().logEvent(tx, "checkout_" + kind, order.get("user"), { order: order.id, license: license ? license.id : "", reference: details.reference || "" })
+    outcome = { result: "revoked", state: kind, entitlement }
+  })
+  return outcome
+}
+function orderForPaymentIntent(app, client, paymentIntent) {
+  try { return app.findFirstRecordByFilter("checkout_orders", "payment_intent = {:p}", { p: paymentIntent }) } catch (_) {}
+  // Orders fulfilled before payment intents were recorded: ask Stripe which session owns it.
+  const list = client.send("GET", "checkout/sessions?payment_intent=" + encodeURIComponent(paymentIntent) + "&limit=1")
+  const session = list && Array.isArray(list.data) && list.data.length === 1 ? list.data[0] : null
+  if (!session || session.payment_intent !== paymentIntent || !session.metadata || !session.metadata.macmint_order) return null
+  let order
+  try { order = app.findRecordById("checkout_orders", session.metadata.macmint_order) } catch (_) { return null }
+  return order.get("session_id") === session.id ? order : null
+}
+// A signed charge/dispute event is only a trigger: the authoritative object decides.
+// Events for payments that are not MacMint checkouts are acknowledged and ignored.
+function reverse(app, type, object) {
+  const client = new StripeClient(app)
+  let charge, kind
+  if (type === "charge.refunded") {
+    if (!object || !/^(ch|py)_[A-Za-z0-9_]+$/.test(object.id || "")) throw Error("Invalid charge")
+    charge = client.send("GET", "charges/" + object.id)
+    if (!charge || charge.id !== object.id) throw Error("Invalid charge response")
+    kind = charge.refunded === true ? "refunded" : (Number(charge.amount_refunded) > 0 ? "partial_refund" : null)
+  } else if (type === "charge.dispute.created") {
+    if (!object || !/^(dp|du)_[A-Za-z0-9_]+$/.test(object.id || "")) throw Error("Invalid dispute")
+    const dispute = client.send("GET", "disputes/" + object.id)
+    if (!dispute || dispute.id !== object.id) throw Error("Invalid dispute response")
+    charge = { payment_intent: dispute.payment_intent, livemode: dispute.livemode }
+    kind = "disputed"
+  } else throw Error("Unsupported reversal")
+  if (!kind) return { result: "ignored" }
+  const paymentIntent = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent && charge.payment_intent.id)
+  if (!PAYMENT_INTENT.test(paymentIntent || "")) return { result: "ignored" }
+  const order = orderForPaymentIntent(app, client, paymentIntent)
+  if (!order) return { result: "ignored" }
+  if (order.get("livemode") !== charge.livemode) throw Error("Mode mismatch")
+  return applyReversal(app, order.id, kind, { payment_intent: paymentIntent, refunded_minor: charge.amount_refunded, reference: object.id })
+}
+// Superuser revocation by license ID, code or order, with the same entitlement cascade.
+function revokeLicense(app, ref) {
+  const shared = lib()
+  let result
+  app.runInTransaction(tx => {
+    let license = null, order = null
+    try {
+      if (ref.order) { order = tx.findRecordById("checkout_orders", ref.order); license = orderLicense(tx, order) }
+      else if (ref.license) license = tx.findRecordById("licenses", ref.license)
+      else if (ref.code) license = tx.findFirstRecordByFilter("licenses", "code = {:c}", { c: shared.normalizeCode(ref.code) })
+    } catch (_) { license = null }
+    if (!license) throw { code: "not_found" }
+    const already = license.get("status") === "revoked"
+    if (!already) { license.set("status", "revoked"); tx.save(license) }
+    if (!order && String(license.get("source")) === "stripe" && license.get("order_ref")) {
+      try { order = tx.findFirstRecordByFilter("checkout_orders", "session_id = {:s}", { s: license.get("order_ref") }) } catch (_) {}
+    }
+    if (order && REVERSED.indexOf(order.get("state")) < 0 && order.get("attention") !== "operator_revoked") {
+      order.set("attention", "operator_revoked"); order.set("reversed_at", new Date().toISOString()); tx.save(order)
+    }
+    const owner = String(license.get("redeemed_by") || "")
+    const entitlement = owner ? recomputeEntitlement(tx, owner) : null
+    if (!already) shared.logEvent(tx, "license_revoked", owner, { license: license.id, reason: ref.reason || "" })
+    result = { license: license.id, already_revoked: already, entitlement }
+  })
+  return result
+}
+// Superuser recovery for orders whose terminal webhook never arrived or that block new
+// purchases as checkout_attention. Applies Stripe's authoritative session state through
+// the normal fulfillment/expiry paths; it never infers payment or failure on its own.
+function reconcileOrder(app, ref) {
+  let order
+  try { order = app.findRecordById("checkout_orders", ref.order) } catch (_) { throw { code: "not_found" } }
+  const before = String(order.get("state"))
+  if (["fulfilled"].concat(REVERSED).indexOf(before) >= 0) return { order: order.id, state: before, changed: false }
+  const sessionId = String(order.get("session_id") || ref.session || "")
+  if (!sessionId) {
+    // No session was ever recorded. Only after every possible session has expired, and
+    // only on explicit operator confirmation from the Stripe dashboard, close the order.
+    if (ref.confirm_expired_without_session !== true) throw { code: "session_unknown" }
+    const created = timestamp(order.get("created"))
+    if (created === null || Date.now() - created < 25 * 3600000) throw { code: "too_recent" }
+    app.runInTransaction(tx => {
+      const current = tx.findRecordById("checkout_orders", order.id)
+      if (current.get("session_id") || ["created", "pending"].indexOf(current.get("state")) < 0) throw { code: "conflict" }
+      current.set("state", "expired"); tx.save(current)
+      lib().logEvent(tx, "checkout_reconciled", current.get("user"), { order: current.id, from: before, to: "expired", confirmed_without_session: true })
+    })
+    return { order: order.id, state: "expired", changed: true }
+  }
+  if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) throw { code: "bad_request" }
+  const full = authoritativeSession(app, { id: sessionId })
+  if (full.metadata.macmint_order !== order.id) throw { code: "session_mismatch" }
+  if (full.payment_status === "paid") fulfillSession(app, full)
+  else if (full.status === "expired") applyTerminal(app, full, "expired")
+  // complete + unpaid is an asynchronous payment still settling, or a failure whose
+  // event was lost. Resend that event from Stripe instead of guessing here.
+  const after = String(app.findRecordById("checkout_orders", order.id).get("state"))
+  if (after !== before) lib().logEvent(app, "checkout_reconciled", order.get("user"), { order: order.id, from: before, to: after })
+  return { order: order.id, state: after, changed: after !== before, session_status: String(full.status || ""), payment_status: String(full.payment_status || "") }
+}
+// Feed downloads open in the customer's browser. Accept only first-party HTTPS hosts:
+// the MacMint site and this repository's GitHub release assets (github.com redirects to
+// signed, expiring githubusercontent URLs that can serve any repository, so those hosts
+// are not accepted as feed URLs). No credentials, ports, queries, encodings or dot segments.
+function trustedDownloadURL(value) {
+  if (typeof value !== "string" || value.length > 2000) return false
+  const match = /^https:\/\/([A-Za-z0-9.-]+)(\/[A-Za-z0-9._~+\/-]*)$/.exec(value)
+  if (!match || match[2].split("/").some(part => part === "." || part === "..")) return false
+  const host = match[1].toLowerCase()
+  if (host === "macmint.co") return true
+  return host === "github.com" && /^\/QuntmTech\/[A-Za-z0-9._-]+\/releases\/download\/[^/]+\/[^/]+$/.test(match[2])
+}
+function publishableRelease(record) {
+  return !record.get("published") || (!!record.get("validated") && !!record.get("notarized") &&
+    /^[a-f0-9]{64}$/.test(String(record.get("sha256"))) && trustedDownloadURL(String(record.get("download_url"))))
+}
+module.exports = { StripeClient, secret, configuration, validConfiguration, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession,
+  reverse, applyReversal, recomputeEntitlement, revokeLicense, reconcileOrder, trustedDownloadURL, publishableRelease }

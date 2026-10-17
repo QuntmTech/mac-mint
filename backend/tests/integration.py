@@ -10,6 +10,8 @@ pocketbase = Path(os.environ.get('POCKETBASE_BIN', root / '.build/pocketbase-bin
 assert pocketbase.exists(), 'Set POCKETBASE_BIN to the pinned PocketBase executable'
 (root / '.build').mkdir(exist_ok=True)
 sessions = {}
+charges = {}
+disputes = {}
 provider_requests = []
 
 class StripeFixture(BaseHTTPRequestHandler):
@@ -20,8 +22,13 @@ class StripeFixture(BaseHTTPRequestHandler):
         provider_requests.append(("GET", self.path))
         if self.path.startswith('/v1/prices/'):
             return self.respond(dict(id='price_fixture', active=True, type='one_time', unit_amount=1900, currency='usd', livemode=False))
-        session_id = self.path.split('?')[0].rsplit('/', 1)[-1]
-        self.respond(sessions[session_id])
+        path, _, query = self.path.partition('?')
+        if path.startswith('/v1/charges/'): return self.respond(charges[path.rsplit('/', 1)[-1]])
+        if path.startswith('/v1/disputes/'): return self.respond(disputes[path.rsplit('/', 1)[-1]])
+        if path == '/v1/checkout/sessions':
+            intent = urllib.parse.parse_qs(query).get('payment_intent', [''])[0]
+            return self.respond(dict(object='list', has_more=False, data=[v for v in sessions.values() if v.get('payment_intent') == intent][:1]))
+        self.respond(sessions[path.rsplit('/', 1)[-1]])
     def do_POST(self):
         provider_requests.append(("POST", self.path))
         fields = urllib.parse.parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
@@ -51,15 +58,21 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
       const u=new Record(app.findCollectionByNameOrId("users"));u.set("email","fixture@example.invalid");u.setPassword("fixture-test-password-123");u.set("verified",true);app.save(u)
       const second=new Record(app.findCollectionByNameOrId("users"));second.set("email","second@example.invalid");second.setPassword("fixture-test-password-123");second.set("verified",true);app.save(second)
       const ent=new Record(app.findCollectionByNameOrId("plan_entitlements"));ent.set("user",u.id);ent.set("plan","pro");ent.set("status","active");ent.set("max_devices",1);app.save(ent)
+      const su=new Record(app.findCollectionByNameOrId("_superusers"));su.set("email","operator@example.invalid");su.setPassword("operator-test-password-123");app.save(su)
       for(const [key,value] of [["ai",{enabled:true}],["commerce",{enabled:true,price_id:"price_fixture",amount_minor:1900,currency:"usd",plan:"pro",duration_days:365,max_devices:3,livemode:false,web_origin:"https://staging.macmint.test"}]]){
         const c=new Record(app.findCollectionByNameOrId("app_config"));c.set("key",key);c.set("value",value);app.save(c)
       }
-      const release=new Record(app.findCollectionByNameOrId("app_releases"));release.set("version","0.0.1");release.set("channel","stable");release.set("sha256","a".repeat(64));release.set("download_url","https://example.invalid/fixture.zip");release.set("validated",true);release.set("notarized",true);release.set("published",true);app.save(release)
+      const release=new Record(app.findCollectionByNameOrId("app_releases"));release.set("version","0.0.1");release.set("channel","stable");release.set("sha256","a".repeat(64));release.set("download_url","https://github.com/QuntmTech/mac-mint/releases/download/v0.0.1/MacMint.zip");release.set("validated",true);release.set("notarized",true);release.set("published",true);app.save(release)
     },()=>{})''')
     (folder / 'hooks/test.pb.js').write_text('''routerAdd("POST","/__test/reserve",e=>{
       const ai=require(`${__hooks}/macmint_ai_lib.js`),user=e.app.findFirstRecordByFilter("users","email='fixture@example.invalid'")
       try{return e.json(200,{id:ai.reserve(e.app,user.id,"review","claude-opus-5-5",100,100)})}
       catch(err){return e.json(err.status||500,{error:err.code||String(err)})}
+    })
+    routerAdd("POST","/__test/release",e=>{
+      const r=new Record(e.app.findCollectionByNameOrId("app_releases"));r.set("version","0.0."+e.requestInfo().body.build);r.set("channel","stable")
+      r.set("sha256","b".repeat(64));r.set("download_url",e.requestInfo().body.url);r.set("validated",true);r.set("notarized",true);r.set("published",true)
+      try{e.app.save(r);return e.json(200,{saved:true})}catch(err){return e.json(400,{saved:false})}
     })
     routerAdd("GET","/__test/auth-config",e=>{
       const users=e.app.findCollectionByNameOrId("users")
@@ -160,7 +173,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert webhook('checkout.session.completed')[0] == 200  # still unpaid
             db = sqlite3.connect(folder / 'data/data.db')
             assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == 0
-            session['payment_status'] = 'paid'
+            session['payment_status'] = 'paid'; session['payment_intent'] = 'pi_test_' + session['metadata']['macmint_order']
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                 events = list(pool.map(lambda _: webhook('checkout.session.async_payment_succeeded'), range(8)))
             assert all(status == 200 for status, _ in events), events
@@ -190,13 +203,91 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             for _ in range(2): assert webhook('checkout.session.async_payment_failed', target=failed_session)[0] == 200
             assert checkout_status(failed_key) == (200, checkout_payload('failed', True))
             # If a later notification arrives after Stripe reports paid, it fulfills once.
-            failed_session['payment_status'] = 'paid'
+            failed_session['payment_status'] = 'paid'; failed_session['payment_intent'] = 'pi_test_' + failed_session['metadata']['macmint_order']
             for event_type in ['checkout.session.expired', 'checkout.session.async_payment_failed', 'checkout.session.async_payment_succeeded']:
                 assert webhook(event_type, target=failed_session)[0] == 200
             assert checkout_status(failed_key) == (200, checkout_payload('fulfilled'))
             assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == 2
             assert db.execute('SELECT customer_email, web_origin FROM checkout_orders WHERE request_key=? AND user=?', (request_key, auth['record']['id'])).fetchone() == ('fixture@example.invalid', 'https://staging.macmint.test')
             print('PASS: expired/failed webhook verification, duplicate/out-of-order delivery, and immutable email migration')
+            status, operator = call('/api/collections/_superusers/auth-with-password', dict(identity='operator@example.invalid', password='operator-test-password-123'))
+            assert status == 200, operator
+            admin = operator['token']
+            def signed(event, valid=True):
+                raw = json.dumps(event).encode(); timestamp = str(int(time.time()))
+                signature = hmac.new(b'fixture-signing-secret', timestamp.encode() + b'.' + raw, hashlib.sha256).hexdigest()
+                return call('/api/macmint/stripe/webhook', raw, headers={'Stripe-Signature': f't={timestamp},v1={signature if valid else "0" * 64}'})
+            def reversal(event_type, object_id, valid=True):
+                return signed(dict(type=event_type, data=dict(object=dict(id=object_id, object='charge' if object_id.startswith('ch_') else 'dispute'))), valid)
+            def active(account_token): return call('/api/macmint/me', token=account_token)[1]['entitlement']['active']
+            def order_row(session_id): return db.execute('SELECT id, state, attention, refunded_minor, payment_intent FROM checkout_orders WHERE session_id=?', (session_id,)).fetchone()
+            def license_status(session_id): return db.execute('SELECT status FROM licenses WHERE order_ref=?', (session_id,)).fetchone()[0]
+            second_id = second_auth['record']['id']
+            second_session = next(v for v in sessions.values() if v['client_reference_id'] == second_id)
+            second_session.update(status='complete', payment_status='paid', payment_intent='pi_test_second')
+            assert not active(second_token)
+            assert webhook('checkout.session.completed', target=second_session)[0] == 200
+            assert active(second_token) and order_row(second_session['id'])[4] == 'pi_test_second'
+            charges['ch_test_second'] = dict(id='ch_test_second', object='charge', payment_intent='pi_test_second', amount=1900, amount_refunded=1900, refunded=True, livemode=False, currency='usd')
+            assert reversal('charge.refunded', 'ch_test_second', valid=False)[0] == 400
+            assert active(second_token)
+            assert reversal('charge.refunded', 'ch_test_second')[0] == 200
+            assert not active(second_token)
+            assert order_row(second_session['id'])[1:4] == ('refunded', '', 1900)
+            assert license_status(second_session['id']) == 'revoked'
+            license_count = db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0]
+            for _ in range(2): assert reversal('charge.refunded', 'ch_test_second')[0] == 200
+            assert webhook('checkout.session.completed', target=second_session)[0] == 200
+            assert not active(second_token) and order_row(second_session['id'])[1] == 'refunded'
+            assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == license_count
+            assert checkout_status(request_key, second_token) == (200, dict(state='refunded', can_start_new=False, offer=saved_offer))
+            print('PASS: signed full refund revokes the license and access in one transaction; replays and late success events stay revoked')
+            charges['ch_test_partial'] = dict(id='ch_test_partial', object='charge', payment_intent=session['payment_intent'], amount=1900, amount_refunded=400, refunded=False, livemode=False, currency='usd')
+            for _ in range(2): assert reversal('charge.refunded', 'ch_test_partial')[0] == 200
+            assert order_row(session['id'])[1:4] == ('fulfilled', 'partial_refund', 400)
+            assert active(token) and license_status(session['id']) == 'redeemed'
+            print('PASS: partial refund flags the order for operator review without revoking access')
+            disputes['dp_test_failed'] = dict(id='dp_test_failed', object='dispute', charge='ch_test_failed', payment_intent=failed_session['payment_intent'], livemode=False, status='needs_response')
+            assert reversal('charge.dispute.created', 'dp_test_failed')[0] == 200
+            assert order_row(failed_session['id'])[1] == 'disputed' and license_status(failed_session['id']) == 'revoked'
+            assert active(token), 'the remaining purchase keeps its access'
+            charges['ch_test_other'] = dict(id='ch_test_other', object='charge', payment_intent='pi_not_macmint', amount=100, amount_refunded=100, refunded=True, livemode=False)
+            assert reversal('charge.refunded', 'ch_test_other')[0] == 200
+            print('PASS: dispute revokes only the disputed purchase; unrelated charges are acknowledged and ignored')
+            first_order = order_row(session['id'])[0]
+            assert call('/api/macmint/admin/licenses/revoke', dict(order=first_order), token)[0] in (401, 403)
+            status, revoked = call('/api/macmint/admin/licenses/revoke', dict(order=first_order, reason='fixture'), admin)
+            assert status == 200 and revoked['already_revoked'] is False and revoked['entitlement']['active'] is False, revoked
+            assert not active(token)
+            assert call('/api/macmint/admin/licenses/revoke', dict(order=first_order), admin)[1]['already_revoked'] is True
+            assert call('/api/macmint/admin/licenses/revoke', dict(license='missingmissing1'), admin)[0] == 404
+            assert call('/api/macmint/admin/licenses/revoke', {}, admin)[0] == 400
+            print('PASS: superuser license revocation cascades to the entitlement and is idempotent')
+            def open_session(account_id):
+                return next(v for v in sessions.values() if v['client_reference_id'] == account_id and v['status'] == 'open')
+            stuck_key = str(uuid.uuid4())
+            assert call('/api/macmint/checkout', dict(request_key=stuck_key), second_token)[0] == 200
+            stuck = open_session(second_id); stuck_order = order_row(stuck['id'])[0]
+            assert call('/api/macmint/admin/checkout/reconcile', dict(order=stuck_order), second_token)[0] in (401, 403)
+            status, result = call('/api/macmint/admin/checkout/reconcile', dict(order=stuck_order), admin)
+            assert status == 200 and (result['state'], result['changed'], result['session_status']) == ('pending', False, 'open'), result
+            stuck['status'] = 'expired'  # Stripe expired it, but the webhook never arrived.
+            status, result = call('/api/macmint/admin/checkout/reconcile', dict(order=stuck_order), admin)
+            assert status == 200 and (result['state'], result['changed']) == ('expired', True), result
+            assert checkout_status(stuck_key, second_token) == (200, checkout_payload('expired', True))
+            paid_key = str(uuid.uuid4())
+            assert call('/api/macmint/checkout', dict(request_key=paid_key), second_token)[0] == 200
+            paid = open_session(second_id); paid.update(status='complete', payment_status='paid', payment_intent='pi_test_reconciled')
+            paid_order = order_row(paid['id'])[0]
+            assert call('/api/macmint/admin/checkout/reconcile', dict(order=paid_order), admin)[1]['state'] == 'fulfilled'
+            assert active(second_token) and order_row(paid['id'])[4] == 'pi_test_reconciled'
+            assert call('/api/macmint/admin/checkout/reconcile', dict(order=paid_order), admin)[1]['changed'] is False
+            assert call('/api/macmint/admin/checkout/reconcile', dict(order='missingmissing1'), admin)[0] == 404
+            print('PASS: superuser reconciliation applies authoritative Stripe expiry and payment without webhooks')
+            assert call('/__test/release', dict(build=2, url='https://evil.example/MacMint.zip'))[1] == dict(saved=False)
+            assert call('/__test/release', dict(build=3, url='http://github.com/QuntmTech/mac-mint/releases/download/v0.0.3/MacMint.zip'))[1] == dict(saved=False)
+            assert call('/__test/release', dict(build=4, url='https://github.com/QuntmTech/mac-mint/releases/download/v0.0.4/MacMint.zip'))[1] == dict(saved=True)
+            print('PASS: published feed releases require a first-party HTTPS download URL')
             db.close()
             print('PASS: real raw-body HMAC, unpaid -> paid fulfillment, 8 duplicate concurrent webhooks grant one license')
             print('PASS: migrations preserve pre-existing collection IDs and reapply cleanly')
