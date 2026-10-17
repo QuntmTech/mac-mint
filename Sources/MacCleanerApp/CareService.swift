@@ -8,13 +8,22 @@ struct CareNotificationClient {
   var available: Bool
   var status: () async -> UNAuthorizationStatus?
   var request: () async throws -> Bool
-  var add: (UNNotificationRequest) async throws -> Void
+  var add: @MainActor (UNNotificationRequest) async throws -> Void
 
   static var system: Self {
     Self(available: CareService.isBundledApp,
       status: { await PermissionsService.notificationAuthorizationStatus() },
       request: { try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) },
-      add: { try await UNUserNotificationCenter.current().add($0) })
+      add: { request in
+        // Keep the request on its owning actor. The imported async overload
+        // sends this non-Sendable object to a generic executor on older SDKs.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+          UNUserNotificationCenter.current().add(request, withCompletionHandler: { error in
+            if let error { continuation.resume(throwing: error) }
+            else { continuation.resume(returning: ()) }
+          })
+        }
+      })
   }
 }
 
