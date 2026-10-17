@@ -163,10 +163,10 @@ struct AppearanceSettingsCard: View {
     GeometryReader { geometry in
       ZStack(alignment: .leading) {
         HStack(spacing: 0) {
-          Color(red: 0.96, green: 0.97, blue: 0.96)
-          if option == .system { Color(red: 0.10, green: 0.13, blue: 0.12) }
+          Color(white: 0.96)
+          if option == .system { Color(white: 0.11) }
         }
-        if option == .dark { Color(red: 0.10, green: 0.13, blue: 0.12) }
+        if option == .dark { Color(white: 0.11) }
         HStack(spacing: 9) {
           VStack(spacing: 6) {
             Capsule().fill(AppTheme.brand.opacity(0.65)).frame(height: 5)
@@ -177,7 +177,7 @@ struct AppearanceSettingsCard: View {
           VStack(alignment: .leading, spacing: 7) {
             Capsule().fill(option == .dark ? Color.white.opacity(0.6) : Color.black.opacity(0.35))
               .frame(width: geometry.size.width * 0.36, height: 5)
-            RoundedRectangle(cornerRadius: 4).fill(AppTheme.brand.opacity(0.16)).frame(height: 21)
+            RoundedRectangle(cornerRadius: 4).fill(Color.gray.opacity(0.16)).frame(height: 21)
             HStack(spacing: 5) {
               RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.15))
               RoundedRectangle(cornerRadius: 3).fill(Color.gray.opacity(0.15))

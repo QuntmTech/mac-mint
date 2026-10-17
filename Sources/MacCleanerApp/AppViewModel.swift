@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MacCleanerCore
+import ServiceManagement
 import SwiftUI
 
 @MainActor
@@ -517,13 +518,13 @@ final class AppViewModel: ObservableObject {
   }
 
   func openLoginItemsSettings() {
-    if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
-      NSWorkspace.shared.open(url)
-    }
+    SMAppService.openSystemSettingsLoginItems()
   }
 
   func openSystemSettings() {
-    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+    if !PermissionsService.openSettings(.fullDiskAccess) {
+      statusMessage = "Open \(PermissionSettingsPane.fullDiskAccess.path) from the Apple menu."
+    }
   }
 
   @discardableResult

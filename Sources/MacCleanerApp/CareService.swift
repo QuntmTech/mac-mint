@@ -3,6 +3,21 @@ import MacCleanerCore
 import ServiceManagement
 import UserNotifications
 
+@MainActor
+struct CareNotificationClient {
+  var available: Bool
+  var status: () async -> UNAuthorizationStatus?
+  var request: () async throws -> Bool
+  var add: (UNNotificationRequest) async throws -> Void
+
+  static var system: Self {
+    Self(available: CareService.isBundledApp,
+      status: { await UNUserNotificationCenter.current().notificationSettings().authorizationStatus },
+      request: { try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) },
+      add: { try await UNUserNotificationCenter.current().add($0) })
+  }
+}
+
 /// Opt-in reminders: low free space and "it's been a while since your last scan".
 /// Checks run while MacMint (or its menu bar item) is running; nothing is ever removed
 /// automatically — notifications only open the app for review.
@@ -19,11 +34,23 @@ final class CareService: ObservableObject {
     static let onboardingDone = "care.onboardingDone"
   }
 
-  @Published var notificationsDenied = false
+  @Published private(set) var notificationPermission: NotificationPermissionState = .unavailable
+  @Published private(set) var notificationError: String?
   @Published var launchAtLoginError: String?
 
-  private let defaults = UserDefaults.standard
+  private let defaults: UserDefaults
+  private let notifications: CareNotificationClient
   private var timer: Timer?
+  private var authorizationGeneration = UUID()
+  private var isRequestingAuthorization = false
+  private var pendingNotifications: Set<String> = []
+
+  init(defaults: UserDefaults = .standard, notifications: CareNotificationClient? = nil) {
+    self.defaults = defaults
+    self.notifications = notifications ?? .system
+  }
+
+  var notificationsDenied: Bool { notificationPermission == .denied }
 
   /// UserNotifications and SMAppService only work from a bundled app, not `swift run`.
   static var isBundledApp: Bool {
@@ -33,9 +60,13 @@ final class CareService: ObservableObject {
   func start() {
     guard timer == nil else { return }
     defaults.register(defaults: [Keys.lowSpaceThresholdGB: 20])
-    evaluate()
+    Task { await refreshAuthorization(); evaluate() }
     timer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.evaluate() }
+      Task { @MainActor in
+        guard let self else { return }
+        await self.refreshAuthorization()
+        self.evaluate()
+      }
     }
   }
 
@@ -44,16 +75,40 @@ final class CareService: ObservableObject {
   }
 
   /// Asks for notification permission when the user turns an alert on.
-  func requestAuthorization() {
-    guard Self.isBundledApp else { return }
-    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
-      granted, _ in
-      Task { @MainActor [weak self] in self?.notificationsDenied = !granted }
+  func requestAuthorization() async {
+    guard notifications.available, !isRequestingAuthorization else { return }
+    isRequestingAuthorization = true
+    notificationError = nil
+    defer { isRequestingAuthorization = false }
+    // Decide from this read, rather than published state that a concurrent
+    // foreground refresh may supersede before an explicit opt-in resumes.
+    let status = await notifications.status()
+    guard NotificationPermissionState(status) == .notRequested else {
+      await refreshAuthorization()
+      return
+    }
+    do {
+      _ = try await notifications.request()
+      await refreshAuthorization()
+    } catch {
+      notificationError = "Could not request notification access: \(error.localizedDescription)"
     }
   }
 
+  /// Foreground and settings refreshes read existing permission without prompting.
+  func refreshAuthorization() async {
+    guard notifications.available else { notificationPermission = .unavailable; return }
+    let generation = UUID()
+    authorizationGeneration = generation
+    let status = await notifications.status()
+    guard generation == authorizationGeneration else { return }
+    notificationPermission = NotificationPermissionState(status)
+    objectWillChange.send() // Login Items approval can also change in System Settings.
+  }
+
   func evaluate(now: Date = Date()) {
-    guard Self.isBundledApp, !Self.isQuietHours(now) else { return }
+    guard notifications.available, !Self.isQuietHours(now),
+      notificationPermission == .enabled || notificationPermission == .quiet else { return }
 
     if defaults.bool(forKey: Keys.lowSpaceAlerts) {
       let threshold = Int64(max(1, defaults.integer(forKey: Keys.lowSpaceThresholdGB))) * 1_000_000_000
@@ -63,8 +118,8 @@ final class CareService: ObservableObject {
         notify(
           id: "low-space",
           title: "Your Mac is running low on space",
-          body: "\(ByteFormatter.string(free)) free. Open MacMint to see what's safe to clean.")
-        defaults.set(now, forKey: Keys.lastLowSpaceAlert)
+          body: "\(ByteFormatter.string(free)) free. Open MacMint to review cleanup suggestions.",
+          preferenceKey: Keys.lowSpaceAlerts, timestampKey: Keys.lastLowSpaceAlert, date: now)
       }
     }
 
@@ -75,19 +130,31 @@ final class CareService: ObservableObject {
       if now.timeIntervalSince(lastScan) > week, now.timeIntervalSince(lastReminder) > week {
         notify(
           id: "scan-reminder", title: "Time for a quick tidy-up",
-          body: "It's been a week since your last Quick Scan. Nothing is removed without your review.")
-        defaults.set(now, forKey: Keys.lastScanReminder)
+          body: "It's been a week since your last Quick Scan. Nothing is removed without your review.",
+          preferenceKey: Keys.scanReminders, timestampKey: Keys.lastScanReminder, date: now)
       }
     }
   }
 
-  private func notify(id: String, title: String, body: String) {
+  private func notify(id: String, title: String, body: String, preferenceKey: String,
+    timestampKey: String, date: Date) {
+    guard pendingNotifications.insert(id).inserted else { return }
     let content = UNMutableNotificationContent()
     content.title = title
     content.body = body
     content.sound = .default
     let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
-    UNUserNotificationCenter.current().add(request)
+    Task {
+      defer { pendingNotifications.remove(id) }
+      guard defaults.bool(forKey: preferenceKey) else { return }
+      do {
+        try await notifications.add(request)
+        defaults.set(date, forKey: timestampKey)
+        notificationError = nil
+      } catch {
+        notificationError = "Could not schedule a reminder: \(error.localizedDescription)"
+      }
+    }
   }
 
   static func isQuietHours(_ date: Date) -> Bool {
@@ -107,6 +174,14 @@ final class CareService: ObservableObject {
   var launchesAtLogin: Bool {
     Self.isBundledApp && SMAppService.mainApp.status == .enabled
   }
+
+  var launchAtLoginNeedsApproval: Bool {
+    Self.isBundledApp && SMAppService.mainApp.status == .requiresApproval
+  }
+
+  var launchAtLoginRequested: Bool { launchesAtLogin || launchAtLoginNeedsApproval }
+
+  func openLoginItemsSettings() { SMAppService.openSystemSettingsLoginItems() }
 
   func setLaunchAtLogin(_ enabled: Bool) {
     launchAtLoginError = nil
