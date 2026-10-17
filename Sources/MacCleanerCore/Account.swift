@@ -135,7 +135,36 @@ public struct AccountAPIError: LocalizedError, Hashable, Sendable {
   public var errorDescription: String? { message }
   /// The stored session is no longer valid and the user must sign in again.
   public var isUnauthorized: Bool { status == 401 || status == 403 && code == "unauthorized" }
-  public var isNetwork: Bool { status == 0 }
+  /// The server could not be reached. TLS failures and cancellation are reported separately.
+  public var isNetwork: Bool { status == 0 && code == "network" }
+  /// The request was cancelled locally; it says nothing about the account.
+  public var isCancellation: Bool { status == 0 && code == "cancelled" }
+  /// The connection was not trustworthy (certificate or TLS failure). Never offline-eligible.
+  public var isSecureConnectionFailure: Bool { status == 0 && code == "tls" }
+  /// Failures that say nothing definitive about the account and may clear up on their own.
+  public var isTransient: Bool { isNetwork || [404, 408, 425, 429].contains(status) || status >= 500 }
+
+  static let cancelled = AccountAPIError(status: 0, code: "cancelled", message: "The request was cancelled.")
+  static let network = AccountAPIError(
+    status: 0, code: "network",
+    message: "Couldn't reach MacMint. Check your internet connection and try again.")
+  static let insecure = AccountAPIError(
+    status: 0, code: "tls",
+    message: "MacMint couldn't establish a secure connection. A network filter, proxy or captive portal may be interfering. Check your connection and try again.")
+
+  /// Maps a transport error without inspecting its message.
+  public static func transport(_ error: Error) -> AccountAPIError {
+    if error is CancellationError { return .cancelled }
+    guard let url = error as? URLError else { return .network }
+    switch url.code {
+    case .cancelled, .userCancelledAuthentication: return .cancelled
+    case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+      .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid, .clientCertificateRejected,
+      .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection:
+      return .insecure
+    default: return .network
+    }
+  }
 }
 
 public enum AccountDates {
@@ -187,6 +216,22 @@ public struct AccountClient: Sendable {
   public typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
   public static let defaultBaseURL = URL(string: "https://macmint.cloudpod.pro")!
+  /// Total deadline for one account request, including retries inside URLSession.
+  public static let resourceTimeout: TimeInterval = 45
+
+  /// Account traffic carries bearer tokens and entitlements: no disk/URL cache, cookies or
+  /// cached responses, and a hard total deadline.
+  public static func sessionConfiguration() -> URLSessionConfiguration {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.httpCookieStorage = nil
+    configuration.httpShouldSetCookies = false
+    configuration.timeoutIntervalForResource = resourceTimeout
+    return configuration
+  }
+
+  private static let session = URLSession(configuration: sessionConfiguration())
 
   public let baseURL: URL
   let transport: Transport
@@ -194,7 +239,7 @@ public struct AccountClient: Sendable {
   public init(baseURL: URL = AccountClient.defaultBaseURL, transport: Transport? = nil) {
     self.baseURL = baseURL
     self.transport =
-      transport ?? { request in try await URLSession.shared.data(for: request) }
+      transport ?? { request in try await AccountClient.session.data(for: request) }
   }
 
   public func signIn(email: String, password: String) async throws -> AuthSession {
@@ -240,10 +285,14 @@ public struct AccountClient: Sendable {
     return try await send("POST", "/api/macmint/redeem", token: token, body: body)
   }
 
-  public func activate(_ device: DeviceInfo, token: String) async throws -> AccountSnapshot {
+  /// `reactivate` is only for an explicit user action; otherwise a Mac removed from the account
+  /// stays removed and the server answers 409 `device_deactivated`.
+  public func activate(_ device: DeviceInfo, token: String, reactivate: Bool = false) async throws
+    -> AccountSnapshot
+  {
     let fields: [String: Any] = [
-      "device_id": device.deviceId, "reactivate": true, "name": device.name, "model": device.model,
-      "os_version": device.osVersion, "app_version": device.appVersion,
+      "device_id": device.deviceId, "reactivate": reactivate, "name": device.name,
+      "model": device.model, "os_version": device.osVersion, "app_version": device.appVersion,
     ]
     return try await send("POST", "/api/macmint/devices/activate", token: token,
       bodyData: JSONSerialization.data(withJSONObject: fields))
@@ -307,6 +356,7 @@ public struct AccountClient: Sendable {
     }
     var request = URLRequest(url: url)
     request.httpMethod = method
+    request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = timeout
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let token { request.setValue(token, forHTTPHeaderField: "Authorization") }
@@ -320,9 +370,7 @@ public struct AccountClient: Sendable {
     do {
       (data, response) = try await transport(request)
     } catch {
-      throw AccountAPIError(
-        status: 0, code: "network",
-        message: "Couldn't reach MacMint. Check your internet connection and try again.")
+      throw AccountAPIError.transport(error)
     }
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(status) else { throw Self.apiError(status: status, data: data) }
