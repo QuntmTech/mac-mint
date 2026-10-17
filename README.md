@@ -6,6 +6,8 @@ A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller, evolved from Mac Clean
 
 Local scanning, inspection, exclusions, History and Restore are available before sign-in. An active account and plan are required to start a paid removal. Existing redemption codes (`MINT-XXXX-XXXX-XXXX-XXXX`) remain supported. Configured Stripe Checkout grants purchased access to the account through verified webhooks; it remains closed until configuration and a validated consumer build are available. Accounts have a device limit.
 
+Purchase setup, pending-pricing configuration and verification gates are documented in [Stripe setup](docs/STRIPE_SETUP.md).
+
 - Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
 - The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
 - Account and license checks touch the network. File contents stay local. Optional AI sends the user's own typed questions and a restricted automatic context after consent.

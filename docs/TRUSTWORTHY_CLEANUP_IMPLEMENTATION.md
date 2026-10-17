@@ -57,10 +57,12 @@ Checkout uses a server-only REST client because PocketBase's Goja runtime cannot
 Before enabling checkout:
 
 1. Use a separate Stripe sandbox and a restricted key with only the necessary Checkout Session and Price permissions. Store it in the host secret store as `STRIPE_RESTRICTED_KEY` (or the existing private `app_secrets` fallback named `stripe_restricted_key`). Store the matching webhook secret as `STRIPE_WEBHOOK_SECRET` / `stripe_webhook_secret`. Never put values in the repository, website or logs.
-2. Register `/api/macmint/stripe/webhook` for `checkout.session.completed`, `checkout.session.async_payment_succeeded` and `checkout.session.async_payment_failed`. The implementation pins API version `2026-08-26.dahlia`; configure and test compatible event payloads.
+2. Register `/api/macmint/stripe/webhook` for `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed` and `checkout.session.expired`. The implementation pins API version `2026-08-26.dahlia`; configure and test compatible event payloads.
 3. Create a private `app_config` record keyed `commerce`, initially disabled. Use the already-approved price's `price_id`, `amount_minor`, `currency`, existing `plan`, `duration_days`, `max_devices`, and explicit `livemode`. No retail price was chosen or changed in this work. `amount_minor` must exactly match the Stripe Price’s integer `unit_amount`; the hosted Stripe page displays the currency and price. The server validates the offer against the retrieved one-time Stripe Price.
 4. Supply a validated, notarized stable release. Checkout remains closed without one. Verify a fresh account's email before purchase. No automatic tax configuration was added; confirm registrations before changing that behavior.
 5. Run the actual sandbox journey, failed/delayed payment, duplicate delivery, network loss after payment, receipt/support process and account transfer. Only then run a bounded, explicitly approved live canary.
+
+The follow-up [Stripe setup guide](STRIPE_SETUP.md) covers the pending-price template, offline preflight, owner-scoped status, immutable offer/email/return-origin snapshots, cross-tab purchase protection and terminal-event reconciliation. It supersedes older checkout retry/setup notes. Source integration does not establish that Stripe account access or production deployment is complete.
 
 SMTP credentials, sender-domain configuration and delivery were not available in this session. Configure the project's sender and secure credentials, then prove verification and password-reset delivery, expired-link behavior and rate limits in staging. The implementation does not claim that email delivery is complete.
 

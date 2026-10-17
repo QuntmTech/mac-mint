@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Field } from '../components/Form'
 import { useAuth } from '../hooks/useAuth'
@@ -38,12 +38,12 @@ const planSummary = (entitlement: Entitlement) => {
     }
   }
   if (entitlement.plan === 'pro' && entitlement.status === 'expired') {
-    return { label: 'Pro expired', detail: 'Redeem a new code to keep using MacMint.', tone: 'inactive' as const }
+    return { label: 'Pro expired', detail: 'Choose paid access below or redeem another code. Local scanning and recovery remain available.', tone: 'inactive' as const }
   }
-  return { label: 'No active plan', detail: 'Redeem the code from your purchase email to unlock MacMint.', tone: 'inactive' as const }
+  return { label: 'No active plan', detail: 'Check purchase availability below or redeem an existing code. Local scanning and recovery remain available.', tone: 'inactive' as const }
 }
 
-const PlanCard = ({ account }: { account: AccountSnapshot }) => {
+const PlanCard = ({ account, checkoutResult, onRefresh }: { account: AccountSnapshot; checkoutResult: string | null; onRefresh: () => Promise<void> }) => {
   const plan = planSummary(account.entitlement)
   const limit = Math.max(account.entitlement.max_devices, account.entitlement.active ? 1 : 0)
   return (
@@ -62,7 +62,7 @@ const PlanCard = ({ account }: { account: AccountSnapshot }) => {
           </p>
         )}
       </div>
-      {!account.entitlement.active && <Checkout userId={account.user.id} verified={account.user.verified} />}
+      <Checkout key={account.user.id} userId={account.user.id} verified={account.user.verified} hasPlan={account.entitlement.active} returnState={checkoutResult} onRefresh={onRefresh} />
     </Card>
   )
 }
@@ -148,7 +148,7 @@ const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
           </Button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Find your code in your purchase confirmation email. Codes can only be used on one account.
+          Have a redemption code? Enter it here. Codes can only be used on one account; direct checkout activates this account automatically.
         </p>
       </form>
     </Card>
@@ -282,44 +282,42 @@ const PasswordCard = ({ email }: { email: string }) => {
 }
 
 export const Account = () => {
-  const { isSignedIn, signOut } = useAuth()
+  const { user, isSignedIn, signOut } = useAuth()
   const location = useLocation()
   const [params] = useSearchParams()
   const [account, setAccount] = useState<AccountSnapshot | null>(null)
   const [release, setRelease] = useState<Release | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const accountGeneration = useRef(0)
+  const invalidateAccount = useCallback(() => { accountGeneration.current++ }, [])
+  const userId = user?.id
   const load = useCallback(async () => {
+    const generation = ++accountGeneration.current
     try {
-      setAccount(await fetchAccount())
+      const snapshot = await fetchAccount()
+      if (generation !== accountGeneration.current || pb.authStore.record?.id !== userId || snapshot.user.id !== userId) return
+      setAccount(snapshot)
       setError(null)
     } catch (err) {
-      const status = (err as { status?: number })?.status
-      if (status === 401) {
-        signOut()
-        return
-      }
-      setError(errorMessage(err, 'Could not load your account.'))
+      if (generation !== accountGeneration.current || pb.authStore.record?.id !== userId) return
+      if ((err as { status?: number })?.status === 401) signOut()
+      else setError(errorMessage(err, 'Could not load your account.'))
     }
-  }, [signOut])
+  }, [signOut, userId])
 
   const checkoutResult = params.get('checkout')
   useEffect(() => {
     if (!isSignedIn) return
     let active = true
-    // Start independent requests together. State changes follow their asynchronous responses.
-    fetchAccount().then(snapshot => {
-      if (active) { setAccount(snapshot); setError(null) }
-    }).catch(err => {
-      if (!active) return
-      if ((err as { status?: number })?.status === 401) signOut()
-      else setError(errorMessage(err, 'Could not load your account.'))
-    })
+    // Start independent requests together; stale account replies cannot replace a new session.
+    void Promise.resolve().then(() => { if (active) return load() })
     fetchLatestRelease().then(value => { if (active) setRelease(value) })
-    if (checkoutResult === 'cancelled' && pb.authStore.record?.id) sessionStorage.removeItem(`mm_checkout_${pb.authStore.record.id}`)
-    return () => { active = false }
-  }, [isSignedIn, signOut, checkoutResult])
+    return () => { active = false; invalidateAccount() }
+  }, [isSignedIn, load, invalidateAccount])
 
+
+  const visibleAccount = account?.user.id === userId ? account : null
 
   if (!isSignedIn) {
     return <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />
@@ -330,7 +328,7 @@ export const Account = () => {
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Your account</h1>
-          <p className="mt-1 text-slate-500 dark:text-slate-400">{account?.user.email ?? pb.authStore.record?.email}</p>
+          <p className="mt-1 text-slate-500 dark:text-slate-400">{visibleAccount?.user.email ?? pb.authStore.record?.email}</p>
         </div>
         <Button variant="secondary" onClick={signOut}>
           Sign out
@@ -348,22 +346,23 @@ export const Account = () => {
         </div>
       )}
 
-      {!account && !error ? (
+      {!visibleAccount && !error ? (
         <div className="space-y-4" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-32 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-900" />
           ))}
         </div>
-      ) : account ? (
+      ) : visibleAccount ? (
         <div className="space-y-6">
-          {params.get('checkout') === 'processing' && <Alert tone="success">Payment confirmation is processing. Your plan is granted by the server after Stripe confirms payment. <button className="underline" onClick={load}>Refresh account</button></Alert>}
-          {params.get('checkout') === 'cancelled' && <Alert>Checkout was closed. No access is granted until a payment is confirmed.</Alert>}
-          {!account.user.verified && <VerificationCard email={account.user.email} onRefresh={load} />}
-          <PlanCard account={account} />
-          <RedeemCard initialCode={params.get('code') ?? ''} hasPlan={account.entitlement.active} onRedeemed={setAccount} />
+          {!visibleAccount.user.verified && <VerificationCard email={visibleAccount.user.email} onRefresh={load} />}
+          <PlanCard account={visibleAccount} checkoutResult={checkoutResult} onRefresh={load} />
+          <RedeemCard key={visibleAccount.user.id} initialCode={params.get('code') ?? ''} hasPlan={visibleAccount.entitlement.active} onRedeemed={snapshot => {
+            if (snapshot.user.id !== userId || pb.authStore.record?.id !== userId) return
+            accountGeneration.current++; setAccount(snapshot)
+          }} />
           <DownloadCard release={release} />
-          <DevicesCard devices={account.devices} onRemoved={load} />
-          <PasswordCard email={account.user.email} />
+          <DevicesCard devices={visibleAccount.devices} onRemoved={load} />
+          <PasswordCard email={visibleAccount.user.email} />
         </div>
       ) : null}
     </div>

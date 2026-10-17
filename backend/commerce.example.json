@@ -1,0 +1,11 @@
+{
+  "enabled": false,
+  "livemode": false,
+  "web_origin": "https://macmint.co",
+  "price_id": "",
+  "amount_minor": null,
+  "currency": "",
+  "plan": "",
+  "duration_days": null,
+  "max_devices": null
+}

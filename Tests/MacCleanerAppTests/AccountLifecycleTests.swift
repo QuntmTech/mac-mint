@@ -173,6 +173,81 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertTrue(store.isUnlocked)
   }
 
+  func testExplicitPurchaseCheckActivatesThisMacWithoutARedemptionCode() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    await fixture.removePlan()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertEqual(store.phase, .needsPlan)
+    await store.checkPurchase()
+    XCTAssertEqual(store.phase, .needsPlan)
+    XCTAssertTrue(store.infoMessage?.contains("No completed purchase") == true)
+    XCTAssertNil(store.errorMessage)
+
+    await fixture.completePurchase()
+    await store.checkPurchase()
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertEqual(store.phase, .active(offline: false))
+    XCTAssertEqual(store.snapshot?.devices.first?.deviceId, device.deviceId)
+    XCTAssertEqual(store.infoMessage, "Purchase verified. This Mac is activated.")
+  }
+
+  func testPurchaseCheckSupersedesVerificationFromBeforeThePurchase() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    await fixture.removePlan()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    try await fixture.holdVerificationWithCurrentSnapshot()
+    let checking = Task { await store.refreshAccess() }
+    try await waitUntilPaused(fixture)
+    await fixture.completePurchase()
+    await store.checkPurchase()
+    XCTAssertTrue(store.isUnlocked)
+    await fixture.resumeVerification()
+    await checking.value
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertEqual(store.phase, .active(offline: false))
+  }
+
+  func testRepeatedPurchaseCheckCannotOverlapOrUndoSignOut() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    await fixture.removePlan()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.completePurchase()
+    await fixture.hold("/activate")
+    let checking = Task { await store.checkPurchase() }
+    try await waitUntilPaused(fixture)
+    let countBefore = await fixture.activations
+    await store.checkPurchase()
+    let countAfter = await fixture.activations
+    XCTAssertEqual(countAfter, countBefore)
+    let signingOut = Task { await store.signOut() }
+    for _ in 0..<100 {
+      if store.phase == .signedOut { break }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+    XCTAssertEqual(store.phase, .signedOut)
+    await fixture.resumeVerification()
+    await checking.value
+    await signingOut.value
+    XCTAssertEqual(store.phase, .signedOut)
+    XCTAssertFalse(store.isUnlocked)
+    XCTAssertNil(tokens.value)
+    XCTAssertNil(store.infoMessage)
+    await store.checkPurchase()
+    XCTAssertEqual(store.phase, .signedOut)
+  }
+
   private func waitUntilPaused(_ fixture: AccountFixture) async throws {
     for _ in 0..<200 {
       if await fixture.isPaused { return }
@@ -284,24 +359,37 @@ private final class TestClock: @unchecked Sendable {
 private actor AccountFixture {
   var offline = false
   var removed = false
+  private var planActive = true
   var activations = 0
   var authentications = 0
   var lastAsk: Data?
   private var pauseSuffix: String?
   private var pending: CheckedContinuation<Void, Never>?
+  private var nextVerificationBody: Data?
   var isPaused: Bool { pending != nil }
   func goOffline() { offline = true }
   func removeDevice() { removed = true }
+  func removePlan() { planActive = false; removed = true }
+  func completePurchase() { planActive = true }
   func holdNextVerification() { hold("/me") }
+  func holdVerificationWithCurrentSnapshot() throws {
+    nextVerificationBody = try JSONSerialization.data(withJSONObject: snapshotBody)
+    hold("/me")
+  }
   func hold(_ suffix: String) { pauseSuffix = suffix }
   func resumeVerification() { pending?.resume(); pending = nil }
   func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
     if offline { throw URLError(.notConnectedToInternet) }
     let path = request.url!.path
+    let frozenBody = path.hasSuffix("/me") ? nextVerificationBody : nil
+    if frozenBody != nil { nextVerificationBody = nil }
     if path.hasSuffix("auth-with-password") { authentications += 1 }
     if let suffix = pauseSuffix, path.hasSuffix(suffix) {
       pauseSuffix = nil
       await withCheckedContinuation { pending = $0 }
+    }
+    if let frozenBody {
+      return (frozenBody, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
     }
     var body: [String: Any] = [:]
     if path.hasSuffix("auth-with-password") || path.hasSuffix("auth-refresh") {
@@ -312,13 +400,24 @@ private actor AccountFixture {
       lastAsk = request.httpBody
       body = ["answer": "Fixture answer", "actions": []]
     } else if !path.hasSuffix("deactivate") {
-      if path.hasSuffix("activate") { activations += 1; removed = false }
-      body = ["user": ["id": "fixture", "email": "fixture@example.invalid", "verified": true],
-        "entitlement": ["plan": "pro", "status": "active", "active": true, "max_devices": 1],
-        "devices": removed ? [] : [["id": "device", "device_id": "native-integration-device", "name": "Fixture",
-          "model": "Fixture", "os_version": "test", "app_version": "test", "last_seen": ""]]]
+      if path.hasSuffix("activate") {
+        activations += 1
+        if !planActive {
+          let data = try JSONSerialization.data(withJSONObject: ["error": "no_active_plan", "message": "No active plan."])
+          return (data, HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!)
+        }
+        removed = false
+      }
+      body = snapshotBody
     }
     return (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: request.url!,
       statusCode: 200, httpVersion: nil, headerFields: nil)!)
+  }
+
+  private var snapshotBody: [String: Any] {
+    ["user": ["id": "fixture", "email": "fixture@example.invalid", "verified": true],
+      "entitlement": ["plan": "pro", "status": planActive ? "active" : "inactive", "active": planActive, "max_devices": 1],
+      "devices": removed ? [] : [["id": "device", "device_id": "native-integration-device", "name": "Fixture",
+        "model": "Fixture", "os_version": "test", "app_version": "test", "last_seen": ""]]]
   }
 }
