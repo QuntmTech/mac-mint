@@ -1,8 +1,10 @@
+import AppKit
 import MacCleanerCore
 import SwiftUI
 
 @main
 struct MacCleanerDesktopApp: App {
+  @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var model = AppViewModel()
   @StateObject private var account = AccountStore(supportDirectory: AppPaths.supportDirectory)
   @StateObject private var monitor = SystemMonitor()
@@ -28,6 +30,8 @@ struct MacCleanerDesktopApp: App {
         .tint(AppTheme.accent)
         .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 980, minHeight: 620)
+        .background(MainWindowReader())
+        .onAppear { appDelegate.model = model }
         .task {
           care.start()
           updates.start()
@@ -38,6 +42,8 @@ struct MacCleanerDesktopApp: App {
     .defaultSize(width: 1240, height: 820)
     .windowStyle(.automatic)
     .commands {
+      // One workspace window: every window would share the model's sheets and onboarding.
+      CommandGroup(replacing: .newItem) {}
       CommandGroup(replacing: .appSettings) {
         Button("Settings…") { model.selectedSection = .settings }
           .keyboardShortcut(",", modifiers: [.command])
@@ -60,21 +66,24 @@ struct MacCleanerDesktopApp: App {
         }
       }
       CommandMenu("Scan") {
-        Button("Quick Scan") {
-          model.selectedSection = .dashboard
-          model.runSmartCare()
+        Group {
+          Button("Quick Scan") {
+            model.selectedSection = .dashboard
+            model.runSmartCare()
+          }
+            .keyboardShortcut("r", modifiers: [.command])
+
+          Button("Map Storage") {
+            model.selectedSection = .storage
+            model.scanStorage()
+          }
+          .keyboardShortcut("m", modifiers: [.command, .shift])
+          Button("Choose Folder for Large Files") { model.chooseLargeFileFolder() }
+
+          Button("Choose Folder for Duplicates") { model.chooseDuplicateFolder() }
         }
-          .keyboardShortcut("r", modifiers: [.command])
-
-        Button("Map Storage") {
-          model.selectedSection = .storage
-          model.scanStorage()
-        }
-        .keyboardShortcut("m", modifiers: [.command, .shift])
-        Button("Choose Folder for Large Files") { model.chooseLargeFileFolder() }
-
-        Button("Choose Folder for Duplicates") { model.chooseDuplicateFolder() }
-
+        // These would navigate and then silently skip the scan while other work is active.
+        .disabled(model.isScanning || model.isWorking || model.isPreparingPlan || model.pendingPlan != nil)
       }
     }
 
@@ -88,6 +97,7 @@ struct MacCleanerDesktopApp: App {
       }
     )) {
       MenuBarView()
+        .onAppear { appDelegate.model = model }
         .environmentObject(model)
         .environmentObject(account)
         .environmentObject(monitor)
@@ -95,5 +105,65 @@ struct MacCleanerDesktopApp: App {
         .preferredColorScheme(appearance.colorScheme)
     }
     .menuBarExtraStyle(.window)
+  }
+}
+
+/// Quitting during a move, restore or organization asks first. Work stops at the next item
+/// boundary; anything left unfinished is reconciled from its journal on the next launch.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+  weak var model: AppViewModel?
+
+  func applicationWillFinishLaunching(_ notification: Notification) {
+    // Window tabs would offer "+" to create another copy of the single workspace.
+    NSWindow.allowsAutomaticWindowTabbing = false
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let model, model.isWorking else { return .terminateNow }
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "Quit while MacMint is working?"
+    alert.informativeText = "\(model.operationTitle ?? "An operation") is in progress. MacMint will stop after the current item and record what finished. Anything interrupted is checked again the next time MacMint opens."
+    alert.addButton(withTitle: "Keep Working")
+    alert.addButton(withTitle: "Stop and Quit")
+    guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+    model.cancelCurrentOperation()
+    Task { @MainActor in
+      // Let the current item finish and History record it, but never hold Quit indefinitely.
+      let deadline = Date().addingTimeInterval(15)
+      while model.isWorking, Date() < deadline { try? await Task.sleep(for: .milliseconds(100)) }
+      NSApp.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
+  }
+}
+
+/// Records the workspace window so the menu bar can bring it forward instead of opening another.
+@MainActor
+enum MainWindow {
+  private static weak var window: NSWindow?
+
+  static func register(_ window: NSWindow?) { if let window { self.window = window } }
+
+  /// False when the window was closed and must be opened again.
+  static func focusExisting() -> Bool {
+    if NSApp.isHidden { NSApp.unhide(nil) }
+    guard let window, window.isVisible || window.isMiniaturized else { return false }
+    if window.isMiniaturized { window.deminiaturize(nil) }
+    window.makeKeyAndOrderFront(nil)
+    return true
+  }
+}
+
+private struct MainWindowReader: NSViewRepresentable {
+  func makeNSView(context: Context) -> NSView { Reader() }
+  func updateNSView(_ nsView: NSView, context: Context) {}
+
+  final class Reader: NSView {
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      MainWindow.register(window)
+    }
   }
 }
