@@ -18,6 +18,12 @@ struct PhotosView: View {
         Label("Only the Photos assets you shared are included in this scan.", systemImage: "photo.badge.checkmark")
           .font(.caption).foregroundStyle(.secondary).padding(.horizontal, AppTheme.pagePadding).padding(.bottom, 10)
       }
+      if let error = model.photoDeletionError {
+        Label(error, systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.horizontal, AppTheme.pagePadding).padding(.bottom, 10)
+      }
       Divider()
       if model.isScanning && model.operationTitle == "Photos" {
         progress

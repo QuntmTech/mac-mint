@@ -59,11 +59,12 @@ final class PhotoReviewTests: XCTestCase {
     XCTAssertEqual(model.photoReviewSession.choices.count, 1)
   }
 
-  func testNewScanAndChangedResultsDiscardOldUndoWhileCancelledScanningPreservesPosition() {
+  func testNewScanResetsWhileRemovalsAndCancelledScanningPreservePosition() {
     let (model, support) = reviewModel()
     defer { try? FileManager.default.removeItem(at: support) }
     let keeper = photo("best.jpg"), copy = photo("copy.jpg")
     model.photoScan = scan([keeper, copy], keeper: keeper)
+    let generation = model.photoScan?.generation
     _ = model.decidePhotoReview(removing: false)
     model.isScanning = true
     _ = model.decidePhotoReview(removing: true)
@@ -73,14 +74,41 @@ final class PhotoReviewTests: XCTestCase {
     _ = model.decidePhotoReview(removing: true)
 
     model.removePhotos { $0.id == copy.id }
-    XCTAssertEqual(model.photoReviewSession.cursor, 0)
-    XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+    XCTAssertEqual(model.photoScan?.generation, generation, "Pruning keeps the scan's identity")
+    XCTAssertEqual(model.photoReviewSession.cursor, 1, "Every remaining photo was already reviewed")
+    XCTAssertEqual(model.photoReviewSession.choices.map(\.photoID), [keeper.id], "Removed photos leave Undo")
     XCTAssertNil(model.undoPhotoReview())
-    XCTAssertFalse(model.selectedPhotoIDs.contains(copy.id), "Undo cannot requeue an invalidated finding")
+    XCTAssertEqual(model.photoReviewSession.cursor, 0)
+    XCTAssertFalse(model.selectedPhotoIDs.contains(copy.id), "Undo cannot requeue a removed finding")
 
     _ = model.decidePhotoReview(removing: false)
     model.photoScan = scan([keeper, copy], keeper: keeper)
     XCTAssertEqual(model.photoReviewSession.cursor, 0, "Even a rescan with the same paths starts a new review")
+    XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+  }
+
+  func testDeletingReviewedPhotosContinuesAtTheNextUnreviewedPhoto() {
+    let (model, support) = reviewModel()
+    defer { try? FileManager.default.removeItem(at: support) }
+    let photos = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"].map(photo)
+    model.photoScan = PhotoScanResult(photos: photos, similarGroups: [], blurry: [], screenshots: [],
+      skippedLibraries: [], issues: [], wasCancelled: false)
+    let generation = model.photoScan?.generation
+    XCTAssertNil(model.decidePhotoReview(removing: true))  // a queued
+    XCTAssertNil(model.decidePhotoReview(removing: false)) // b kept
+    XCTAssertEqual(model.photoReviewSession.cursor, 2)
+
+    // The reviewed photo is deleted (as after the review sheet or Photos confirmation).
+    model.removePhotos { $0.id == photos[0].id }
+    XCTAssertEqual(model.photoScan?.generation, generation)
+    XCTAssertEqual(model.allScannedPhotos[model.photoReviewSession.cursor].id, photos[2].id, "The deck stays on c")
+    XCTAssertEqual(model.photoReviewSession.choices.map(\.photoID), [photos[1].id])
+
+    // The photo under the cursor disappears: continue with the next one.
+    model.removePhotos { $0.id == photos[2].id }
+    XCTAssertEqual(model.allScannedPhotos[model.photoReviewSession.cursor].id, photos[3].id)
+    XCTAssertNil(model.undoPhotoReview())
+    XCTAssertEqual(model.allScannedPhotos[model.photoReviewSession.cursor].id, photos[1].id, "Undo follows photo IDs")
     XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
   }
 
