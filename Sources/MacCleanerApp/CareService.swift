@@ -12,7 +12,7 @@ struct CareNotificationClient {
 
   static var system: Self {
     Self(available: CareService.isBundledApp,
-      status: { await UNUserNotificationCenter.current().notificationSettings().authorizationStatus },
+      status: { await PermissionsService.notificationAuthorizationStatus() },
       request: { try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) },
       add: { try await UNUserNotificationCenter.current().add($0) })
   }

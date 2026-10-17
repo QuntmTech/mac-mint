@@ -119,7 +119,7 @@ final class PermissionsService: ObservableObject {
   init(readPhotos: @escaping () -> PHAuthorizationStatus = { PHPhotoLibrary.authorizationStatus(for: .readWrite) },
     readNotifications: @escaping () async -> UNAuthorizationStatus? = {
       guard CareService.isBundledApp else { return nil }
-      return await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+      return await PermissionsService.notificationAuthorizationStatus()
     }, openURL: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) }) {
     self.readPhotos = readPhotos
     self.readNotifications = readNotifications
@@ -133,6 +133,16 @@ final class PermissionsService: ObservableObject {
     let status = await readNotifications()
     guard generation == refreshGeneration else { return }
     notifications = NotificationPermissionState(status)
+  }
+
+  /// UNNotificationSettings is not Sendable on supported SDKs. Extract the
+  /// authorization enum on the callback queue so that object never crosses actors.
+  static func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
+    await withCheckedContinuation { continuation in
+      UNUserNotificationCenter.current().getNotificationSettings { settings in
+        continuation.resume(returning: settings.authorizationStatus)
+      }
+    }
   }
 
   func open(_ pane: PermissionSettingsPane) {
