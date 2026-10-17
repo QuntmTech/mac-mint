@@ -297,8 +297,18 @@ public actor OperationExecutor {
 
   private func move(_ item: PlanItem, size: Int64) async -> ItemOutcome {
     let identity = FileSystem.fileIdentity(at: item.url)
+    if let expected = item.identity, identity != expected {
+      return ItemOutcome(item: item, status: .skipped,
+        message: "A different item now exists at this location. Rescan before removing it.")
+    }
     do {
       let trashURL = try await trashService.trash(item.url)
+      // The move is path-based, so prove afterwards that the reviewed item is what reached Trash.
+      if let expected = item.identity ?? identity, let trashURL,
+        FileSystem.fileIdentity(at: trashURL) != expected {
+        return ItemOutcome(item: item, status: .uncertain,
+          message: "Something moved to Trash at \(trashURL.lastPathComponent), but it isn't the item that was reviewed. Inspect Finder's Trash; no verified restore receipt is available.")
+      }
       return ItemOutcome(
         item: item, status: .moved,
         receipt: TrashReceipt(

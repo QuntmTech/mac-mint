@@ -61,7 +61,7 @@ public actor CleanupScanner {
             risk: rule.risk,
             reason: rule.reason,
             isSelected: rule.risk == .safe,
-            ownerBundleID: rule.ownerBundleID,
+            ownerBundleID: owner(of: piece, rule: rule),
             identity: FileSystem.fileIdentity(at: piece)
           ))
       }
@@ -74,6 +74,13 @@ public actor CleanupScanner {
     return ScanReport(
       value: value, issues: issues, duration: Date().timeIntervalSince(started),
       wasCancelled: Task.isCancelled)
+  }
+
+  /// Generic cache children are named after their app, so the running-app check can apply to them.
+  private func owner(of piece: URL, rule: CleanupRule) -> String? {
+    if let explicit = rule.ownerBundleID { return explicit }
+    guard rule.category == .userCaches else { return nil }
+    return OwnerResolver.hint(for: piece)?.bundleID
   }
 
   private func scanChildren(for rule: CleanupRule, ignoredPaths: Set<String>) -> (
@@ -109,7 +116,7 @@ public actor CleanupScanner {
               risk: rule.risk,
               reason: rule.reason,
               isSelected: rule.risk == .safe,
-              ownerBundleID: rule.ownerBundleID,
+              ownerBundleID: owner(of: piece, rule: rule),
               identity: FileSystem.fileIdentity(at: piece)
             ))
         }
