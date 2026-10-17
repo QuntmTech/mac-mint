@@ -152,11 +152,12 @@ final class AccountStore: ObservableObject {
   }
 
   /// Foregrounding also enforces expiry and remote deactivation after a sleeping Mac wakes.
-  /// Called on every app activation, so it is throttled while access is valid.
+  /// Called on every app activation, so it is throttled while access is valid and online. While
+  /// offline every activation tries to reach the server again.
   func refreshAccess(force: Bool = false) async {
     noteClock()
     guard token != nil, !isBusy else { return }
-    if !force, isUnlocked, let last = lastVerification {
+    if !force, isUnlocked, !isOffline, let last = lastVerification {
       let elapsed = now().timeIntervalSince(last)
       if elapsed >= 0, elapsed < Self.minimumRefreshInterval { return }
     }
@@ -213,8 +214,9 @@ final class AccountStore: ObservableObject {
 
   // MARK: Plan + devices
 
-  /// A browser purchase can grant access without a redemption code. Registering
-  /// this Mac still requires an explicit user action, never a foreground recheck.
+  /// A browser purchase can grant access without a redemption code. Like Redeem and freeing a
+  /// slot, this explicit action may bring back a Mac removed from the account; the server still
+  /// enforces the device limit. Background checks never reactivate.
   func checkPurchase() async {
     guard let token else {
       phase = .signedOut
@@ -223,7 +225,7 @@ final class AccountStore: ObservableObject {
     // Supersede a quiet verification that may have read the account before the
     // purchase settled. Its late response must not replace this activation.
     await perform(replacingSession: true) { generation in
-      try await self.activate(token: token, generation: generation, reactivate: false)
+      try await self.activate(token: token, generation: generation, reactivate: true)
       guard generation == self.sessionGeneration else { return }
       if self.isUnlocked {
         self.infoMessage = "Purchase verified. This Mac is activated."
@@ -247,7 +249,7 @@ final class AccountStore: ObservableObject {
     await perform { generation in
       _ = try await self.client.redeem(code: trimmed, token: token, deviceId: self.deviceInfo.deviceId)
       guard generation == self.sessionGeneration else { return }
-      try await self.activate(token: token, generation: generation, reactivate: false)
+      try await self.activate(token: token, generation: generation, reactivate: true)
       guard generation == self.sessionGeneration else { return }
       if self.isUnlocked { self.infoMessage = "MacMint Pro is unlocked. Enjoy!" }
     }
@@ -272,7 +274,7 @@ final class AccountStore: ObservableObject {
     await perform { generation in
       try await self.client.deactivate(deviceId: device.deviceId, token: token)
       guard generation == self.sessionGeneration else { return }
-      try await self.activate(token: token, generation: generation, reactivate: false)
+      try await self.activate(token: token, generation: generation, reactivate: true)
     }
   }
 
@@ -299,7 +301,8 @@ final class AccountStore: ObservableObject {
   }
 
   /// Registers this Mac and maps the server's answer to a phase. `reactivate` only from an
-  /// explicit user action; otherwise a Mac removed from the account stays removed.
+  /// explicit user action on this Mac (sign-in, Redeem, Check Purchase, freeing a slot, Activate
+  /// this Mac); background paths pass false so a Mac removed from the account stays removed.
   private func activate(token: String, generation: UUID, reactivate: Bool) async throws {
     do {
       let activation = Task { [client, deviceInfo] in
@@ -342,9 +345,11 @@ final class AccountStore: ObservableObject {
     cachedAccess = CachedAccess(snapshot: result.withoutAssertion, verifiedAt: verifiedAt)
     if case .signed(let signed) = evaluation, let token {
       signedEntitlement = signed
-      highWater = OfflineEntitlementPolicy.advance(highWater, to: verifiedAt)
+      // The server's issue time is the trusted "now": re-anchor, so a Mac whose clock ran ahead
+      // isn't locked out offline after the clock is corrected. Later checks advance it again.
+      highWater = signed.claims.issuedAt
       persist(OfflineEntitlementRecord(token: token, userId: result.user.id, assertion: signed.compact,
-        highWater: highWater ?? verifiedAt, snapshot: result.withoutAssertion))
+        highWater: signed.claims.issuedAt, snapshot: result.withoutAssertion))
     }
     phase = .active(offline: false)
   }
@@ -391,9 +396,11 @@ final class AccountStore: ObservableObject {
         return
       }
       guard result.devices.contains(where: { $0.deviceId == deviceInfo.deviceId }) else {
+        // Not an active device. A Mac that never had a row is registered; one removed from the
+        // account gets 409 device_deactivated and waits for an explicit "Activate this Mac".
         snapshot = result.withoutAssertion
         clearAccess()
-        phase = .deviceRemoved
+        try await activate(token: active, generation: generation, reactivate: false)
         return
       }
       try apply(result)
@@ -407,17 +414,21 @@ final class AccountStore: ObservableObject {
   }
 
   /// Only an expired session or a definitive account answer takes access away. Cancellation
-  /// changes nothing; quiet re-checks keep valid access through any other failure; network-type
-  /// failures fall back to signed offline evidence. TLS failures are never offline-eligible.
+  /// changes nothing; quiet re-checks keep valid access through any other failure, and a quiet
+  /// network failure switches to offline so the signed window applies; transient failures fall
+  /// back to signed offline evidence. TLS failures are never offline-eligible.
   private func handle(_ error: AccountAPIError, quiet: Bool) {
-    if error.isCancellation { return }
+    if error.isCancellation {
+      settleInterruptedCheck()
+      return
+    }
     if error.isUnauthorized {
       signOutLocally(message: "Your session expired. Please sign in again.")
       return
     }
     let current = now()
     if quiet, isUnlocked {
-      if error.isNetwork, offlineAccessAllowed(at: current) { phase = .active(offline: true) }
+      if error.isNetwork { phase = .active(offline: true) }
       return
     }
     if error.isTransient, offlineAccessAllowed(at: current) {
@@ -426,6 +437,17 @@ final class AccountStore: ObservableObject {
       return
     }
     phase = .failed(error.message)
+  }
+
+  /// A cancelled check says nothing about the account, but must not leave `.checking` behind.
+  private func settleInterruptedCheck() {
+    guard phase == .checking else { return }
+    if offlineAccessAllowed(at: now()) {
+      if snapshot == nil { snapshot = offlineRecord?.snapshot ?? cachedAccess?.snapshot }
+      phase = .active(offline: true)
+    } else {
+      phase = .failed("The account check was interrupted. Try again.")
+    }
   }
 
   private func perform(replacingSession: Bool = false,
@@ -440,8 +462,10 @@ final class AccountStore: ObservableObject {
     do {
       try await work(generation)
     } catch let error as AccountAPIError {
-      guard generation == sessionGeneration, !error.isCancellation else { return }
-      if error.isUnauthorized, token != nil, phase != .signedOut {
+      guard generation == sessionGeneration else { return }
+      if error.isCancellation {
+        settleInterruptedCheck()
+      } else if error.isUnauthorized, token != nil, phase != .signedOut {
         signOutLocally(message: "Your session expired. Please sign in again.")
       } else if phase == .checking {
         // A failed activation after sign-in must not leave an endless spinner.
@@ -449,8 +473,11 @@ final class AccountStore: ObservableObject {
       } else {
         errorMessage = error.message
       }
+    } catch is CancellationError {
+      guard generation == sessionGeneration else { return }
+      settleInterruptedCheck()
     } catch {
-      guard generation == sessionGeneration, !(error is CancellationError) else { return }
+      guard generation == sessionGeneration else { return }
       errorMessage = error.localizedDescription
     }
   }

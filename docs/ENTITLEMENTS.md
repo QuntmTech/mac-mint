@@ -22,8 +22,12 @@ Server: [`macmint_entitlement.js`](../backend/pocketbase/pb_hooks/macmint_entitl
 ## What the app accepts
 
 - Online: the assertion, when present, must verify (signature, known `kid`, `v` 1, user, this Mac, active). A failure is treated as a failed check. No assertion means a legacy server: unlock this run only.
-- Offline or after a restart: a verified assertion from the Keychain with `now < offline_until`, before `expires_at`, and `now` no earlier than five minutes before the latest time this Mac has seen (the high-water mark, kept in the same Keychain item and never earlier than `issued_at`).
-- Quiet foreground checks (at most every 15 minutes while access is valid) keep valid access through 404/408/425/429/5xx, network, TLS and verification failures. An expired session (401) or a definitive answer (no active plan, this Mac removed) removes it. Launch and explicit retries fall back to valid offline evidence for those transient failures, never for TLS or verification failures. Cancellation changes nothing.
+- Offline or after a restart: a verified assertion from the Keychain with `now < offline_until`, before `expires_at`, and `now` no earlier than five minutes before the latest time this Mac has seen (the high-water mark, kept in the same Keychain item and never earlier than `issued_at`). Every verified online assertion re-anchors the mark to its server `issued_at`, so a Mac whose clock ran ahead isn't locked out once the clock is corrected; later checks advance it again.
+- Quiet foreground checks (at most every 15 minutes while access is valid and online; every activation while offline) keep valid access through 404/408/425/429/5xx, TLS and verification failures. A quiet network failure switches to offline, so the signed `offline_until` window, not the running app's last online check, decides from then on. An expired session (401) or a definitive answer (no active plan, this Mac removed) removes access. Launch and explicit retries fall back to valid offline evidence for transient failures, never for TLS or verification failures. Cancellation changes nothing about the account; an interrupted launch or retry settles on valid offline evidence or a Try Again panel.
+
+## Device activation
+
+Explicit actions on this Mac — sign-in, Redeem, Check Purchase, freeing a slot from the device-limit panel, and "Activate this Mac" — send `reactivate: true`; the server still enforces the device limit. Background paths (launch, foreground refresh, periodic recheck) never do. When verification finds this Mac without an active device row they call activate with `reactivate: false`: a Mac that never had a row is registered, and one removed from the account gets `409 device_deactivated` and shows "Activate this Mac".
 
 ## Keys
 
