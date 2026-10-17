@@ -203,7 +203,7 @@ final class AppReliabilityTests: XCTestCase {
     return (model, folder)
   }
 
-  private func waitUntil(seconds: Double = 3, _ condition: () async -> Bool) async throws {
+  private func waitUntil(seconds: Double = 3, _ condition: @MainActor () async -> Bool) async throws {
     let deadline = Date().addingTimeInterval(seconds)
     while Date() < deadline {
       if await condition() { return }
