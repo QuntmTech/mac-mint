@@ -94,7 +94,24 @@ enum SmokeTest {
           if (name.contains("-Empty-") || name.contains("-Populated-") || name.contains("-Compact-")), !Set(layoutProbe.frames.keys).isSuperset(of: ["brand", "workspace controls"]) {
             failures.append("Missing workspace layout evidence: " + name)
           }
+          if name.contains("-Performance-") {
+            let requiredRows = name.contains("-Compact-") ? 3 : 5
+            let viewport = layoutProbe.frames["performance viewport"]
+            if viewport == nil { failures.append("Missing performance viewport: " + name) }
+            for index in 0..<requiredRows {
+              guard let frame = layoutProbe.frames["performance app row \(index)"] else {
+                failures.append("Missing visible performance row \(index): " + name)
+                continue
+              }
+              if let viewport, frame.height < 40 || frame.width <= 0 || !viewport.insetBy(dx: -1, dy: -1).contains(frame) {
+                failures.append("Performance row \(index) is not fully visible: " + name)
+                print("✗ Performance first-fold \(name): row \(index) \(frame), viewport \(viewport)")
+              }
+            }
+          }
           for (element, frame) in layoutProbe.frames {
+            // Later table rows may correctly extend below the scroll viewport.
+            if element.hasPrefix("performance app row ") { continue }
             if frame.minY < -1 || frame.maxY > height + 1 || frame.minX < -1 || frame.maxX > width + 1 {
               failures.append("Offscreen " + element + ": " + name)
               print("✗ Layout \(name): \(element) \(frame), bounds \(hosting.bounds)")
@@ -140,6 +157,12 @@ enum SmokeTest {
         render(prefix + "-Populated-" + section.rawValue, RootView())
         render(prefix + "-Compact-" + section.rawValue, RootView(), width: 980, height: 660)
       }
+      for state in PerformanceFixtureState.allCases {
+        model.selectedSection = .performance
+        let view = RootView().environment(\.performancePreview, performancePreview(state))
+        render(prefix + "-Performance-Populated-" + state.rawValue, view)
+        render(prefix + "-Performance-Compact-" + state.rawValue, view, width: 980, height: 660)
+      }
       render(prefix + "-Organizer", OrganizerView(), width: 840, height: 660)
       render(prefix + "-Photo-deck", PhotoReviewDeck(), width: 720, height: 480)
       let reviewSession = model.photoReviewSession
@@ -168,6 +191,40 @@ enum SmokeTest {
         : "Smoke test FAILED: \(failures.joined(separator: ", "))")
     try? FileManager.default.removeItem(at: support)
     exit(failures.isEmpty ? 0 : 1)
+  }
+
+  private enum PerformanceFixtureState: String, CaseIterable {
+    case populated, paused, highPressure = "high-pressure", unknownCPU = "unknown-cpu"
+  }
+
+  private static func performancePreview(_ state: PerformanceFixtureState) -> PerformancePreview {
+    let gb: Int64 = 1_000_000_000
+    var snapshot = SystemMonitor.Snapshot(freeBytes: 165 * gb, totalBytes: 512 * gb,
+      cpuUsage: 0.23, memoryUsedBytes: 10 * gb, physicalMemory: 16 * gb,
+      swapUsedBytes: 512_000_000, pressure: .normal)
+    let rows: [PerformancePresentation.App] = [
+      .init(id: .init(pid: 401, started: 1), name: "Code Studio", bundleID: "example.code-studio",
+        memoryBytes: 3 * gb, cpuPercent: 185.4, fallbackSymbol: "hammer.fill"),
+      .init(id: .init(pid: 402, started: 2), name: "Browser", bundleID: "example.browser",
+        memoryBytes: 2 * gb, cpuPercent: 32.6, fallbackSymbol: "globe"),
+      .init(id: .init(pid: 403, started: 3), name: "Design Workspace with a longer application name", bundleID: "example.design-workspace",
+        memoryBytes: 1_400_000_000, cpuPercent: 5.7, fallbackSymbol: "paintpalette.fill"),
+      .init(id: .init(pid: 404, started: 4), name: "Music", bundleID: "example.music",
+        memoryBytes: 290_000_000, cpuPercent: 0, fallbackSymbol: "music.note"),
+      .init(id: .init(pid: 405, started: 5), name: "Notes", bundleID: "example.notes",
+        memoryBytes: 145_000_000, cpuPercent: nil, fallbackSymbol: "note.text"),
+    ]
+    if state == .highPressure {
+      snapshot.pressure = .critical; snapshot.memoryUsedBytes = 15 * gb
+      snapshot.swapUsedBytes = 3 * gb; snapshot.cpuUsage = 0.88
+    }
+    if state == .unknownCPU { snapshot.cpuUsage = nil }
+    let apps = state == .unknownCPU ? rows.enumerated().map { index, app in
+      PerformancePresentation.App(id: app.id, name: app.name, bundleID: app.bundleID,
+        memoryBytes: app.memoryBytes, cpuPercent: index == 0 ? .nan : nil, fallbackSymbol: app.fallbackSymbol)
+    } : rows
+    return PerformancePreview(snapshot: snapshot, apps: apps,
+      sampledAt: Date(timeIntervalSince1970: 1_792_231_200), logicalCPUCount: 8, paused: state == .paused)
   }
 }
 

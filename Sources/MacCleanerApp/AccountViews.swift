@@ -59,7 +59,7 @@ private struct GateScaffold<Content: View>: View {
   var body: some View {
     ZStack {
       LinearGradient(
-        colors: [AppTheme.accent.opacity(0.14), Color(nsColor: .windowBackgroundColor)],
+        colors: [AppTheme.panel, AppTheme.canvas],
         startPoint: .top,
         endPoint: .bottom
       )
