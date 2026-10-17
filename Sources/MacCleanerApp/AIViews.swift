@@ -226,7 +226,7 @@ struct AIReviewPanel: View {
         }
       }
       .padding(12)
-      .background(AppTheme.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
   }
 }

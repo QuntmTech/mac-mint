@@ -79,7 +79,7 @@ struct DashboardView: View {
     .background {
       RoundedRectangle(cornerRadius: 22).fill(AppTheme.hero)
         .overlay(alignment: .topTrailing) {
-          Circle().fill(AppTheme.brand.opacity(0.07)).frame(width: 280, height: 280)
+          Circle().fill(AppTheme.ink.opacity(0.025)).frame(width: 280, height: 280)
             .offset(x: 75, y: -100).allowsHitTesting(false)
         }.clipShape(RoundedRectangle(cornerRadius: 22))
     }
