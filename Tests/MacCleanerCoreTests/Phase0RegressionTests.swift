@@ -303,3 +303,29 @@ actor MovingTrashService: TrashService {
     return destination
   }
 }
+
+extension Phase0RegressionTests {
+  func testDuplicateVerifierReportsGroupProgressAndFinalCount() async throws {
+    let root = makeTempDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    _ = try makeFile(root, "a.bin", Data(repeating: 3, count: 4096))
+    _ = try makeFile(root, "b.bin", Data(repeating: 3, count: 4096))
+    let group = try await scanSingleGroup(root)
+    final class Reports: @unchecked Sendable {
+      private let lock = NSLock()
+      private var values: [[Int]] = []
+      func append(_ value: [Int]) { lock.lock(); values.append(value); lock.unlock() }
+      var all: [[Int]] { lock.lock(); defer { lock.unlock() }; return values }
+    }
+    let reports = Reports()
+    let selected = Set(group.files.filter { $0.url.lastPathComponent == "b.bin" }.map(\.id))
+    let unselectedFile = LargeFile(url: root.appendingPathComponent("c.bin"), size: 4096, modifiedAt: nil, accessedAt: nil)
+    let untouched = DuplicateGroup(fingerprint: "unselected", files: [unselectedFile, unselectedFile])
+    let plan = await DuplicateRemovalVerifier(safetyPolicy: SafetyPolicy(homeDirectory: root.deletingLastPathComponent()))
+      .plan(groups: [group, untouched], selectedIDs: selected) { checked, total in reports.append([checked, total]) }
+    XCTAssertEqual(plan.approved.map(\.url.lastPathComponent), ["b.bin"])
+    XCTAssertEqual(reports.all.first, [0, 1], "Only groups containing a selection are counted")
+    XCTAssertEqual(reports.all.last, [1, 1])
+  }
+}
+
