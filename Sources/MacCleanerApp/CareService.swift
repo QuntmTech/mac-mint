@@ -18,10 +18,11 @@ struct CareNotificationClient {
         // Keep the request on its owning actor. The imported async overload
         // sends this non-Sendable object to a generic executor on older SDKs.
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-          UNUserNotificationCenter.current().add(request, withCompletionHandler: { error in
+          let completion: @Sendable (Error?) -> Void = { error in
             if let error { continuation.resume(throwing: error) }
             else { continuation.resume(returning: ()) }
-          })
+          }
+          UNUserNotificationCenter.current().add(request, withCompletionHandler: completion)
         }
       })
   }
