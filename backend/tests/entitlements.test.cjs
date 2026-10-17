@@ -153,3 +153,9 @@ test('attach adds the assertion field only when one is issued', () => {
   assert.ok(!('entitlement_assertion' in signer.attach(fakeApp({ secret: testKey }), payload(), '')))
   assert.match(signer.attach(fakeApp({ secret: testKey }), payload(), activeDevice).entitlement_assertion, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{86}$/)
 })
+
+test('the shared wire vector is stable (Tests/MacCleanerAppTests/AccountEntitlementVerifierTests.swift verifies it with CryptoKit)', () => {
+  const vector = 'eyJhY3RpdmUiOnRydWUsImRldmljZV9pZCI6IkFCQ0RFRjAxMjM0NTY3ODkiLCJleHBpcmVzX2F0IjpudWxsLCJpc3N1ZWRfYXQiOjE4MDAwMDAwMDAsImtpZCI6Im1tLXRlc3QtMSIsIm9mZmxpbmVfdW50aWwiOjE4MDEyMDk2MDAsInBsYW4iOiJwcm8iLCJ1c2VyX2lkIjoidXNlcjEiLCJ2IjoxfQ.5ultdfhb-3pEE38G_aKeqPfbVrWmKHoM_shIY_zhNC78gdoGuQFPUnq1V6dBKwPeLru9DhFnv7gv0vlbid_TCQ'
+  assert.equal(signer.sign(signer.assertionPayload('mm-test-1', 'user1', activeDevice, pro, 1800000000, 14), seed), vector)
+  assert.equal(Buffer.from(nacl.sign.keyPair.fromSeed(seed).publicKey).toString('base64'), 'A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=')
+})
