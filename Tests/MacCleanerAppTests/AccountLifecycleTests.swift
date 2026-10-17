@@ -51,6 +51,32 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertNil(tokens.value)
   }
 
+  func testRemovedMacIsOnlyReactivatedByAnExplicitAction() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    var flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true], "Signing in is an explicit activation")
+    await fixture.deactivateThisMac()
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .deviceRemoved)
+    XCTAssertFalse(store.isUnlocked)
+    await store.checkPurchase()
+    await store.redeem(code: "MINT-FIXTURE-CODE")
+    flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true, false, false], "Purchase and redemption never reactivate implicitly")
+    XCTAssertEqual(store.phase, .deviceRemoved)
+    XCTAssertFalse(store.isUnlocked)
+    await store.activateThisMac()
+    flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags.last, true)
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertEqual(store.infoMessage, "This Mac is activated.")
+  }
+
   func testLateVerificationCannotRestoreAccessAfterSignOut() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }

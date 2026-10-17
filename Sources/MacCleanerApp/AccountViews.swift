@@ -290,6 +290,38 @@ private struct DeviceLimitPanel: View {
   }
 }
 
+private struct DeviceRemovedPanel: View {
+  @EnvironmentObject private var account: AccountStore
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      Label("This Mac was removed from your account", systemImage: "laptopcomputer.slash")
+        .font(.title3.bold())
+      Text("MacMint won’t add it back on its own. Activate this Mac to use your plan here again; it takes one of your device slots.")
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      Button {
+        Task { await account.activateThisMac() }
+      } label: {
+        HStack {
+          if account.isBusy { ProgressView().controlSize(.small) }
+          Text("Activate this Mac").frame(maxWidth: .infinity)
+        }
+      }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .disabled(account.isBusy)
+      HStack {
+        Button("Manage Devices…") { account.openAccountPage() }
+        Spacer()
+        Button("Sign Out") { Task { await account.signOut() } }
+      }
+      .buttonStyle(.link)
+      .tint(AppTheme.accentText)
+      .font(.callout)
+    }
+  }
+}
+
 private struct FailurePanel: View {
   @EnvironmentObject private var account: AccountStore
   let message: String
@@ -394,6 +426,7 @@ struct AccountAccessSheet: View {
         case .signedOut: GateScaffold { AuthForm() }
         case .needsPlan: GateScaffold { RedeemForm() }
         case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
+        case .deviceRemoved: GateScaffold { DeviceRemovedPanel() }
         case .failed(let message): GateScaffold { FailurePanel(message: message) }
         }
       }

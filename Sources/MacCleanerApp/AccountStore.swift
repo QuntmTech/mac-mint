@@ -48,6 +48,8 @@ final class AccountStore: ObservableObject {
     case signedOut
     case needsPlan
     case deviceLimit(message: String, devices: [RegisteredDevice])
+    /// This Mac was removed from the account; only an explicit action activates it again.
+    case deviceRemoved
     case active(offline: Bool)
     case failed(String)
   }
@@ -232,6 +234,20 @@ final class AccountStore: ObservableObject {
     }
   }
 
+  /// The explicit "Activate this Mac" action for a Mac removed from the account.
+  func activateThisMac() async {
+    guard let token else {
+      phase = .signedOut
+      return
+    }
+    await perform(replacingSession: true) { generation in
+      try await self.activate(token: token, generation: generation, reactivate: true)
+      guard generation == self.sessionGeneration else { return }
+      if self.isUnlocked { self.infoMessage = "This Mac is activated." }
+      self.scheduleRecheck()
+    }
+  }
+
   func removeDevice(_ device: RegisteredDevice) async {
     guard let token else { return }
     await perform { generation in
@@ -286,6 +302,10 @@ final class AccountStore: ObservableObject {
       snapshot = result?.withoutAssertion
       clearAccess()
       phase = .deviceLimit(message: error.message, devices: error.devices)
+    } catch let error as AccountAPIError where error.code == "device_deactivated" {
+      guard generation == sessionGeneration else { return }
+      clearAccess()
+      phase = .deviceRemoved
     }
   }
 
@@ -351,8 +371,9 @@ final class AccountStore: ObservableObject {
         return
       }
       guard result.devices.contains(where: { $0.deviceId == deviceInfo.deviceId }) else {
+        snapshot = result.withoutAssertion
         clearAccess()
-        phase = .failed("This Mac was deactivated. Sign in again to activate it explicitly.")
+        phase = .deviceRemoved
         return
       }
       try apply(result)
