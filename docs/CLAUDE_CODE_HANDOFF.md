@@ -2,6 +2,8 @@
 
 Desktop micro polish followed the original implementation checkpoint; see section 18 for the additional changes to review.
 
+A further interruption/lifecycle pass is described in section 19, including new regression tests and photo-deck resume/completion captures.
+
 Prepared 2026-10-16, America/New_York. This document accompanies delivery to `main` through [PR #22](https://github.com/QuntmTech/mac-mint/pull/22).
 
 Claude Code: please independently review the work described here. Treat these statements as claims to verify against the source and executable evidence, not as proof that the product is finished. Prioritize data safety, recovery, privacy, account boundaries, concurrency, native usability, and resource consumption. Report concrete findings with severity, file/line, trigger, consequence, and a regression or verification method. Separate confirmed defects from untested hypotheses and product limitations. Another green test run alone is not the requested review.
@@ -474,3 +476,15 @@ After the original implementation was merged, the user requested another pass of
 - `OrganizerView.swift`: validation waits for a 200 ms typing pause, captures inventory ID/proposals/exclusions together, and discards cancelled or superseded checks. Review and selection stay unavailable until that input has been validated. A checking indicator explains the delay. Undo also communicates the existing scan/operation busy boundary through its disabled state.
 
 Review the cancellation/edit/exclusion transitions, pausing while the menu-bar monitor is active, and photo-deck completion in both appearances. Portable tests and syntax parsing run on the Linux host; the macOS workflow provides semantic compilation, native tests, layout captures, and downloaded-package checks for the follow-up commit. Actual keyboard routing and VoiceOver still need interactive Mac verification. This follow-up adds no polling timer, AI request, watcher, automatic removal, release tag or deployment.
+
+## 19. Interruption and lifecycle follow-up (2026-10-17)
+
+A second critical pass found three gaps beyond visual polish:
+
+1. Photo-deck cursor/Undo state lived in the view, so moving to Similar, another workspace, or a scan progress view restarted browsing while keeping queued selections. `PhotoReviewSession` now lives in `AppViewModel` and is reset when the scan generation changes. Navigation and cancelled scans preserve progress. `decidePhotoReview`, `undoPhotoReview`, and `restartPhotoReview` share existing selection/keeper policy; restarting browsing leaves the queue alone. Preparing a plan blocks deck changes. New results cannot inherit old index-based Undo records.
+2. File-type suggestions used an untracked task without the AI path's generation check or immediate busy state. `OrganizationSuggestionSession` now owns preparation for both paths. Starting work blocks edits/folder changes immediately, replacement/cancellation invalidates the old result, and a late success/error cannot publish into a dismissed or newer session or clear its busy state. Cancelling preparation does not clear the separate busy state of an already-started local apply/Undo.
+3. Quick Look generation had no explicit native cancellation forwarding. `ThumbnailRequest` now forwards cancellation to the request-specific generator API, skips already-cancelled starts, and discards late images before cache insertion. This builds on [Apple's cancellation API](https://developer.apple.com/documentation/quicklookthumbnailing/qlthumbnailgenerator/cancel(_:)); it does not establish a measured CPU/RAM improvement or a hard bound on third-party thumbnail-provider shutdown time.
+
+`PhotoReviewTests` adds navigation/resume/Undo, cancelled scans, changed-result invalidation, changed keepers, and queue-preserving restart checks. `OrganizationSuggestionTests` uses deliberately delayed operations that ignore cancellation to verify stale-response and retry behavior. `ThumbnailRequestTests` covers cancellation before start, cancellation during generation, repeated cancellation and late images, and normal completion. The smoke harness also captures resumed and completed photo decks in both appearances.
+
+The Linux host can run portable tests and syntax parsing; new app-level tests require macOS CI. Inspect the final commit's native test, render and package evidence. Interactive keyboard/VoiceOver, real PhotoKit/iCloud, provider shutdown behavior and prolonged Instruments measurements remain outstanding as described above. No paid operation authority, production AI flag, release tag or deployment is added by this follow-up.

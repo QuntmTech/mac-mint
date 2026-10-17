@@ -11,7 +11,8 @@ struct OrganizerView: View {
   @State private var selected: Set<String> = []
   @State private var problems: [String: String] = [:]
   @State private var records: [OrganizationRecord] = []
-  @State private var busy = false
+  @State private var localBusy = false
+  @StateObject private var suggestions = OrganizationSuggestionSession()
   @State private var error: String?
   @State private var confirmation = false
   @State private var showingActivation = false
@@ -19,9 +20,9 @@ struct OrganizerView: View {
   @State private var consentPayload: AIOrganizationRequest?
   @State private var consentText = ""
   @State private var consentSheet = false
-  @State private var requestTask: Task<Void, Never>?
-  @State private var generation = UUID()
   @State private var validatedInput: ValidationInput?
+
+  private var busy: Bool { localBusy || suggestions.isBusy }
 
   private struct ValidationInput: Hashable {
     let inventoryID: UUID?
@@ -63,7 +64,7 @@ struct OrganizerView: View {
           ProgressView().controlSize(.small)
           Text("Checking changes…").font(.caption).foregroundStyle(.secondary)
         }
-        if requestTask != nil { Button("Cancel request") { cancelRequest() } }
+        if suggestions.isBusy { Button("Cancel suggestions") { cancelRequest() } }
         Spacer()
         if inventory != nil && !showHistory && !historyOnly {
           Button("Choose another folder…", action: chooseFolder).disabled(busy)
@@ -99,7 +100,7 @@ struct OrganizerView: View {
         }
         Spacer()
         Button("Suggest by file type") {
-          Task { proposals = await model.organizationStore.localSuggestions(inventory); selected = [] }
+          suggestLocally(inventory)
         }.disabled(busy)
         Button { prepareAI(inventory) } label: { Label("Suggest with AI…", systemImage: "sparkles") }
           .disabled(busy || inventory.files.isEmpty || !account.aiStatus.allows("organize"))
@@ -204,9 +205,9 @@ struct OrganizerView: View {
 
   private func chooseFolder() {
     guard !busy, model.exclusionsReady, let root = model.chooseFolder(prompt: "Choose one folder to organize") else { return }
-    cancelRequest(); selected = []; proposals = []; inventory = nil; error = nil; busy = true
+    cancelRequest(); selected = []; proposals = []; inventory = nil; error = nil; localBusy = true
     Task {
-      defer { busy = false }
+      defer { localBusy = false }
       do { inventory = try await model.organizationStore.inspect(root, ignoredPaths: model.ignoredPaths) }
       catch { self.error = error.localizedDescription }
     }
@@ -242,33 +243,34 @@ struct OrganizerView: View {
     consentPayload = payload; consentSheet = true
   }
   private func requestSuggestions() {
-    guard let payload = consentPayload else { return }
-    consentSheet = false; consentPayload = nil; busy = true; error = nil
-    let token = generation
-    requestTask = Task {
-      defer { if generation == token { busy = false; requestTask = nil } }
-      do {
-        let response = try await account.aiOrganize(payload)
-        guard !Task.isCancelled, generation == token else { return }
-        let known = Set(payload.files.map(\.id)); var seen: Set<String> = []
-        proposals = response.proposals.filter { known.contains($0.id) && seen.insert($0.id).inserted }; selected = []
-      } catch { if !Task.isCancelled, generation == token { self.error = error.localizedDescription } }
-    }
+    guard let payload = consentPayload, !busy else { return }
+    consentSheet = false; consentPayload = nil; error = nil
+    suggestions.start {
+      let response = try await account.aiOrganize(payload)
+      let known = Set(payload.files.map(\.id)); var seen: Set<String> = []
+      return response.proposals.filter { known.contains($0.id) && seen.insert($0.id).inserted }
+    } receive: { proposals = $0; selected = [] }
+      reportError: { error = $0 }
+  }
+  private func suggestLocally(_ inventory: OrganizationInventory) {
+    guard !busy else { return }
+    error = nil
+    suggestions.start {
+      await model.organizationStore.localSuggestions(inventory)
+    } receive: { proposals = $0; selected = [] }
+      reportError: { error = $0 }
   }
   private func cancelRequest() {
-    let hadRequest = requestTask != nil
-    generation = UUID(); requestTask?.cancel(); requestTask = nil; consentPayload = nil; consentSheet = false
-    // Sign-out must not unlock this UI while an already-started local operation is finishing.
-    if hadRequest { busy = false }
+    suggestions.cancel(); consentPayload = nil; consentSheet = false
   }
   private func apply() {
     guard let inventory, !busy, !validationPending, !selected.isEmpty,
       !model.isWorking, !model.isScanning, model.exclusionsReady else { return }
     guard model.authorizeRemoval() else { showingActivation = true; return }
     let approved = proposals.filter { selected.contains($0.id) }
-    busy = true; error = nil
+    localBusy = true; error = nil
     Task {
-      defer { busy = false }
+      defer { localBusy = false }
       do {
         _ = try await model.applyOrganization(inventory, proposals: approved)
         self.inventory = nil; proposals = []; selected = []; showHistory = true
@@ -278,9 +280,9 @@ struct OrganizerView: View {
   }
   private func undo(_ record: OrganizationRecord) {
     guard !busy, !model.isWorking else { return }
-    busy = true; error = nil
+    localBusy = true; error = nil
     Task {
-      defer { busy = false }
+      defer { localBusy = false }
       do { _ = try await model.undoOrganization(record.id) }
       catch { self.error = error.localizedDescription }
       await loadHistory()

@@ -114,7 +114,7 @@ struct PhotosView: View {
   @ViewBuilder
   private func content(_ scan: PhotoScanResult) -> some View {
     switch tab {
-    case .deck: PhotoReviewDeck(photos: scan.photos).id(scan.generation)
+    case .deck: PhotoReviewDeck().id(scan.generation)
     case .similar:
       if scan.similarGroups.isEmpty {
         EmptyState(icon: "checkmark.seal", title: "No similar shots", detail: "Every photo here looks distinct.")

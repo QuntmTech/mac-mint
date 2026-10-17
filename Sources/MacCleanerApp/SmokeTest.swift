@@ -141,7 +141,13 @@ enum SmokeTest {
         render(prefix + "-Compact-" + section.rawValue, RootView(), width: 980, height: 660)
       }
       render(prefix + "-Organizer", OrganizerView(), width: 840, height: 660)
-      render(prefix + "-Photo-deck", PhotoReviewDeck(photos: model.allScannedPhotos), width: 720, height: 480)
+      render(prefix + "-Photo-deck", PhotoReviewDeck(), width: 720, height: 480)
+      let reviewSession = model.photoReviewSession
+      model.photoReviewSession.cursor = min(1, model.allScannedPhotos.count)
+      render(prefix + "-Photo-deck-resumed", PhotoReviewDeck(), width: 720, height: 480)
+      model.photoReviewSession.cursor = model.allScannedPhotos.count
+      render(prefix + "-Photo-deck-complete", PhotoReviewDeck(), width: 720, height: 480)
+      model.photoReviewSession = reviewSession
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
       render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 540)

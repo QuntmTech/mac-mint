@@ -22,6 +22,18 @@ enum PhotoTab: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
+/// In-memory browsing state belongs to the scan, rather than a disposable view.
+/// New results discard the trail; navigation and cancelled scans preserve it.
+struct PhotoReviewSession {
+  struct Choice {
+    let index: Int
+    let photoID: String
+    let wasSelected: Bool
+  }
+  var cursor = 0
+  var choices: [Choice] = []
+}
+
 extension AppViewModel {
   // MARK: Derived state
 
@@ -128,6 +140,41 @@ extension AppViewModel {
   }
 
   // MARK: Selection
+
+  func decidePhotoReview(removing: Bool) -> String? {
+    guard !isWorking, !isScanning, !isPreparingPlan, let scan = photoScan,
+      scan.photos.indices.contains(photoReviewSession.cursor) else { return nil }
+    let photo = scan.photos[photoReviewSession.cursor]
+    if removing, let group = group(containing: photo), keeper(of: group).id == photo.id {
+      return "Choose a different keeper in Compare before queuing this photo."
+    }
+    let before = selectedPhotoIDs.contains(photo.id)
+    if before != removing { togglePhoto(photo) }
+    guard selectedPhotoIDs.contains(photo.id) == removing else { return statusMessage }
+    photoReviewSession.choices.append(.init(index: photoReviewSession.cursor, photoID: photo.id, wasSelected: before))
+    photoReviewSession.cursor += 1
+    return nil
+  }
+
+  func undoPhotoReview() -> String? {
+    guard !isWorking, !isScanning, !isPreparingPlan, let scan = photoScan,
+      let previous = photoReviewSession.choices.last else { return nil }
+    guard scan.photos.indices.contains(previous.index), scan.photos[previous.index].id == previous.photoID else {
+      photoReviewSession = PhotoReviewSession()
+      return "The photo results changed. Review the current scan again."
+    }
+    let photo = scan.photos[previous.index]
+    if selectedPhotoIDs.contains(photo.id) != previous.wasSelected { togglePhoto(photo) }
+    guard selectedPhotoIDs.contains(photo.id) == previous.wasSelected else { return statusMessage }
+    photoReviewSession.choices.removeLast()
+    photoReviewSession.cursor = previous.index
+    return nil
+  }
+
+  func restartPhotoReview() {
+    guard !isWorking, !isScanning, !isPreparingPlan else { return }
+    photoReviewSession = PhotoReviewSession()
+  }
 
   func togglePhoto(_ photo: PhotoFingerprint) {
     if !photo.isLibraryAsset { setFileSelection(photo.url, selected: !selectedPhotoIDs.contains(photo.id)); return }

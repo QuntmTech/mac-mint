@@ -118,7 +118,12 @@ final class AppViewModel: ObservableObject {
   @Published var devItems: [DevStorageItem] = []
   @Published var selectedDevIDs: Set<String> = []
   @Published var photoSource: PhotoSource = .library
-  @Published var photoScan: PhotoScanResult?
+  @Published var photoReviewSession = PhotoReviewSession()
+  @Published var photoScan: PhotoScanResult? {
+    didSet {
+      if oldValue?.generation != photoScan?.generation { photoReviewSession = PhotoReviewSession() }
+    }
+  }
   @Published var photoProgress: (done: Int, total: Int)?
   @Published var selectedPhotoIDs: Set<String> = []
   @Published var photoKeeperOverrides: [String: String] = [:]
