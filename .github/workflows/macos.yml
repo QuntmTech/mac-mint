@@ -6,12 +6,19 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Swift version
-        run: swift --version
+      - name: Operating system and Swift version
+        run: |
+          sw_vers
+          uname -m
+          swift --version
       - name: Core tests
         run: swift test
         timeout-minutes: 7
@@ -21,6 +28,9 @@ jobs:
         run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+      - name: Normal startup, menu bar, idle CPU, and graceful Quit
+        run: ./scripts/native_startup_test.sh dist/MacMint.app
+        timeout-minutes: 4
       - name: Launch smoke test
         run: ./scripts/smoke_test.sh dist/MacMint.app
         env:
@@ -29,14 +39,22 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: MacMint-UI-${{ github.sha }}
+          name: MacMint-UI-${{ matrix.os }}-${{ github.sha }}
           path: dist/screenshots
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload helper startup failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMint-Startup-Diagnostics-build-${{ matrix.os }}-${{ github.sha }}
+          path: .build/native-startup-diagnostics
           if-no-files-found: ignore
           retention-days: 14
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
-          name: MacMint-${{ github.sha }}
+          name: MacMint-${{ matrix.os }}-${{ github.sha }}
           path: |
             dist/MacMint.zip
             dist/MacMint.zip.sha256
@@ -44,13 +62,17 @@ jobs:
 
   downloaded-package:
     needs: build
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: MacMint-${{ github.sha }}
+          name: MacMint-${{ matrix.os }}-${{ github.sha }}
           path: candidate
       - name: Verify downloaded archive and extracted signature
         run: |
@@ -60,3 +82,14 @@ jobs:
           ditto -x -k candidate/MacMint.zip candidate/extracted
           codesign --verify --strict --verbose=2 candidate/extracted/MacMint.app
           ./scripts/smoke_test.sh candidate/extracted/MacMint.app
+      - name: Normal startup from downloaded package
+        run: ./scripts/native_startup_test.sh candidate/extracted/MacMint.app
+        timeout-minutes: 4
+      - name: Upload helper startup failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMint-Startup-Diagnostics-downloaded-package-${{ matrix.os }}-${{ github.sha }}
+          path: .build/native-startup-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14

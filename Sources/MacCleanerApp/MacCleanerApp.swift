@@ -78,7 +78,15 @@ struct MacCleanerDesktopApp: App {
       }
     }
 
-    MenuBarExtra("MacMint", systemImage: "leaf.fill", isInserted: $showMenuBar) {
+    MenuBarExtra("MacMint", systemImage: "leaf.fill", isInserted: Binding(
+      get: { showMenuBar },
+      set: { inserted in
+        // Scene updates can report the existing state. Republishing it through
+        // AppStorage can continuously invalidate the application's scene graph.
+        guard showMenuBar != inserted else { return }
+        showMenuBar = inserted
+      }
+    )) {
       MenuBarView()
         .environmentObject(model)
         .environmentObject(account)

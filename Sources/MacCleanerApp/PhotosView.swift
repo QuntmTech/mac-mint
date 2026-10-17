@@ -1,3 +1,4 @@
+import AppKit
 import ImageIO
 import MacCleanerCore
 import SwiftUI
@@ -5,6 +6,7 @@ import SwiftUI
 struct PhotosView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var comparing: SimilarPhotoGroup?
+  @StateObject private var permissions = PermissionsService()
   @SceneStorage("photos.tab") private var tab: PhotoTab = .similar
 
   private var isLibrary: Bool { model.photoSource == .library }
@@ -12,9 +14,15 @@ struct PhotosView: View {
   var body: some View {
     VStack(spacing: 0) {
       header
+      if isLibrary && permissions.photos == .limited {
+        Label("Only the Photos assets you shared are included in this scan.", systemImage: "photo.badge.checkmark")
+          .font(.caption).foregroundStyle(.secondary).padding(.horizontal, AppTheme.pagePadding).padding(.bottom, 10)
+      }
       Divider()
       if model.isScanning && model.operationTitle == "Photos" {
         progress
+      } else if isLibrary && (permissions.photos == .notRequested || permissions.photos.requiresSettings) {
+        libraryAccess
       } else if let scan = model.photoScan {
         Picker("", selection: $tab) {
           ForEach(isLibrary ? [PhotoTab.deck, .similar, .blurry] : PhotoTab.allCases) { tab in
@@ -32,11 +40,18 @@ struct PhotosView: View {
           icon: "photo.on.rectangle.angled", title: "Make room for your best shots",
           detail:
             "Check your Photos library or any folder. Nothing is selected for you. Compare each set and choose the copy to keep.",
-          actionTitle: "Scan photos", action: { model.scanPhotos() })
+          actionTitle: "Scan photos", action: startScan)
       }
     }
     .sheet(item: $comparing) { group in PhotoComparisonSheet(group: group) }
     .onAppear { if isLibrary && tab == .screenshots { tab = .similar } }
+    .task { await permissions.refresh() }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      Task { await permissions.refresh() }
+    }
+    .onChange(of: model.isScanning) { _, scanning in
+      if !scanning { Task { await permissions.refresh() } }
+    }
     .onChange(of: model.photoSource) { _, source in
       if source == .library && tab == .screenshots { tab = .similar }
     }
@@ -66,19 +81,55 @@ struct PhotosView: View {
       Menu {
         Button("Photos Library") {
           model.photoSource = .library
-          model.scanPhotos()
+          startScan()
         }
         Button("Choose Folder…") { model.choosePhotoFolder() }
       } label: {
         Label(model.photoSource.title, systemImage: isLibrary ? "photo.stack" : "folder")
       }
       .fixedSize()
-      Button(model.photoScan == nil ? "Scan" : "Rescan") { model.scanPhotos() }
+      .disabled(model.isScanning || model.isWorking)
+      Button(isLibrary && permissions.photos.requiresSettings ? "Photos Settings" : model.photoScan == nil ? "Scan" : "Rescan", action: startScan)
         .buttonStyle(MintButtonStyle())
         .disabled(model.isScanning || model.isWorking)
     }
     }
     .padding(AppTheme.pagePadding)
+  }
+
+  private func startScan() {
+    if isLibrary && permissions.photos.requiresSettings {
+      permissions.open(.photos)
+    } else {
+      model.scanPhotos()
+    }
+  }
+
+  private var libraryAccess: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        Image(systemName: "photo.badge.checkmark").font(.system(size: 36)).foregroundStyle(AppTheme.accentText)
+        Text(permissions.photos == .notRequested ? "Choose access to your Photos library" : permissions.photos.title)
+          .font(.title2.bold())
+        Text(permissions.photos.detail).foregroundStyle(.secondary)
+        Text("Analysis uses local thumbnails. Photos deletions require your review and Photos confirmation, sync to other iCloud devices, and are recovered in Photos.")
+          .font(.callout).foregroundStyle(.secondary)
+        HStack {
+          Button(permissions.photos == .notRequested ? "Continue & Scan" : "Open Photos Settings", action: startScan)
+            .buttonStyle(MintButtonStyle())
+          Button("Choose a Photo Folder…") { model.choosePhotoFolder() }
+        }
+        .disabled(model.isWorking || model.isScanning)
+        Text(PermissionSettingsPane.photos.path).font(.caption).foregroundStyle(.secondary)
+        if let error = permissions.settingsError {
+          Text(error).font(.callout).foregroundStyle(AppTheme.warning)
+        }
+      }
+      .fixedSize(horizontal: false, vertical: true)
+      .frame(maxWidth: 620, alignment: .leading)
+      .padding(AppTheme.pagePadding)
+      .frame(maxWidth: .infinity, alignment: .center)
+    }
   }
 
   private var progress: some View {

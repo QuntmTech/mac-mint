@@ -138,8 +138,6 @@ struct RootView: View {
       model.authorizeRemoval = { [weak account] in account?.isUnlocked == true }
       if !onboardingDone {
         showingOnboarding = true
-      } else if model.cleanupTargets.isEmpty {
-        model.runSmartScan()
       }
     }
   }

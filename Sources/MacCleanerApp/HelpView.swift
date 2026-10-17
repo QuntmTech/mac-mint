@@ -7,6 +7,7 @@ struct HelpView: View {
   @EnvironmentObject private var account: AccountStore
   @Environment(\.dismiss) private var dismiss
   @State private var showDiagnostics = false
+  @State private var showPermissions = false
   private var diagnostics: String {
     """
     MacMint \(UpdateService.currentVersion)
@@ -34,7 +35,7 @@ struct HelpView: View {
         topic("What is included in Quick Scan?", "Known cache locations, installed apps, startup metadata, Downloads, removed-app data and home Trash. Whole-folder storage maps, duplicate comparisons, photo analysis and deep project scans start only when you choose them.")
         topic("How does AI use my data?", "AI is optional and cannot select or remove items. Automatic context uses storage categories and known tool identifiers. Your typed question and recent conversation are sent as written. Preview the context before enabling AI.")
         HStack {
-          Button("Open Privacy Settings") { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!) }
+          Button("Permissions & Setup…") { showPermissions = true }
           Button("Contact Support") { NSWorkspace.shared.open(URL(string: "mailto:support@macmint.co")!) }
         }
         Toggle("Preview diagnostic summary", isOn: $showDiagnostics)
@@ -51,6 +52,7 @@ struct HelpView: View {
         }
       }.padding(24)
     }.frame(width: 660, height: 640).background(AppTheme.canvas)
+      .sheet(isPresented: $showPermissions) { PermissionHelpSheet() }
       .safeAreaInset(edge: .bottom, spacing: 0) {
         HStack {
           Label("Here to help", systemImage: "leaf").font(.caption).foregroundStyle(.secondary)

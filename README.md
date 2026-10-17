@@ -8,6 +8,8 @@ Local scanning, inspection, exclusions, History and Restore are available before
 
 Purchase setup, pending-pricing configuration and verification gates are documented in [Stripe setup](docs/STRIPE_SETUP.md).
 
+See [startup and permissions](docs/PERMISSIONS_AND_STARTUP.md) for guided setup, access troubleshooting and normal-launch verification.
+
 - Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
 - The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
 - Account and license checks touch the network. File contents stay local. Optional AI sends the user's own typed questions and a restricted automatic context after consent.

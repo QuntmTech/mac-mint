@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -84,18 +85,7 @@ struct SettingsView: View {
           }
         }
 
-        SurfaceCard {
-          VStack(alignment: .leading, spacing: 12) {
-            Label("Permissions", systemImage: "lock.shield")
-              .font(.headline)
-            Text(
-              "macOS may deny access to protected Library locations. The scanner records access problems and continues; it never tries to bypass system privacy controls."
-            )
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            Button("Open System Settings") { model.openSystemSettings() }
-          }
-        }
+        PermissionsSettingsCard()
 
         SurfaceCard {
           VStack(alignment: .leading, spacing: 12) {
@@ -136,6 +126,7 @@ struct HelpersSettingsCard: View {
   @AppStorage(CareService.Keys.lowSpaceThresholdGB) private var thresholdGB = 20
   @AppStorage(CareService.Keys.scanReminders) private var scanReminders = false
   @State private var launchAtLogin = false
+  @StateObject private var permissions = PermissionsService()
 
   var body: some View {
     SurfaceCard {
@@ -144,8 +135,16 @@ struct HelpersSettingsCard: View {
         Toggle("Show MacMint in the menu bar", isOn: $showMenuBar)
         Toggle("Open MacMint at login", isOn: $launchAtLogin)
           .onChange(of: launchAtLogin) { _, enabled in
-            if enabled != care.launchesAtLogin { care.setLaunchAtLogin(enabled) }
+            if enabled != care.launchAtLoginRequested {
+              care.setLaunchAtLogin(enabled)
+              launchAtLogin = care.launchAtLoginRequested
+            }
           }
+        if care.launchAtLoginNeedsApproval {
+          Text("Login launch is waiting for your approval. Enable MacMint under Login Items in System Settings.")
+            .font(.caption).foregroundStyle(AppTheme.warning)
+          Button("Open Login Items") { care.openLoginItemsSettings() }
+        }
         if let error = care.launchAtLoginError {
           Text(error).font(.caption).foregroundStyle(AppTheme.warning)
         }
@@ -169,13 +168,20 @@ struct HelpersSettingsCard: View {
           Text("Notifications are turned off for MacMint in System Settings → Notifications.")
             .font(.caption)
             .foregroundStyle(AppTheme.warning)
+          Button("Open Notification Settings") { permissions.open(.notifications) }
+        }
+        if let error = care.notificationError ?? permissions.settingsError {
+          Text(error).font(.caption).foregroundStyle(AppTheme.warning)
         }
       }
       .toggleStyle(.switch)
     }
-    .onAppear { launchAtLogin = care.launchesAtLogin }
-    .onChange(of: lowSpaceAlerts) { _, enabled in if enabled { care.requestAuthorization() } }
-    .onChange(of: scanReminders) { _, enabled in if enabled { care.requestAuthorization() } }
+    .task { await care.refreshAuthorization(); launchAtLogin = care.launchAtLoginRequested }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      Task { await care.refreshAuthorization(); launchAtLogin = care.launchAtLoginRequested }
+    }
+    .onChange(of: lowSpaceAlerts) { _, enabled in if enabled { Task { await care.requestAuthorization() } } }
+    .onChange(of: scanReminders) { _, enabled in if enabled { Task { await care.requestAuthorization() } } }
   }
 }
 

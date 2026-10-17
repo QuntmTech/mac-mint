@@ -2,25 +2,13 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
-/// The user's Trash. Emptying it is permanent and invalidates every Restore receipt, so it is
-/// never part of an OperationPlan: it is a separate, explicit action, and Finder does the work.
+/// Read-only measurement of the user's home Trash. Emptying is reviewed in Finder.
 enum TrashBinService {
   struct Status: Equatable, Sendable {
     let bytes: Int64
     let items: Int
-    /// False when macOS privacy settings hide the Trash (Full Disk Access not granted).
+    /// False when the Trash cannot be fully inspected, including denied access.
     let isComplete: Bool
-  }
-
-  enum EmptyError: LocalizedError {
-    case finderRefused(String)
-
-    var errorDescription: String? {
-      switch self {
-      case .finderRefused(let message):
-        return "Finder couldn't empty the Trash: \(message). Allow MacMint to control Finder in System Settings ▸ Privacy & Security ▸ Automation, or empty it from the Dock."
-      }
-    }
   }
 
   static var trashURL: URL {

@@ -150,7 +150,11 @@ enum SmokeTest {
       model.photoReviewSession = reviewSession
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
-      render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 540)
+      render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 660)
+      render(prefix + "-Onboarding-access", OnboardingView(initialStep: 1), width: 720, height: 660)
+      render(prefix + "-Onboarding-helpers", OnboardingView(initialStep: 2), width: 720, height: 660)
+      render(prefix + "-Access-help", PermissionHelpSheet(), width: 720, height: 660)
+      render(prefix + "-Scan-issues", ScanIssueSheet(issues: [ScanIssue(area: "Downloads", message: "Access to this location was denied. Review Files & Folders settings before rescanning.")]), width: 720, height: 540)
     }
     scheme = .light
     render("Help", HelpView())

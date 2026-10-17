@@ -17,6 +17,12 @@
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 2026 MacMint</string>
   <key>NSPhotoLibraryUsageDescription</key><string>MacMint looks for similar and blurry photos in your library. Photos are analysed on this Mac and are only removed when you confirm in Photos.</string>
-  <key>NSAppleEventsUsageDescription</key><string>MacMint asks Finder to empty the Trash when you choose Empty Trash.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>MacMint inspects Desktop files when you scan this location for storage, duplicates or photos. Changes require your review.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>MacMint inspects Documents when you scan this location for storage, duplicates, photos or developer files. Changes require your review.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>MacMint measures Downloads and helps you review files to keep or move to Trash. Nothing is removed without your confirmation.</string>
+  <key>NSNetworkVolumesUsageDescription</key><string>MacMint reads selected network locations to map storage. Removal from external locations is not supported.</string>
+  <key>NSRemovableVolumesUsageDescription</key><string>MacMint reads selected removable drives to map storage. Removal from external locations is not supported.</string>
+  <key>NSAppDataUsageDescription</key><string>MacMint inspects app containers to measure storage and identify related data for your review. Removal requires your confirmation.</string>
+  <key>NSAppBundlesUsageDescription</key><string>MacMint inspects installed apps and moves selected apps to Trash only after you confirm an uninstall.</string>
 </dict>
 </plist>
