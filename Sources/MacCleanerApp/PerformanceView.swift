@@ -7,11 +7,30 @@ struct PerformanceView: View {
   @State private var pendingQuit: SystemMonitor.AppUsage?
   @Environment(\.scenePhase) private var scenePhase
   @State private var monitoringLease = UUID()
-  @State private var paused = false
+  @State private var pausedReading: Reading?
   @State private var search = ""
   @State private var sortByCPU = false
   @State private var forceQuit = false
   @State private var insights: DiskInsights?
+
+  private struct Reading {
+    let snapshot: SystemMonitor.Snapshot
+    let apps: [SystemMonitor.AppUsage]
+    let sampledAt: Date?
+    @MainActor init(_ monitor: SystemMonitor) {
+      snapshot = monitor.snapshot; apps = monitor.apps; sampledAt = monitor.sampledAt
+    }
+  }
+  private var paused: Bool { pausedReading != nil }
+  private var snapshot: SystemMonitor.Snapshot { pausedReading?.snapshot ?? monitor.snapshot }
+  private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+  private var samplingDetail: String {
+    guard let pausedReading else {
+      return "Main app processes · 100% CPU equals one core · refreshes every \(Int(monitor.samplingInterval ?? 4)) seconds"
+    }
+    guard let date = pausedReading.sampledAt else { return "Paused before the first sample. Resume to measure app activity." }
+    return "Displayed readings paused at \(date.formatted(date: .omitted, time: .shortened)). The menu bar may continue sampling while open."
+  }
 
   var body: some View {
     ScrollView {
@@ -19,18 +38,18 @@ struct PerformanceView: View {
         PageHeader("Performance", subtitle: "Live readings, with context that helps you decide when to act.")
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
           gauge(
-            "Memory pressure", value: monitor.snapshot.pressure.rawValue,
+            "Memory pressure", value: snapshot.pressure.rawValue,
             detail: memoryDetail, icon: "memorychip", tint: pressureTint)
           gauge(
-            "CPU", value: monitor.snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "Measuring…",
+            "CPU", value: snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "Measuring…",
             detail: "Across all cores", icon: "cpu", tint: AppTheme.accentText)
           gauge(
-            "Swap", value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
+            "Swap", value: snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
             detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: AppTheme.info)
           gauge(
-            "Free space", value: ByteFormatter.string(monitor.snapshot.freeBytes),
-            detail: "of \(ByteFormatter.string(monitor.snapshot.totalBytes))", icon: "internaldrive",
-            tint: monitor.snapshot.diskUsedFraction > 0.9 ? AppTheme.warning : AppTheme.accentText)
+            "Free space", value: snapshot.totalBytes > 0 ? ByteFormatter.string(snapshot.freeBytes) : "—",
+            detail: snapshot.totalBytes > 0 ? "of \(ByteFormatter.string(snapshot.totalBytes))" : "Not available", icon: "internaldrive",
+            tint: snapshot.diskUsedFraction > 0.9 ? AppTheme.warning : AppTheme.accentText)
         }
 
         processCard
@@ -91,7 +110,8 @@ struct PerformanceView: View {
   }
 
   private var visibleApps: [SystemMonitor.AppUsage] {
-    monitor.apps.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+    let query = query
+    return (pausedReading?.apps ?? monitor.apps).filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
       .sorted {
         let left = sortByCPU ? ($0.cpuPercent ?? -1) : Double($0.memoryBytes)
         let right = sortByCPU ? ($1.cpuPercent ?? -1) : Double($1.memoryBytes)
@@ -106,16 +126,30 @@ struct PerformanceView: View {
         HStack {
           Label("Running apps", systemImage: "waveform.path.ecg").font(.headline)
           Spacer()
-          Button(paused ? "Resume" : "Pause") { paused.toggle() }.controlSize(.small)
+          Button(paused ? "Resume" : "Pause") { pausedReading = paused ? nil : Reading(monitor) }
+            .controlSize(.small).help(paused ? "Resume live readings" : "Freeze the displayed readings")
         }
         HStack {
           SearchField(prompt: "Find an app", text: $search)
           Picker("Sort apps", selection: $sortByCPU) { Text("Memory").tag(false); Text("CPU").tag(true) }
             .pickerStyle(.segmented).labelsHidden().frame(width: 170)
         }
-        Text(paused ? "Readings paused in this window. The menu bar may continue sampling while open." : "Main app processes · 100% CPU equals one core · refreshes every \(Int(monitor.samplingInterval ?? 4)) seconds")
+        Text(samplingDetail)
           .font(.caption).foregroundStyle(.secondary)
-        if displayed.isEmpty { Text(search.isEmpty ? "Waiting for a sample…" : "No matching apps").foregroundStyle(.secondary) }
+        if displayed.isEmpty {
+          Text(query.isEmpty
+            ? (paused ? "No apps in this paused sample. Resume to refresh." : "Waiting for a sample…")
+            : "No matching apps. Try another name or clear the search.").foregroundStyle(.secondary)
+        }
+        if !displayed.isEmpty {
+          HStack(spacing: 12) {
+            Text("App")
+            Spacer()
+            Text("CPU").frame(width: 70, alignment: .trailing)
+            Text("Memory").frame(width: 85, alignment: .trailing)
+            Color.clear.frame(width: 20, height: 1)
+          }.font(.caption.weight(.medium)).foregroundStyle(.secondary).accessibilityHidden(true)
+        }
         ForEach(displayed) { app in
           HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
@@ -125,13 +159,16 @@ struct PerformanceView: View {
             Spacer()
             Text(app.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "—")
               .font(.callout.monospacedDigit()).frame(width: 70, alignment: .trailing).accessibilityLabel("CPU")
+              .accessibilityValue(app.cpuPercent.map { String(format: "%.1f percent", $0) } ?? "Not measured yet")
             Text(ByteFormatter.string(app.memoryBytes)).font(.callout.monospacedDigit())
               .frame(width: 85, alignment: .trailing).accessibilityLabel("Memory")
+              .accessibilityValue(ByteFormatter.string(app.memoryBytes))
             Menu {
               Button("Quit…") { forceQuit = false; pendingQuit = app }
               Button("Force Quit…", role: .destructive) { forceQuit = true; pendingQuit = app }
             } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("Actions for " + app.name) }
-              .menuStyle(.borderlessButton).fixedSize().disabled(!app.canControl)
+              .menuStyle(.borderlessButton).frame(width: 20).disabled(!app.canControl)
+              .help(app.canControl ? "Quit or force quit " + app.name : "MacMint protects this app from process controls")
           }
           if app.id != displayed.last?.id { Divider() }
         }
@@ -189,12 +226,12 @@ struct PerformanceView: View {
   }
 
   private var memoryDetail: String {
-    guard let used = monitor.snapshot.memoryUsedBytes else { return "—" }
-    return "\(ByteFormatter.string(used)) of \(ByteFormatter.string(monitor.snapshot.physicalMemory)) used"
+    guard let used = snapshot.memoryUsedBytes else { return "—" }
+    return "\(ByteFormatter.string(used)) of \(ByteFormatter.string(snapshot.physicalMemory)) used"
   }
 
   private var pressureTint: Color {
-    switch monitor.snapshot.pressure {
+    switch snapshot.pressure {
     case .normal: return AppTheme.accentText
     case .warning: return AppTheme.warning
     case .critical: return AppTheme.danger

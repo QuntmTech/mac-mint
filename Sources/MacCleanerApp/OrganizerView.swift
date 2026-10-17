@@ -21,6 +21,20 @@ struct OrganizerView: View {
   @State private var consentSheet = false
   @State private var requestTask: Task<Void, Never>?
   @State private var generation = UUID()
+  @State private var validatedInput: ValidationInput?
+
+  private struct ValidationInput: Hashable {
+    let inventoryID: UUID?
+    let proposals: [OrganizationProposal]
+    let ignoredPaths: Set<String>
+  }
+
+  private var validationInput: ValidationInput {
+    .init(inventoryID: inventory?.id, proposals: proposals, ignoredPaths: model.ignoredPaths)
+  }
+  private var validationPending: Bool {
+    !proposals.isEmpty && validatedInput != validationInput
+  }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -45,20 +59,24 @@ struct OrganizerView: View {
       HStack {
         if !historyOnly { Button(showHistory ? "Back to preview" : "History & Undo") { showHistory.toggle(); Task { await loadHistory() } } }
         if busy { ProgressView().controlSize(.small); Text("Working…").font(.caption) }
+        else if validationPending {
+          ProgressView().controlSize(.small)
+          Text("Checking changes…").font(.caption).foregroundStyle(.secondary)
+        }
         if requestTask != nil { Button("Cancel request") { cancelRequest() } }
         Spacer()
         if inventory != nil && !showHistory && !historyOnly {
           Button("Choose another folder…", action: chooseFolder).disabled(busy)
           Button("Review \(selected.count) changes") { confirmation = true }
-            .buttonStyle(MintButtonStyle()).disabled(busy || selected.isEmpty || selected.contains { problems[$0] != nil } || model.isWorking || model.isScanning)
+            .buttonStyle(MintButtonStyle()).disabled(busy || validationPending || selected.isEmpty || selected.contains { problems[$0] != nil } || model.isWorking || model.isScanning)
         }
       }.padding(16)
     }
     .background(AppTheme.canvas)
     .frame(minWidth: 700, idealWidth: 840, maxWidth: 960, minHeight: 520, idealHeight: 660)
     .task { await loadHistory(); if !SmokeTest.isRequested { await account.refreshAIStatus() } }
-    .task(id: proposals) { await validate() }
-    .onChange(of: model.ignoredPaths) { _, _ in cancelRequest(); Task { await validate() } }
+    .task(id: validationInput) { await validate() }
+    .onChange(of: model.ignoredPaths) { _, _ in cancelRequest() }
     .onChange(of: model.aiEnabled) { _, enabled in if !enabled { cancelRequest() } }
     .onChange(of: account.isUnlocked) { _, unlocked in if !unlocked { cancelRequest() } }
     .onDisappear { cancelRequest() }
@@ -71,7 +89,8 @@ struct OrganizerView: View {
   }
 
   private func proposalContent(_ inventory: OrganizationInventory) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
+    let validating = validationPending
+    return VStack(alignment: .leading, spacing: 12) {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Label(inventory.root.lastPathComponent, systemImage: "folder").font(.headline)
@@ -99,20 +118,20 @@ struct OrganizerView: View {
       } else {
         ScrollView {
           LazyVStack(spacing: 12) {
-            ForEach(proposals) { proposal in proposalRow(proposal, inventory: inventory) }
+            ForEach(proposals) { proposal in proposalRow(proposal, inventory: inventory, validating: validating) }
           }.padding(.vertical, 4)
         }
       }
     }.padding(20)
   }
 
-  private func proposalRow(_ proposal: OrganizationProposal, inventory: OrganizationInventory) -> some View {
+  private func proposalRow(_ proposal: OrganizationProposal, inventory: OrganizationInventory, validating: Bool) -> some View {
     SurfaceCard {
       VStack(alignment: .leading, spacing: 8) {
         HStack {
           Toggle(isOn: Binding(get: { selected.contains(proposal.id) }, set: { if $0 { selected.insert(proposal.id) } else { selected.remove(proposal.id) } })) {
             Text(inventory.files.first { $0.id == proposal.fileID }?.name ?? "Unknown file").lineLimit(1)
-          }.toggleStyle(.checkbox).disabled(busy || problems[proposal.id] != nil)
+          }.toggleStyle(.checkbox).disabled(busy || validating || problems[proposal.id] != nil)
           Spacer()
         }
         HStack {
@@ -141,7 +160,7 @@ struct OrganizerView: View {
                 Text(record.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Undo available changes") { undo(record) }
-                  .disabled(busy || model.isWorking || !record.items.contains { $0.state == .moved })
+                  .disabled(busy || model.isWorking || model.isScanning || !record.items.contains { $0.state == .moved })
               }
               ForEach(record.items) { item in
                 let original = record.inventory.files.first { $0.id == item.id }?.name ?? "Unknown file"
@@ -198,14 +217,22 @@ struct OrganizerView: View {
     proposals[index] = .init(fileID: proposal.fileID, folderID: folder ?? proposal.folderID, name: name ?? proposal.name, reason: proposal.reason)
   }
   private func validate() async {
-    guard let inventory else { return }
-    var issues: [String: String] = [:]
-    for proposal in proposals {
-      if Task.isCancelled { return }
-      if let problem = await model.organizationStore.problem(proposal, in: inventory, ignoredPaths: model.ignoredPaths) { issues[proposal.id] = problem }
+    let input = validationInput
+    guard let inventory, !input.proposals.isEmpty else {
+      problems = [:]; validatedInput = input
+      return
     }
-    guard !Task.isCancelled else { return }
-    problems = issues; selected.subtract(issues.keys)
+    // Coalesce typing before touching the filesystem. Cancellation and the full
+    // input key prevent older checks from enabling review after an edit/exclusion.
+    do { try await Task.sleep(for: .milliseconds(200)) }
+    catch { return }
+    var issues: [String: String] = [:]
+    for proposal in input.proposals {
+      if Task.isCancelled { return }
+      if let problem = await model.organizationStore.problem(proposal, in: inventory, ignoredPaths: input.ignoredPaths) { issues[proposal.id] = problem }
+    }
+    guard !Task.isCancelled, input == validationInput else { return }
+    problems = issues; selected.subtract(issues.keys); validatedInput = input
   }
   private func prepareAI(_ inventory: OrganizationInventory) {
     guard account.isUnlocked else { showingActivation = true; return }
@@ -235,7 +262,8 @@ struct OrganizerView: View {
     if hadRequest { busy = false }
   }
   private func apply() {
-    guard let inventory, !busy, !model.isWorking, !model.isScanning, model.exclusionsReady else { return }
+    guard let inventory, !busy, !validationPending, !selected.isEmpty,
+      !model.isWorking, !model.isScanning, model.exclusionsReady else { return }
     guard model.authorizeRemoval() else { showingActivation = true; return }
     let approved = proposals.filter { selected.contains($0.id) }
     busy = true; error = nil

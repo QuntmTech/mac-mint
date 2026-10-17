@@ -1,5 +1,7 @@
 # MacMint — handoff to Claude Code for independent review
 
+Desktop micro polish followed the original implementation checkpoint; see section 18 for the additional changes to review.
+
 Prepared 2026-10-16, America/New_York. This document accompanies delivery to `main` through [PR #22](https://github.com/QuntmTech/mac-mint/pull/22).
 
 Claude Code: please independently review the work described here. Treat these statements as claims to verify against the source and executable evidence, not as proof that the product is finished. Prioritize data safety, recovery, privacy, account boundaries, concurrency, native usability, and resource consumption. Report concrete findings with severity, file/line, trigger, consequence, and a regression or verification method. Separate confirmed defects from untested hypotheses and product limitations. Another green test run alone is not the requested review.
@@ -460,3 +462,15 @@ Local reading order:
 Some older docs retain historical counts such as 127/157 tests and 20/25 screens, or describe future modules that now exist. Use the explicit checkpoint above and current-SHA CI for current evidence. They do not supersede current source or establish release readiness.
 
 Please finish your review with prioritized findings, what you verified yourself, what remained untested, and a concrete recommended sequence of fixes/validation. Preserve the user's preview-and-approve decision and existing recovery boundaries while proposing improvements.
+
+## 18. Desktop micro polish follow-up
+
+After the original implementation was merged, the user requested another pass of small desktop improvements. The follow-up changes five views; the original checkpoint/test counts above remain historical evidence.
+
+- `DesignSystem.swift`: shared search fields show a semantic focus outline, consume Escape to clear a nonempty query, leave Escape available to the enclosing screen when empty, and restore typing focus after clicking Clear. The decorative search icon is hidden from accessibility.
+- `CommandPalette.swift`: results are native SwiftUI buttons with accessible titles, details and selection state. Truncated results have tooltips. The footer shows keyboard instructions and the displayed result count; an empty search result explains what can be searched.
+- `PerformanceView.swift`: Pause captures the displayed snapshot, app list and sample time, so another monitor consumer cannot change the paused readings. Resume uses the live monitor again; existing lease/lifecycle policy and final process-identity checks remain authoritative. The view labels CPU/Memory columns, supplies their accessible values, ignores surrounding whitespace in searches, and keeps unavailable disk capacity distinct from a measured zero.
+- `PhotoReviewDeck.swift`: the current photo identifies an existing queued selection; swiping a keeper shows protection rather than a misleading removal label. Folder photos can be revealed directly. The end state distinguishes an empty queue and offers the existing review flow when photos are selected. Keyboard/Undo hints are visible; gestures still change selections only.
+- `OrganizerView.swift`: validation waits for a 200 ms typing pause, captures inventory ID/proposals/exclusions together, and discards cancelled or superseded checks. Review and selection stay unavailable until that input has been validated. A checking indicator explains the delay. Undo also communicates the existing scan/operation busy boundary through its disabled state.
+
+Review the cancellation/edit/exclusion transitions, pausing while the menu-bar monitor is active, and photo-deck completion in both appearances. Portable tests and syntax parsing run on the Linux host; the macOS workflow provides semantic compilation, native tests, layout captures, and downloaded-package checks for the follow-up commit. Actual keyboard routing and VoiceOver still need interactive Mac verification. This follow-up adds no polling timer, AI request, watcher, automatic removal, release tag or deployment.
