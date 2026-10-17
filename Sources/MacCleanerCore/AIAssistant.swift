@@ -179,7 +179,8 @@ extension AccountClient {
   }
 
   public func review(_ request: AIReviewRequest, token: String) async throws -> AIReview {
-    try await send("POST", "/api/macmint/ai/review", token: token, json: request, timeout: 45)
+    // Review and organize wait up to 90 s for the provider on the server; outlast that here.
+    try await send("POST", "/api/macmint/ai/review", token: token, json: request, timeout: 100)
   }
 
   public func ask(question: String, history: [AITurn], context: AIContext, token: String) async throws
@@ -192,7 +193,7 @@ extension AccountClient {
   }
 
   public func organize(_ request: AIOrganizationRequest, token: String) async throws -> AIOrganizationResponse {
-    try await send("POST", "/api/macmint/ai/organize", token: token, json: request, timeout: 45)
+    try await send("POST", "/api/macmint/ai/organize", token: token, json: request, timeout: 100)
   }
 
   /// Server kill switch (public app_config record `ai`). Off when unreachable.
