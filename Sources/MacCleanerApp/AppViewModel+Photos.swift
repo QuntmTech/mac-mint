@@ -234,6 +234,7 @@ extension AppViewModel {
   func deleteSelectedLibraryPhotos() async {
     let assets = selectedPhotos.filter(\.isLibraryAsset)
     guard !assets.isEmpty, !isWorking, requirePaidAccess() else { return }
+    photoDeletionError = nil
     isWorking = true
     operationTitle = "Photos"
     statusMessage = "Waiting for your confirmation in Photos…"
@@ -261,6 +262,7 @@ extension AppViewModel {
       statusMessage = "\(assets.count) photo\(assets.count == 1 ? "" : "s") moved to Photos ▸ Recently Deleted"
     } catch {
       statusMessage = "Photos couldn't delete them: \(error.localizedDescription)"
+      photoDeletionError = statusMessage
     }
   }
 

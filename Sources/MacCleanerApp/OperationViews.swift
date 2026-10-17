@@ -357,6 +357,8 @@ struct ReviewQueueView: View {
         HStack(spacing: 8) {
           if model.queuedCount > 0 {
             Button("Clear selection") { model.clearQueue() }.buttonStyle(MintButtonStyle(prominent: false))
+          }
+          if !model.queuedItems.isEmpty {
             Button { model.reviewEverything() } label: {
               if model.isPreparingPlan { ProgressView().controlSize(.small) }
               else { Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist") }
@@ -375,6 +377,9 @@ struct ReviewQueueView: View {
           actionTitle: "Explore Cleanup", action: { model.selectedSection = .cleaner })
       } else {
         List {
+          if model.queuedLibraryPhotoCount > 0 {
+            Section { libraryPhotos } header: { Text("Photos library") }
+          }
           ForEach(grouped, id: \.0) { source, items in
             Section {
               ForEach(items, id: \.url) { item in
@@ -392,6 +397,31 @@ struct ReviewQueueView: View {
         .listStyle(.inset)
       }
     }
+  }
+
+  /// Library assets never join the Trash plan. Photos asks for its own confirmation.
+  private var libraryPhotos: some View {
+    let count = model.queuedLibraryPhotoCount
+    return VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 11) {
+        IconTile(symbol: "photo.stack", size: 30)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("\(count) Photos library item\(count == 1 ? "" : "s")").fontWeight(.medium)
+          Text("Photos asks you to confirm. Deleted items stay in Photos ▸ Recently Deleted for about 30 days, and deletion syncs to devices using iCloud Photos.")
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 8)
+        Button("Show in Photos") { model.selectedSection = .photos }.controlSize(.small)
+        Button("Delete in Photos…") { Task { await model.deleteSelectedLibraryPhotos() } }
+          .controlSize(.small)
+          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
+      }
+      if let error = model.photoDeletionError {
+        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppTheme.warning)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .padding(.vertical, 10)
   }
 }
 
