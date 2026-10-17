@@ -46,7 +46,7 @@ node -e 'const c=require("crypto");const[k,s]=process.env.MACMINT_ENTITLEMENT_SI
 
 ### Rotation
 
-1. Generate a new pair with a new `kid` (`crypto.generateKeyPairSync('ed25519')`, raw 32-byte seed and public key).
+1. Generate a new pair with a **new** `kid` (never reuse a `kid` for a different seed) (`crypto.generateKeyPairSync('ed25519')`, raw 32-byte seed and public key).
 2. Add the public key to `productionKeys` and ship that app release. Keep the old `kid`.
 3. When enough installs have the release, switch the server value to the new `kid:seed`. Apps without the new `kid` cannot verify its assertions, so their explicit checks fail (quiet checks keep existing access); do not switch early.
 4. Remove the old `kid` from the app only after its last assertions have passed `offline_until` (at most the grace period after the switch).
@@ -75,4 +75,6 @@ Pure-JS Ed25519 is slow under Goja. Measured with the real PocketBase 0.40.5 int
 - **Local TLS interception**: someone who installs their own root CA and rewrites `/me` can fake an online "active" answer (or strip the assertion), because unsigned online answers are still accepted for compatibility. That access lasts for the running app only. A later release can require assertions online once every production server signs.
 - **Clock and Keychain games**: restoring an older copy of the Keychain item and winding the clock back can reuse an assertion's window, but never before its `issued_at`. Doing so repeatedly means keeping the Mac's clock wrong and the server unreachable. Conversely, a Mac whose clock runs more than five minutes behind the server cannot use offline access until its clock is corrected (online access is unaffected).
 - **Device cloning**: the device ID is a random UUID in user defaults, not a hardware identifier. Copying it and the Keychain item to another Mac copies offline access for at most one window.
+- **Offline user binding is only as strong as the Keychain item.** On restart, the stored record's own `userId` is what the assertion is checked against. Someone who can edit the Keychain item could swap in another account's captured assertion that names this device ID. That is no worse than sharing credentials, and it is bounded by that assertion's `offline_until` (14 days or less).
+- **Key rotation edges.** (a) Assertion reuse in `issue()` is keyed by `kid`, not by the seed. If the seed changes but the `kid` stays the same, assertions signed with the old seed can still be served for up to 12 h, and apps trusting that `kid` would reject the new ones. Always change the `kid` when rotating. (b) An app that doesn't know a new `kid` rejects those assertions, so an explicit activation or check fails with `invalid_assertion`. This is intentional: ship the new public key in an app release before the server signs with it.
 - **Server key exposure** and **server CPU** as described above.
