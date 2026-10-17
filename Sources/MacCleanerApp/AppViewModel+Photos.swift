@@ -32,6 +32,19 @@ struct PhotoReviewSession {
   }
   var cursor = 0
   var choices: [Choice] = []
+
+  /// After photos leave the results, positions follow photo IDs: removed photos drop out of
+  /// Undo, and the cursor moves to the next photo that has not been reviewed.
+  func following(from old: [PhotoFingerprint], to new: [PhotoFingerprint]) -> PhotoReviewSession {
+    let position = Dictionary(new.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+    var updated = PhotoReviewSession()
+    updated.choices = choices.compactMap { choice in
+      position[choice.photoID].map { Choice(index: $0, photoID: choice.photoID, wasSelected: choice.wasSelected) }
+    }
+    let upcoming: ArraySlice<PhotoFingerprint> = old.indices.contains(cursor) ? old[cursor...] : []
+    updated.cursor = upcoming.lazy.compactMap { position[$0.id] }.first ?? new.count
+    return updated
+  }
 }
 
 extension AppViewModel {
@@ -251,7 +264,8 @@ extension AppViewModel {
     }
   }
 
-  /// Drops photos from the current results (after they were moved or deleted).
+  /// Drops photos from the current results (after they were moved or deleted). The pruned
+  /// result belongs to the same scan, so deck progress follows the surviving photos.
   func removePhotos(where shouldRemove: (PhotoFingerprint) -> Bool) {
     guard let scan = photoScan else { return }
     let photos = scan.photos.filter { !shouldRemove($0) }
@@ -264,12 +278,15 @@ extension AppViewModel {
       let index = members.firstIndex { $0.id == keptID } ?? 0
       return SimilarPhotoGroup(id: group.id, photos: members, keeperIndex: index)
     }
+    let session = photoReviewSession
     photoScan = PhotoScanResult(
       photos: photos, similarGroups: groups,
       blurry: scan.blurry.filter { remaining.contains($0.id) },
       screenshots: scan.screenshots.filter { remaining.contains($0.id) },
-      skippedLibraries: scan.skippedLibraries, issues: scan.issues, wasCancelled: scan.wasCancelled)
+      skippedLibraries: scan.skippedLibraries, issues: scan.issues, wasCancelled: scan.wasCancelled,
+      generation: scan.generation)
     selectedPhotoIDs.formIntersection(remaining)
+    photoReviewSession = session.following(from: scan.photos, to: photos)
   }
 
   // MARK: Trash
