@@ -20,6 +20,10 @@ public struct AIExplainRequest: Codable, Hashable, Sendable, Identifiable {
 
   public var id: String { "\(kind.rawValue)|\(location)|\(identifier)" }
 
+  /// The name was not recognized and was replaced before sending. An AI answer about the
+  /// placeholder would only guess, so it is explained locally without a request.
+  public var isPlaceholder: Bool { AIContextBuilder.placeholderIdentifiers.contains(identifier) }
+
   public init(kind: AIExplainKind, identifier: String, location: String) {
     self.kind = kind
     self.identifier = AIContextBuilder.safeIdentifier(identifier, kind: kind)
@@ -44,6 +48,20 @@ public struct AIExplainResponse: Codable, Sendable {
   public let explanation: AIExplanation
   public let cached: Bool?
   public let model: String?
+
+  /// Matches the server's deterministic answer for placeholder names (macmint_ai_context.js).
+  public static func local(for request: AIExplainRequest) -> AIExplainResponse {
+    let developer = request.kind == .developerTool
+    let subject = developer ? "developer tool names, so this cache" : "app identifiers, so this item"
+    let owner = developer ? "tool" : "app"
+    return AIExplainResponse(
+      explanation: AIExplanation(
+        summary: "MacMint only shares recognized \(subject) was not sent for an AI explanation. Check which \(owner) created it before removing it.",
+        owner: "Unknown", category: developer ? "developer" : "unknown", verdict: .unknown,
+        whatHappens: "Moving it to the Trash may remove settings or data that an app or tool uses. You can restore it from History.",
+        confidence: "low"),
+      cached: false, model: "local")
+  }
 }
 
 public struct AIReviewRequest: Codable, Sendable {
@@ -156,7 +174,8 @@ public struct AIStatus: Sendable {
 
 extension AccountClient {
   public func explain(_ request: AIExplainRequest, token: String) async throws -> AIExplainResponse {
-    try await send("POST", "/api/macmint/ai/explain", token: token, json: request, timeout: 40)
+    if request.isPlaceholder { return .local(for: request) }
+    return try await send("POST", "/api/macmint/ai/explain", token: token, json: request, timeout: 40)
   }
 
   public func review(_ request: AIReviewRequest, token: String) async throws -> AIReview {
@@ -278,9 +297,13 @@ public enum AIContextBuilder {
     return allowed.contains(location) ? location : "Other"
   }
 
+  static let unrecognizedTool = "Unrecognized developer cache"
+  static let unrecognizedItem = "Unrecognized Library item"
+  static let placeholderIdentifiers: Set<String> = [unrecognizedTool, unrecognizedItem]
+
   public static func safeIdentifier(_ identifier: String, kind: AIExplainKind) -> String {
-    if kind == .developerTool { return knownTools.contains(identifier) ? identifier : "Unrecognized developer cache" }
-    return knownApps.keys.contains(identifier) ? identifier : "Unrecognized Library item"
+    if kind == .developerTool { return knownTools.contains(identifier) ? identifier : unrecognizedTool }
+    return knownApps.keys.contains(identifier) ? identifier : unrecognizedItem
   }
 
   public static func sanitize(_ path: String, home: URL) -> String? {

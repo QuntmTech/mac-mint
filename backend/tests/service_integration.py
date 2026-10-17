@@ -8,7 +8,7 @@ from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-import json, os, re, shutil, socket, socketserver, sqlite3, subprocess, tempfile, threading, time
+import datetime, json, os, re, shutil, socket, socketserver, sqlite3, subprocess, tempfile, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,8 +88,14 @@ with ExitStack() as stack:
     shutil.copytree(ROOT / 'backend/pocketbase/pb_migrations', folder / 'migrations')
     # Only this copied test runtime has its provider transport redirected or timeout shortened.
     library = folder / 'hooks/macmint_ai_lib.js'
-    library.write_text(library.read_text().replace('https://api.anthropic.com/v1/messages',
-        f'http://127.0.0.1:{provider.server_port}/v1/messages').replace('const HTTP_TIMEOUT_SECONDS = 30', 'const HTTP_TIMEOUT_SECONDS = 1'))
+    # The test control route can point the copied client at a closed port to prove that
+    # connection failures (no request sent) are released rather than held as uncertain.
+    source = library.read_text()
+    for marker in ['"https://api.anthropic.com/v1/messages"', 'const HTTP_TIMEOUT_SECONDS = 30', 'const LONG_HTTP_TIMEOUT_SECONDS = 90']:
+        assert marker in source, marker
+    library.write_text(source.replace('"https://api.anthropic.com/v1/messages"',
+        f'($app.store().has("test_provider_url") ? $app.store().get("test_provider_url") : "http://127.0.0.1:{provider.server_port}/v1/messages")')
+        .replace('const HTTP_TIMEOUT_SECONDS = 30', 'const HTTP_TIMEOUT_SECONDS = 1').replace('const LONG_HTTP_TIMEOUT_SECONDS = 90', 'const LONG_HTTP_TIMEOUT_SECONDS = 1'))
     (folder / 'migrations/1792109300_test_seed.js').write_text('''migrate(app=>{
       const settings=app.settings();settings.meta.appName="MacMint";settings.meta.appURL="https://macmint.co";
       settings.meta.senderAddress="support@macmint.co";settings.smtp.enabled=true;settings.smtp.host="127.0.0.1";
@@ -100,14 +106,22 @@ with ExitStack() as stack:
         if(name==="fixture"){const ent=new Record(app.findCollectionByNameOrId("plan_entitlements"));
           ent.set("user",u.id);ent.set("plan","pro");ent.set("status","active");ent.set("max_devices",1);app.save(ent)}
       }
-      const c=new Record(app.findCollectionByNameOrId("app_config"));c.set("key","ai");c.set("value",{enabled:true});app.save(c)
+      // Pre-split layout: budgets in the public record must move to the private ai_limits record.
+      const c=new Record(app.findCollectionByNameOrId("app_config"));c.set("key","ai");c.set("value",{enabled:true,daily_usd_budget:20});c.set("public",true);app.save(c)
+      const su=new Record(app.findCollectionByNameOrId("_superusers"));su.set("email","operator@example.invalid");su.setPassword("operator-password-123");app.save(su)
     },()=>{})'''.replace('SMTP_PORT', str(smtp.server_address[1])))
     # Test-only control route is never copied into production hooks or exposed off loopback.
     (folder / 'hooks/test.pb.js').write_text('''routerAdd("POST","/__test/config",e=>{
       const data=e.requestInfo().body;
       if(data.expireReset){const users=e.app.findCollectionByNameOrId("users");users.passwordResetToken.duration=10;e.app.save(users)}
       if(data.ai){const c=e.app.findFirstRecordByFilter("app_config","key='ai'");c.set("value",data.ai);e.app.save(c)}
+      if(data.limits){const c=e.app.findFirstRecordByFilter("app_config","key='ai_limits'");c.set("value",data.limits);e.app.save(c)}
+      if(data.providerURL!==undefined){if(data.providerURL)e.app.store().set("test_provider_url",data.providerURL);else e.app.store().remove("test_provider_url")}
       return e.json(200,{ok:true})
+    })
+    routerAdd("GET","/__test/rate-limits",e=>{
+      const limits=e.app.settings().rateLimits
+      return e.json(200,{enabled:limits.enabled,labels:limits.rules.map(r=>r.label)})
     })''')
     base = [str(BINARY), '--dir', str(folder / 'data'), '--hooksDir', str(folder / 'hooks'), '--migrationsDir', str(folder / 'migrations')]
     result = subprocess.run(base + ['migrate', 'up'], text=True, capture_output=True)
@@ -143,6 +157,13 @@ with ExitStack() as stack:
     token = auth['token']
     db = sqlite3.connect(folder / 'data/data.db')
     stack.callback(db.close)
+    status, public = call('/api/collections/app_config/records?perPage=50')
+    published = {item['key']: item['value'] for item in public['items']}
+    assert status == 200 and published.get('ai') == dict(enabled=True) and 'ai_limits' not in published, published
+    assert json.loads(db.execute("SELECT value FROM app_config WHERE key='ai_limits'").fetchone()[0]) == dict(daily_usd_budget=20)
+    limits = call('/__test/rate-limits')[1]
+    assert limits['enabled'] is False and '/api/macmint/redeem' in limits['labels'], limits
+    print('PASS: public AI config exposes only switches; limits are private; rate limits stay off without a trusted proxy')
     question = 'Why is storage full?'
     def ask(context=None): return call('/api/macmint/ai/ask', dict(question=question, context=context or {}), token)
     assert call('/api/macmint/ai/ask', dict(question=question))[0] in (401, 403)
@@ -176,30 +197,66 @@ with ExitStack() as stack:
     call('/__test/config', dict(ai=dict(enabled=True)))
     print('PASS: organization flag, authenticated structured proposals, name-only payload and transactional allowance')
 
-    status, _ = call('/api/macmint/ai/explain', dict(kind='library-item', identifier='Jane jane@example.invalid.pages', location='Caches'), token)
-    assert status == 200
-    assert 'jane@example.invalid' not in json.dumps(SENT[-1])
+    count = len(SENT)
+    explained = db.execute("SELECT explain FROM ai_usage").fetchone()[0]
+    for kind, name in [('library-item', 'Jane jane@example.invalid.pages'), ('developer-tool', 'Jane secret tool'), ('launch-agent', 'com.jane.private')]:
+        status, local = call('/api/macmint/ai/explain', dict(kind=kind, identifier=name, location='Caches'), token)
+        assert status == 200 and local['model'] == 'local' and local['explanation']['verdict'] == 'unknown', (status, local)
+    assert len(SENT) == count, 'Placeholder explanations reached the provider'
+    assert db.execute("SELECT explain FROM ai_usage").fetchone()[0] == explained
+    assert db.execute("SELECT COUNT(*) FROM ai_requests WHERE feature='explain'").fetchone()[0] == 0
+    status, known = call('/api/macmint/ai/explain', dict(kind='library-item', identifier='com.spotify.client', location='Caches'), token)
+    assert status == 200 and known['model'] != 'local' and len(SENT) == count + 1, known
+    print('PASS: unrecognized explain placeholders are answered locally with zero provider calls and no allowance')
     status, _ = call('/api/macmint/ai/review', dict(recommendations=[dict(id='caches', title='秘密', detail='jane@example.invalid', bytes=100)]), token)
     assert status == 200
     assert 'jane@example.invalid' not in json.dumps(SENT[-1])
-    assert call('/__test/config', dict(ai=dict(enabled=True, models=dict(ask='claude-sonnet-5-5'))))[0] == 200
+    assert call('/__test/config', dict(limits=dict(models=dict(ask='claude-sonnet-5-5'))))[0] == 200
     assert ask()[0] == 200 and SENT[-1]['model'] == 'claude-sonnet-5-5'
     count = len(SENT)
-    for cfg, error in [(dict(enabled=False),'ai_disabled'),(dict(enabled=True, features=dict(ask=False)),'ai_disabled'),
-                       (dict(enabled=True, daily_usd_budget=0),'ai_capacity'),(dict(enabled=True, models=dict(ask='unknown')),'ai_model_config')]:
-        call('/__test/config', dict(ai=cfg))
-        status, body = ask(); assert status == 503 and body['error'] == error, body
-    assert len(SENT) == count, 'Kill switch or exhausted budget reached provider'
-    call('/__test/config', dict(ai=dict(enabled=True)))
+    for public_cfg, private, expected, error in [(dict(enabled=False), {}, 503, 'ai_disabled'), (dict(enabled=True, features=dict(ask=False)), {}, 503, 'ai_disabled'),
+                       (dict(enabled=True), dict(daily_usd_budget=0), 503, 'ai_capacity'), (dict(enabled=True, daily_usd_budget=0), {}, 503, 'ai_capacity'),
+                       (dict(enabled=True), dict(models=dict(ask='unknown')), 503, 'ai_model_config'),
+                       (dict(enabled=True), dict(user_daily_usd_cap=0.0001), 429, 'ai_user_budget')]:
+        call('/__test/config', dict(ai=public_cfg, limits=private))
+        status, body = ask(); assert status == expected and body['error'] == error, (public_cfg, private, status, body)
+    assert len(SENT) == count, 'Kill switch, exhausted budget or user cap reached provider'
+    call('/__test/config', dict(ai=dict(enabled=True), limits={}))
     for mode, error, state in [('busy','ai_busy','released'),('malformed','ai_upstream','settled'),
                                ('null','ai_upstream','settled'),('wrong-shape','ai_upstream','settled'),('empty-answer','ai_upstream','settled'),
-                               ('missing-usage','ai_accounting','uncertain'),('timeout','ai_timeout','uncertain')]:
+                               ('missing-usage','ai_accounting','uncertain'),('timeout','ai_timeout','uncertain'),('refused','ai_unreachable','released')]:
         Provider.mode = mode
+        if mode == 'refused':
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0)); closed = probe.getsockname()[1]
+            call('/__test/config', dict(providerURL=f'http://127.0.0.1:{closed}/v1/messages'))
         before = {row[0] for row in db.execute('SELECT id FROM ai_requests')}
+        asked = db.execute('SELECT ask FROM ai_usage').fetchone()[0]
         status, body = ask(); assert status in (502,503) and body['error'] == error, (mode,status,body)
         records = [(identifier,state) for identifier,state in db.execute('SELECT id,state FROM ai_requests') if identifier not in before]
         assert len(records) == 1 and records[0][1] == state, (mode, records)
-    print('PASS: effective model, kill switches, zero currency budget, malformed output, known refund and uncertain timeout settlement')
+        assert db.execute('SELECT ask FROM ai_usage').fetchone()[0] == asked + (state != 'released'), mode
+    call('/__test/config', dict(providerURL=''))
+    Provider.mode = 'ok'
+    print('PASS: effective model, kill switches, zero budgets, user cap, malformed output, known refund, released connection failure and uncertain timeout')
+
+    status, operator = call('/api/collections/_superusers/auth-with-password', dict(identity='operator@example.invalid', password='operator-password-123'))
+    assert status == 200, operator
+    status, crons = call('/api/crons', token=operator['token'])
+    assert status == 200 and any(job['id'] == 'macmint_ai_stale_reservations' for job in crons), crons
+    held = [row[0] for row in db.execute("SELECT id FROM ai_requests WHERE state='uncertain'")]
+    assert len(held) == 2, held
+    reserved = db.execute('SELECT reserved_micro_usd FROM ai_daily_budgets').fetchone()[0]
+    stale = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=2)).strftime('%Y-%m-%d %H:%M:%S.000Z')
+    db.execute('UPDATE ai_requests SET created=? WHERE id=?', (stale, held[0])); db.commit()
+    assert call('/api/crons/macmint_ai_stale_reservations', {}, operator['token'])[0] == 204
+    for _ in range(100):
+        flagged = {identifier for identifier, mark in db.execute("SELECT id, flagged_at FROM ai_requests WHERE state='uncertain'") if mark}
+        if flagged: break
+        time.sleep(.05)
+    assert flagged == {held[0]}, flagged
+    assert db.execute('SELECT reserved_micro_usd FROM ai_daily_budgets').fetchone()[0] == reserved, 'Flagging must not free reservations'
+    print('PASS: hourly cron flags stale uncertain reservations for reconciliation without freeing them')
 
     def captured(address, subject):
         for _ in range(100):

@@ -2,8 +2,10 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
-/// Checks the published release feed. Only informs — downloads happen in the browser
-/// so Gatekeeper verifies the signed, notarized download.
+/// Checks the published release feed. Only informs: the download opens in the browser, and
+/// only from an allowlisted first-party HTTPS location (otherwise the account page). Builds
+/// can still be ad-hoc signed prereleases that Gatekeeper does not vouch for, so the
+/// release's published SHA-256 (`ReleaseInfo.expectedSHA256`) is the integrity reference.
 @MainActor
 final class UpdateService: ObservableObject {
   @Published private(set) var status: UpdateStatus = .current
@@ -48,7 +50,6 @@ final class UpdateService: ObservableObject {
   }
 
   func openDownload(_ release: ReleaseInfo?) {
-    let url = release?.downloadUrl.flatMap(URL.init(string:)) ?? URL(string: "https://macmint.co/account")!
-    NSWorkspace.shared.open(url)
+    NSWorkspace.shared.open(ReleaseChecker.trustedDownloadURL(release?.downloadUrl) ?? ReleaseChecker.fallbackDownloadURL)
   }
 }
