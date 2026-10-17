@@ -139,9 +139,10 @@ final class PermissionsService: ObservableObject {
   /// authorization enum on the callback queue so that object never crosses actors.
   static func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
     await withCheckedContinuation { continuation in
-      UNUserNotificationCenter.current().getNotificationSettings { settings in
+      let completion: @Sendable (UNNotificationSettings) -> Void = { settings in
         continuation.resume(returning: settings.authorizationStatus)
       }
+      UNUserNotificationCenter.current().getNotificationSettings(completionHandler: completion)
     }
   }
 

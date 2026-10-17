@@ -137,13 +137,19 @@ private struct NativeStartupTest {
       throw ProbeFailure(description: "\(label): launch did not yield its own application process within 30 seconds.")
     }
     let pid = app.processIdentifier
+    try recordOwnedApp(pid: pid, appURL: appURL, marker: marker)
     guard waitUntil(seconds: 30, { app.isFinishedLaunching || app.isTerminated }), !app.isTerminated,
       app.isFinishedLaunching
     else { throw ProbeFailure(description: "\(label): PID \(pid) did not finish ordinary AppKit launch.") }
     log("\(label): PID \(pid) finished launching")
     guard waitUntil(seconds: 20, { app.isTerminated || hasMainWindow(pid) }), !app.isTerminated,
       hasMainWindow(pid)
-    else { throw ProbeFailure(description: "\(label): no normal main-window bounds appeared for PID \(pid).") }
+    else {
+      if app.isTerminated {
+        throw ProbeFailure(description: "\(label): PID \(pid) exited before its normal main window appeared.")
+      }
+      throw ProbeFailure(description: "\(label): no normal main-window bounds appeared for PID \(pid).")
+    }
     log("\(label): normal-layer main window exists (no title, AX, or pixel capture required)")
     guard !waitUntil(seconds: settleSeconds, { app.isTerminated }) else {
       throw ProbeFailure(description: "\(label): process exited while settling.")
@@ -174,6 +180,19 @@ private struct NativeStartupTest {
       throw ProbeFailure(description: "\(label): PID \(pid) did not exit within 12 seconds of normal Quit.")
     }
     log("\(label): normal Quit completed")
+  }
+
+  /// Record only an app whose exact bundle and inert launch marker were verified
+  /// above. The failure collector uses PID + executable path to reject other apps.
+  private static func recordOwnedApp(pid: pid_t, appURL: URL, marker: String) throws {
+    guard let folder = ProcessInfo.processInfo.environment["MACMINT_NATIVE_STARTUP_DIAGNOSTICS"] else { return }
+    let url = URL(fileURLWithPath: folder).appendingPathComponent("native-startup-test-owned-apps.jsonl")
+    let record: [String: Any] = ["pid": Int(pid), "marker": marker,
+      "executablePath": appURL.appendingPathComponent("Contents/MacOS/MacMint").path]
+    var data = (try? Data(contentsOf: url)) ?? Data()
+    data.append(try JSONSerialization.data(withJSONObject: record))
+    data.append(0x0a)
+    try data.write(to: url, options: .atomic)
   }
 
   @MainActor
