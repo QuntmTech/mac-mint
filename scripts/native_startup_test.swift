@@ -113,9 +113,13 @@ private struct NativeStartupTest {
       "-MacMintNativeStartupProbeID", marker,
     ]
     log("Launching ordinary app: \(label)")
-    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration) { app, error in
+    // AppKit calls this completion on its own queue. An unannotated closure in
+    // this MainActor method can inherit actor isolation and trap before it reaches
+    // the mailbox. This callback must only hand off the result through the lock.
+    let completion: @Sendable (NSRunningApplication?, Error?) -> Void = { app, error in
       mailbox.complete(app: app, error: error)
     }
+    NSWorkspace.shared.openApplication(at: appURL, configuration: configuration, completionHandler: completion)
     let discovered = waitUntil(seconds: 30) {
       let result = mailbox.snapshot()
       if result.error != nil { return true }

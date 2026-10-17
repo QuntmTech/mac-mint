@@ -43,6 +43,14 @@ jobs:
           path: dist/screenshots
           if-no-files-found: ignore
           retention-days: 14
+      - name: Upload helper startup failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMint-Startup-Diagnostics-build-${{ matrix.os }}-${{ github.sha }}
+          path: .build/native-startup-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
@@ -77,3 +85,11 @@ jobs:
       - name: Normal startup from downloaded package
         run: ./scripts/native_startup_test.sh candidate/extracted/MacMint.app
         timeout-minutes: 4
+      - name: Upload helper startup failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacMint-Startup-Diagnostics-downloaded-package-${{ matrix.os }}-${{ github.sha }}
+          path: .build/native-startup-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
