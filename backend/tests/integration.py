@@ -3,7 +3,7 @@ Set POCKETBASE_BIN to PocketBase 0.40.5. Stripe responses below are local protoc
 """
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import concurrent.futures, hashlib, hmac, json, os, shutil, socket, sqlite3, subprocess, tempfile, threading, time, urllib.request, urllib.error, urllib.parse, uuid
+import concurrent.futures, hashlib, hmac, itertools, json, os, shutil, socket, sqlite3, subprocess, tempfile, threading, time, urllib.request, urllib.error, urllib.parse, uuid
 
 root = Path(__file__).resolve().parents[2]
 pocketbase = Path(os.environ.get('POCKETBASE_BIN', root / '.build/pocketbase-bin/pocketbase')).resolve()
@@ -59,6 +59,8 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
       const second=new Record(app.findCollectionByNameOrId("users"));second.set("email","second@example.invalid");second.setPassword("fixture-test-password-123");second.set("verified",true);app.save(second)
       const ent=new Record(app.findCollectionByNameOrId("plan_entitlements"));ent.set("user",u.id);ent.set("plan","pro");ent.set("status","active");ent.set("max_devices",1);app.save(ent)
       const su=new Record(app.findCollectionByNameOrId("_superusers"));su.set("email","operator@example.invalid");su.setPassword("operator-test-password-123");app.save(su)
+      // Fixture proxy header: each test client supplies its own address, like a trusted reverse proxy.
+      const settings=app.settings();settings.trustedProxy.headers=["X-Test-Client-IP"];app.save(settings)
       for(const [key,value] of [["ai",{enabled:true}],["commerce",{enabled:true,price_id:"price_fixture",amount_minor:1900,currency:"usd",plan:"pro",duration_days:365,max_devices:3,livemode:false,web_origin:"https://staging.macmint.test"}]]){
         const c=new Record(app.findCollectionByNameOrId("app_config"));c.set("key",key);c.set("value",value);app.save(c)
       }
@@ -68,6 +70,10 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
       const ai=require(`${__hooks}/macmint_ai_lib.js`),user=e.app.findFirstRecordByFilter("users","email='fixture@example.invalid'")
       try{return e.json(200,{id:ai.reserve(e.app,user.id,"review","claude-opus-5-5",100,100)})}
       catch(err){return e.json(err.status||500,{error:err.code||String(err)})}
+    })
+    routerAdd("GET","/__test/rate-limits",e=>{
+      const limits=e.app.settings().rateLimits
+      return e.json(200,{enabled:limits.enabled,labels:limits.rules.map(r=>r.label)})
     })
     routerAdd("POST","/__test/release",e=>{
       const r=new Record(e.app.findCollectionByNameOrId("app_releases"));r.set("version","0.0."+e.requestInfo().body.build);r.set("channel","stable")
@@ -85,9 +91,13 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     origin = f'http://127.0.0.1:{port}'
-    def call(path, data=None, token=None, headers=None):
+    client_numbers = itertools.count(1)
+    def call(path, data=None, token=None, headers=None, ip=None):
+        # Distinct simulated clients unless a test pins one address to exercise its limit.
+        n = next(client_numbers)
+        ip = ip or f'10.{(n >> 16) & 255}.{(n >> 8) & 255}.{n & 255}'
         content = data if isinstance(data, bytes) else (json.dumps(data).encode() if data is not None else None)
-        request_headers = {'Content-Type': 'application/json', **(headers or {})}
+        request_headers = {'Content-Type': 'application/json', 'X-Test-Client-IP': ip, **(headers or {})}
         if token: request_headers['Authorization'] = token
         request = urllib.request.Request(origin + path, data=content, headers=request_headers)
         try:
@@ -113,6 +123,22 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert sum(status == 200 for status, _ in results) == 8, results
             assert sum(status == 429 for status, _ in results) == 8, results
             print('PASS: 16 concurrent AI reservations, exactly 8 approvals')
+            limits = call('/__test/rate-limits')[1]
+            assert limits['enabled'] is True, limits
+            assert {'/api/macmint/redeem', '/api/macmint/checkout', '*:auth', 'users:create', 'site_events:create', '/api/macmint/stripe/webhook', '/api/'} <= set(limits['labels'])
+            bogus = dict(code='MINT-AAAA-BBBB-CCCC-DDDD')
+            redeems = [call('/api/macmint/redeem', bogus, token, ip='198.51.100.7')[0] for _ in range(11)]
+            assert redeems == [404] * 10 + [429], redeems
+            assert call('/api/macmint/redeem', bogus, token, ip='198.51.100.70')[0] == 404
+            wrong = dict(identity='fixture@example.invalid', password='wrong-password-000')
+            right = dict(identity='fixture@example.invalid', password='fixture-test-password-123')
+            sign_ins = [call('/api/collections/users/auth-with-password', wrong, ip='198.51.100.8')[0] for _ in range(10)]
+            assert sign_ins == [400] * 10, sign_ins
+            assert call('/api/collections/users/auth-with-password', right, ip='198.51.100.8')[0] == 429
+            assert call('/api/collections/users/auth-with-password', right, ip='198.51.100.80')[0] == 200
+            deliveries = [call('/api/macmint/stripe/webhook', b'{}', headers={'Stripe-Signature': 't=1,v1=' + '0' * 64}, ip='198.51.100.9')[0] for _ in range(30)]
+            assert deliveries == [400] * 30, deliveries
+            print('PASS: per-client 429 after redeem and sign-in bursts behind a trusted proxy header; other clients and webhooks unaffected')
             device_ids = [str(uuid.uuid4()) for _ in range(8)]
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                 results = list(pool.map(lambda identifier: call('/api/macmint/devices/activate', dict(device_id=identifier, name='Fixture'), token), device_ids))
@@ -151,7 +177,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert checkout_status(request_key) == (200, checkout_payload('pending'))
             assert checkout_status(request_key, second_token) == (200, dict(state='not_found', can_start_new=False))
             assert len(provider_requests) == before_poll, 'Status polling must not call Stripe'
-            with urllib.request.urlopen(urllib.request.Request(origin + '/api/macmint/checkout/status?request_key=' + request_key, headers={'Authorization': token})) as status_response:
+            with urllib.request.urlopen(urllib.request.Request(origin + '/api/macmint/checkout/status?request_key=' + request_key, headers={'Authorization': token, 'X-Test-Client-IP': '10.255.0.1'})) as status_response:
                 assert status_response.headers.get('Cache-Control') == 'no-store'
             print('PASS: checkout status is authenticated, owner-scoped, database-only, and rejects malformed request IDs')
             assert call('/api/macmint/checkout', dict(request_key=request_key), token) == (200, checkout)
