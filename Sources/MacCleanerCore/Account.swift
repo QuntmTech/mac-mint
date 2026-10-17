@@ -75,16 +75,25 @@ public struct AccountSnapshot: Codable, Hashable, Sendable {
   public let devices: [RegisteredDevice]
   public let device: RegisteredDevice?
   public let serverTime: String?
+  /// Signed offline evidence for the requesting Mac (see EntitlementAssertion.swift). Absent from
+  /// servers that predate it and when this Mac isn't an active device of an active plan.
+  public let entitlementAssertion: String?
 
   public init(
     user: AccountUser, entitlement: Entitlement, devices: [RegisteredDevice] = [],
-    device: RegisteredDevice? = nil, serverTime: String? = nil
+    device: RegisteredDevice? = nil, serverTime: String? = nil, entitlementAssertion: String? = nil
   ) {
     self.user = user
     self.entitlement = entitlement
     self.devices = devices
     self.device = device
     self.serverTime = serverTime
+    self.entitlementAssertion = entitlementAssertion
+  }
+
+  /// The display copy kept for offline use carries no evidence of its own.
+  public var withoutAssertion: AccountSnapshot {
+    AccountSnapshot(user: user, entitlement: entitlement, devices: devices, device: device, serverTime: serverTime)
   }
 }
 
@@ -126,7 +135,36 @@ public struct AccountAPIError: LocalizedError, Hashable, Sendable {
   public var errorDescription: String? { message }
   /// The stored session is no longer valid and the user must sign in again.
   public var isUnauthorized: Bool { status == 401 || status == 403 && code == "unauthorized" }
-  public var isNetwork: Bool { status == 0 }
+  /// The server could not be reached. TLS failures and cancellation are reported separately.
+  public var isNetwork: Bool { status == 0 && code == "network" }
+  /// The request was cancelled locally; it says nothing about the account.
+  public var isCancellation: Bool { status == 0 && code == "cancelled" }
+  /// The connection was not trustworthy (certificate or TLS failure). Never offline-eligible.
+  public var isSecureConnectionFailure: Bool { status == 0 && code == "tls" }
+  /// Failures that say nothing definitive about the account and may clear up on their own.
+  public var isTransient: Bool { isNetwork || [404, 408, 425, 429].contains(status) || status >= 500 }
+
+  static let cancelled = AccountAPIError(status: 0, code: "cancelled", message: "The request was cancelled.")
+  static let network = AccountAPIError(
+    status: 0, code: "network",
+    message: "Couldn't reach MacMint. Check your internet connection and try again.")
+  static let insecure = AccountAPIError(
+    status: 0, code: "tls",
+    message: "MacMint couldn't establish a secure connection. A network filter, proxy or captive portal may be interfering. Check your connection and try again.")
+
+  /// Maps a transport error without inspecting its message.
+  public static func transport(_ error: Error) -> AccountAPIError {
+    if error is CancellationError { return .cancelled }
+    guard let url = error as? URLError else { return .network }
+    switch url.code {
+    case .cancelled, .userCancelledAuthentication: return .cancelled
+    case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+      .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid, .clientCertificateRejected,
+      .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection:
+      return .insecure
+    default: return .network
+    }
+  }
 }
 
 public enum AccountDates {
@@ -159,7 +197,9 @@ public struct CachedAccess: Codable, Hashable, Sendable {
 public enum AccessPolicy {
   public static let defaultOfflineGraceDays = 14
 
-  /// Whether a previously verified entitlement may unlock the app while the server is unreachable.
+  /// How long an online verification made by this running app keeps it unlocked. It is held in
+  /// memory only; after a restart, offline access requires a signed assertion
+  /// (`OfflineEntitlementPolicy`), because a file on disk can be edited.
   public static func allowsOffline(
     _ cached: CachedAccess?, now: Date = Date(), graceDays: Int = defaultOfflineGraceDays
   ) -> Bool {
@@ -176,6 +216,23 @@ public struct AccountClient: Sendable {
   public typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
   public static let defaultBaseURL = URL(string: "https://macmint.cloudpod.pro")!
+  /// Total deadline for one request, including retries inside URLSession. Above the longest
+  /// per-request timeout (45 s AI review/ask) so it only cuts off requests that are stuck.
+  public static let resourceTimeout: TimeInterval = 60
+
+  /// Account traffic carries bearer tokens and entitlements: no disk/URL cache, cookies or
+  /// cached responses, and a hard total deadline.
+  public static func sessionConfiguration() -> URLSessionConfiguration {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.urlCache = nil
+    configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+    configuration.httpCookieStorage = nil
+    configuration.httpShouldSetCookies = false
+    configuration.timeoutIntervalForResource = resourceTimeout
+    return configuration
+  }
+
+  private static let session = URLSession(configuration: sessionConfiguration())
 
   public let baseURL: URL
   let transport: Transport
@@ -183,7 +240,7 @@ public struct AccountClient: Sendable {
   public init(baseURL: URL = AccountClient.defaultBaseURL, transport: Transport? = nil) {
     self.baseURL = baseURL
     self.transport =
-      transport ?? { request in try await URLSession.shared.data(for: request) }
+      transport ?? { request in try await AccountClient.session.data(for: request) }
   }
 
   public func signIn(email: String, password: String) async throws -> AuthSession {
@@ -216,18 +273,27 @@ public struct AccountClient: Sendable {
       body: ["email": email.trimmingCharacters(in: .whitespaces)])
   }
 
-  public func me(token: String) async throws -> AccountSnapshot {
-    try await send("GET", "/api/macmint/me", token: token)
+  /// `deviceId` asks the server for a signed offline assertion for that Mac.
+  public func me(token: String, deviceId: String? = nil) async throws -> AccountSnapshot {
+    try await send(
+      "GET", "/api/macmint/me", token: token, bodyData: nil,
+      query: deviceId.map { [URLQueryItem(name: "device_id", value: $0)] } ?? [])
   }
 
-  public func redeem(code: String, token: String) async throws -> AccountSnapshot {
-    try await send("POST", "/api/macmint/redeem", token: token, body: ["code": code])
+  public func redeem(code: String, token: String, deviceId: String? = nil) async throws -> AccountSnapshot {
+    var body = ["code": code]
+    if let deviceId { body["device_id"] = deviceId }
+    return try await send("POST", "/api/macmint/redeem", token: token, body: body)
   }
 
-  public func activate(_ device: DeviceInfo, token: String) async throws -> AccountSnapshot {
+  /// `reactivate` is only for an explicit user action; otherwise a Mac removed from the account
+  /// stays removed and the server answers 409 `device_deactivated`.
+  public func activate(_ device: DeviceInfo, token: String, reactivate: Bool = false) async throws
+    -> AccountSnapshot
+  {
     let fields: [String: Any] = [
-      "device_id": device.deviceId, "reactivate": true, "name": device.name, "model": device.model,
-      "os_version": device.osVersion, "app_version": device.appVersion,
+      "device_id": device.deviceId, "reactivate": reactivate, "name": device.name,
+      "model": device.model, "os_version": device.osVersion, "app_version": device.appVersion,
     ]
     return try await send("POST", "/api/macmint/devices/activate", token: token,
       bodyData: JSONSerialization.data(withJSONObject: fields))
@@ -281,10 +347,17 @@ public struct AccountClient: Sendable {
   }
 
   private func send<T: Decodable>(
-    _ method: String, _ path: String, token: String?, bodyData: Data?, timeout: TimeInterval = 20
+    _ method: String, _ path: String, token: String?, bodyData: Data?, timeout: TimeInterval = 20,
+    query: [URLQueryItem] = []
   ) async throws -> T {
-    var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    var url = baseURL.appendingPathComponent(path)
+    if !query.isEmpty, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      components.queryItems = query
+      url = components.url ?? url
+    }
+    var request = URLRequest(url: url)
     request.httpMethod = method
+    request.cachePolicy = .reloadIgnoringLocalCacheData
     request.timeoutInterval = timeout
     request.setValue("application/json", forHTTPHeaderField: "Accept")
     if let token { request.setValue(token, forHTTPHeaderField: "Authorization") }
@@ -298,9 +371,7 @@ public struct AccountClient: Sendable {
     do {
       (data, response) = try await transport(request)
     } catch {
-      throw AccountAPIError(
-        status: 0, code: "network",
-        message: "Couldn't reach MacMint. Check your internet connection and try again.")
+      throw AccountAPIError.transport(error)
     }
     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
     guard (200..<300).contains(status) else { throw Self.apiError(status: status, data: data) }

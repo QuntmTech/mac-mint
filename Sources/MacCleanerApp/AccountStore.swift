@@ -1,7 +1,7 @@
 import AppKit
-import CryptoKit
 import Foundation
 import MacCleanerCore
+import SystemConfiguration
 
 /// Defaults to Keychain; injectable so lifecycle checks never touch a real session.
 @MainActor
@@ -16,8 +16,32 @@ struct AccountTokenStorage {
   }
 }
 
+/// Signed offline evidence (`OfflineEntitlementRecord`). Keychain by default; tests that inject
+/// token storage get an in-memory store unless they pass their own.
+@MainActor
+struct OfflineEntitlementStorage {
+  var load: () -> Data?
+  var save: (Data) -> Bool
+  var delete: () -> Void
+
+  static var keychain: Self {
+    Self(load: { KeychainStore.loadEntitlement() }, save: { KeychainStore.saveEntitlement($0) },
+      delete: { KeychainStore.deleteEntitlement() })
+  }
+
+  static func memory() -> Self {
+    final class Box { var data: Data? }
+    let box = Box()
+    return Self(load: { box.data }, save: { box.data = $0; return true }, delete: { box.data = nil })
+  }
+}
+
 /// Owns the signed-in session and decides whether the app is unlocked.
 /// Flow: Keychain token -> refresh -> activate this Mac -> active / needs plan / device limit.
+///
+/// Online, a successful verification unlocks this run (for at most the offline grace period
+/// without another check). Offline, and after any restart, only a server-signed assertion for
+/// this account and Mac unlocks; nothing written to disk is trusted on its own.
 @MainActor
 final class AccountStore: ObservableObject {
   enum Phase: Equatable {
@@ -25,9 +49,15 @@ final class AccountStore: ObservableObject {
     case signedOut
     case needsPlan
     case deviceLimit(message: String, devices: [RegisteredDevice])
+    /// This Mac was removed from the account; only an explicit action activates it again.
+    case deviceRemoved
     case active(offline: Bool)
     case failed(String)
   }
+
+  /// Foreground checks run at most this often while access is valid. Retry, the periodic
+  /// recheck and any check while access is not valid run immediately.
+  static let minimumRefreshInterval: TimeInterval = 15 * 60
 
   static let purchaseURL = URL(string: "https://macmint.co/#pricing")!
   static let accountURL = URL(string: "https://macmint.co/account")!
@@ -44,16 +74,23 @@ final class AccountStore: ObservableObject {
 
   let deviceInfo: DeviceInfo
   let client: AccountClient
-  private let cacheURL: URL
+  /// account.json from earlier versions: removed on sight, never trusted.
+  private let legacyCacheURL: URL
   private(set) var token: String?
   private let now: @Sendable () -> Date
   private let tokenStorage: AccountTokenStorage
+  private let entitlementStorage: OfflineEntitlementStorage
+  private let verifier: any EntitlementSignatureVerifier
+  /// This run's last online verification. Memory only.
   private var cachedAccess: CachedAccess?
-  private struct SessionCache: Codable {
-    let tokenFingerprint: String
-    let access: CachedAccess
-  }
-  private var sessionGeneration = UUID()
+  /// Verified signed evidence for offline use, and the record it was loaded from or saved as.
+  private var signedEntitlement: SignedEntitlement?
+  private var offlineRecord: OfflineEntitlementRecord?
+  /// Latest time this Mac has seen; blocks winding the clock back to stretch offline access.
+  private var highWater: Date?
+  /// Changes on every sign-in/out; late responses from an older session compare and drop out.
+  private(set) var sessionGeneration = UUID()
+  private var lastVerification: Date?
   private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
   private var deviceReleaseTask: Task<Void, Never>?
@@ -61,32 +98,46 @@ final class AccountStore: ObservableObject {
 
   init(supportDirectory: URL, client: AccountClient = AccountClient(),
     deviceInfo: DeviceInfo? = nil, tokenStorage: AccountTokenStorage? = nil,
+    entitlementStorage: OfflineEntitlementStorage? = nil,
+    verifier: (any EntitlementSignatureVerifier)? = nil,
     now: @escaping @Sendable () -> Date = { Date() }) {
     self.now = now
     self.client = client
-    self.cacheURL = supportDirectory.appendingPathComponent("account.json")
+    self.legacyCacheURL = supportDirectory.appendingPathComponent("account.json")
     self.deviceInfo = deviceInfo ?? Self.currentDevice()
     self.tokenStorage = tokenStorage ?? .keychain
+    self.entitlementStorage = entitlementStorage ?? (tokenStorage == nil ? .keychain : .memory())
+    self.verifier = verifier ?? CryptoKitEntitlementVerifier.production
   }
 
   var isUnlocked: Bool {
-    if case .active = phase { return AccessPolicy.allowsOffline(cachedAccess, now: now()) }
-    return false
+    guard case .active(let offline) = phase else { return false }
+    return offline ? offlineAccessAllowed(at: now()) : AccessPolicy.allowsOffline(cachedAccess, now: now())
   }
 
   var isOffline: Bool { phase == .active(offline: true) }
+
+  /// Access was granted earlier but its window has since passed (plan expiry or the offline
+  /// window). The phase stays `.active` until the next check, so the UI must offer one.
+  var accessLapsed: Bool {
+    if case .active = phase { return !isUnlocked }
+    return false
+  }
 
   // MARK: Lifecycle
 
   func start() async {
     guard !isBusy, token == nil else { return }
+    removeLegacyCache()
     guard let stored = tokenStorage.load() else {
+      entitlementStorage.delete()
       phase = .signedOut
       return
     }
     sessionGeneration = UUID()
     token = stored
-    cachedAccess = loadCache(for: stored)
+    restoreOfflineEvidence(for: stored)
+    noteClock()
     phase = .checking
     let generation = sessionGeneration
     await verify(refreshToken: true, quiet: false)
@@ -101,8 +152,14 @@ final class AccountStore: ObservableObject {
   }
 
   /// Foregrounding also enforces expiry and remote deactivation after a sleeping Mac wakes.
-  func refreshAccess() async {
+  /// Called on every app activation, so it is throttled while access is valid.
+  func refreshAccess(force: Bool = false) async {
+    noteClock()
     guard token != nil, !isBusy else { return }
+    if !force, isUnlocked, let last = lastVerification {
+      let elapsed = now().timeIntervalSince(last)
+      if elapsed >= 0, elapsed < Self.minimumRefreshInterval { return }
+    }
     await verify(refreshToken: false, quiet: true)
   }
 
@@ -166,7 +223,7 @@ final class AccountStore: ObservableObject {
     // Supersede a quiet verification that may have read the account before the
     // purchase settled. Its late response must not replace this activation.
     await perform(replacingSession: true) { generation in
-      try await self.activate(token: token, generation: generation)
+      try await self.activate(token: token, generation: generation, reactivate: false)
       guard generation == self.sessionGeneration else { return }
       if self.isUnlocked {
         self.infoMessage = "Purchase verified. This Mac is activated."
@@ -188,11 +245,25 @@ final class AccountStore: ObservableObject {
       return
     }
     await perform { generation in
-      _ = try await self.client.redeem(code: trimmed, token: token)
+      _ = try await self.client.redeem(code: trimmed, token: token, deviceId: self.deviceInfo.deviceId)
       guard generation == self.sessionGeneration else { return }
-      try await self.activate(token: token, generation: generation)
+      try await self.activate(token: token, generation: generation, reactivate: false)
       guard generation == self.sessionGeneration else { return }
       if self.isUnlocked { self.infoMessage = "MacMint Pro is unlocked. Enjoy!" }
+    }
+  }
+
+  /// The explicit "Activate this Mac" action for a Mac removed from the account.
+  func activateThisMac() async {
+    guard let token else {
+      phase = .signedOut
+      return
+    }
+    await perform(replacingSession: true) { generation in
+      try await self.activate(token: token, generation: generation, reactivate: true)
+      guard generation == self.sessionGeneration else { return }
+      if self.isUnlocked { self.infoMessage = "This Mac is activated." }
+      self.scheduleRecheck()
     }
   }
 
@@ -201,7 +272,7 @@ final class AccountStore: ObservableObject {
     await perform { generation in
       try await self.client.deactivate(deviceId: device.deviceId, token: token)
       guard generation == self.sessionGeneration else { return }
-      try await self.activate(token: token, generation: generation)
+      try await self.activate(token: token, generation: generation, reactivate: false)
     }
   }
 
@@ -212,7 +283,7 @@ final class AccountStore: ObservableObject {
 
   private func adopt(_ session: AuthSession, generation: UUID) async throws {
     guard generation == sessionGeneration else { return }
-    clearCache()
+    clearAccess()
     snapshot = nil
     phase = .checking
     token = session.token
@@ -221,42 +292,72 @@ final class AccountStore: ObservableObject {
     // registers it again, or the late server response could deactivate the new session.
     await deviceReleaseTask?.value
     guard generation == sessionGeneration else { return }
-    try await activate(token: session.token, generation: generation)
+    // Signing in is the explicit action that may bring back a Mac removed from the account.
+    try await activate(token: session.token, generation: generation, reactivate: true)
     guard generation == sessionGeneration else { return }
     scheduleRecheck()
   }
 
-  /// Registers this Mac and maps the server's answer to a phase.
-  private func activate(token: String, generation: UUID) async throws {
+  /// Registers this Mac and maps the server's answer to a phase. `reactivate` only from an
+  /// explicit user action; otherwise a Mac removed from the account stays removed.
+  private func activate(token: String, generation: UUID, reactivate: Bool) async throws {
     do {
-      let activation = Task { [client, deviceInfo] in try await client.activate(deviceInfo, token: token) }
+      let activation = Task { [client, deviceInfo] in
+        try await client.activate(deviceInfo, token: token, reactivate: reactivate)
+      }
       activationTask = activation
       let result = try await activation.value
       guard generation == sessionGeneration else { return }
-      apply(result)
+      try apply(result)
     } catch let error as AccountAPIError where error.code == "no_active_plan" {
       let result = try? await client.me(token: token)
       guard generation == sessionGeneration else { return }
-      snapshot = result
-      clearCache()
+      snapshot = result?.withoutAssertion
+      clearAccess()
       phase = .needsPlan
     } catch let error as AccountAPIError where error.code == "device_limit" {
       let result = try? await client.me(token: token)
       guard generation == sessionGeneration else { return }
-      snapshot = result
-      clearCache()
+      snapshot = result?.withoutAssertion
+      clearAccess()
       phase = .deviceLimit(message: error.message, devices: error.devices)
+    } catch let error as AccountAPIError where error.code == "device_deactivated" {
+      guard generation == sessionGeneration else { return }
+      clearAccess()
+      phase = .deviceRemoved
     }
   }
 
-  private func apply(_ result: AccountSnapshot) {
-    snapshot = result
-    cachedAccess = CachedAccess(snapshot: result, verifiedAt: now())
-    saveCache()
+  static let invalidAssertion = AccountAPIError(
+    status: 200, code: "invalid_assertion",
+    message: "MacMint couldn't confirm this Mac's access with the server. Try again in a moment, or contact support@macmint.co if this continues.")
+
+  /// Unlocks for an online answer that says this Mac is active on an active plan. A server that
+  /// predates signed assertions unlocks this run only; a present assertion must verify.
+  private func apply(_ result: AccountSnapshot) throws {
+    let evaluation = OnlineEntitlement.evaluate(result, deviceId: deviceInfo.deviceId, verifier: verifier)
+    if case .rejected = evaluation { throw Self.invalidAssertion }
+    snapshot = result.withoutAssertion
+    let verifiedAt = now()
+    cachedAccess = CachedAccess(snapshot: result.withoutAssertion, verifiedAt: verifiedAt)
+    if case .signed(let signed) = evaluation, let token {
+      signedEntitlement = signed
+      highWater = OfflineEntitlementPolicy.advance(highWater, to: verifiedAt)
+      persist(OfflineEntitlementRecord(token: token, userId: result.user.id, assertion: signed.compact,
+        highWater: highWater ?? verifiedAt, snapshot: result.withoutAssertion))
+    }
     phase = .active(offline: false)
   }
 
-  /// `quiet` re-checks keep an unlocked app usable through transient network failures.
+  private func offlineAccessAllowed(at date: Date) -> Bool {
+    if let signedEntitlement {
+      return OfflineEntitlementPolicy.check(signedEntitlement, now: date, highWater: highWater) == nil
+    }
+    // Only a server without assertions leaves none: this run's online check, never a file.
+    return AccessPolicy.allowsOffline(cachedAccess, now: date)
+  }
+
+  /// `quiet` re-checks keep an unlocked app usable through any failure that isn't definitive.
   private func verify(refreshToken: Bool, quiet: Bool) async {
     guard !isVerifying, !isBusy else { return }
     isVerifying = true
@@ -266,6 +367,8 @@ final class AccountStore: ObservableObject {
       phase = .signedOut
       return
     }
+    noteClock()
+    lastVerification = now()
     do {
       var active = current
       if refreshToken {
@@ -274,50 +377,54 @@ final class AccountStore: ObservableObject {
         active = session.token
         token = active
         saveToken(active)
-        // A refreshed token belongs to the same account, but offline evidence keeps its
-        // original verification date. Rebind it without extending the grace period.
-        if cachedAccess?.snapshot.user.id != session.user.id { clearCache() }
-        saveCache()
+        // A refreshed token belongs to the same account; offline evidence keeps its signed
+        // window and is only rebound to the new token.
+        rebindAccess(to: session)
       }
       // Verification must not silently reactivate a device removed through the portal.
-      let result = try await client.me(token: active)
+      let result = try await client.me(token: active, deviceId: deviceInfo.deviceId)
       guard generation == sessionGeneration else { return }
       guard result.entitlement.active else {
-        snapshot = result
-        clearCache()
+        snapshot = result.withoutAssertion
+        clearAccess()
         phase = .needsPlan
         return
       }
       guard result.devices.contains(where: { $0.deviceId == deviceInfo.deviceId }) else {
-        clearCache()
-        phase = .failed("This Mac was deactivated. Sign in again to activate it explicitly.")
+        snapshot = result.withoutAssertion
+        clearAccess()
+        phase = .deviceRemoved
         return
       }
-      apply(result)
+      try apply(result)
     } catch let error as AccountAPIError {
       guard generation == sessionGeneration else { return }
       handle(error, quiet: quiet)
     } catch {
       guard generation == sessionGeneration else { return }
-      handle(
-        AccountAPIError(status: 0, code: "network", message: error.localizedDescription),
-        quiet: quiet)
+      handle(AccountAPIError.transport(error), quiet: quiet)
     }
   }
 
+  /// Only an expired session or a definitive account answer takes access away. Cancellation
+  /// changes nothing; quiet re-checks keep valid access through any other failure; network-type
+  /// failures fall back to signed offline evidence. TLS failures are never offline-eligible.
   private func handle(_ error: AccountAPIError, quiet: Bool) {
+    if error.isCancellation { return }
     if error.isUnauthorized {
       signOutLocally(message: "Your session expired. Please sign in again.")
       return
     }
-    if error.isNetwork || error.status >= 500, let cached = cachedAccess,
-      AccessPolicy.allowsOffline(cached, now: now())
-    {
-      snapshot = cached.snapshot
+    let current = now()
+    if quiet, isUnlocked {
+      if error.isNetwork, offlineAccessAllowed(at: current) { phase = .active(offline: true) }
+      return
+    }
+    if error.isTransient, offlineAccessAllowed(at: current) {
+      if snapshot == nil { snapshot = offlineRecord?.snapshot ?? cachedAccess?.snapshot }
       phase = .active(offline: true)
       return
     }
-    _ = quiet
     phase = .failed(error.message)
   }
 
@@ -333,25 +440,29 @@ final class AccountStore: ObservableObject {
     do {
       try await work(generation)
     } catch let error as AccountAPIError {
-      guard generation == sessionGeneration else { return }
+      guard generation == sessionGeneration, !error.isCancellation else { return }
       if error.isUnauthorized, token != nil, phase != .signedOut {
         signOutLocally(message: "Your session expired. Please sign in again.")
+      } else if phase == .checking {
+        // A failed activation after sign-in must not leave an endless spinner.
+        phase = .failed(error.message)
       } else {
         errorMessage = error.message
       }
     } catch {
-      guard generation == sessionGeneration else { return }
+      guard generation == sessionGeneration, !(error is CancellationError) else { return }
       errorMessage = error.localizedDescription
     }
   }
 
   private func signOutLocally(message: String?) {
     sessionGeneration = UUID()
+    lastVerification = nil
     isBusy = false
     recheckTask?.cancel()
     recheckTask = nil
     tokenStorage.delete()
-    clearCache()
+    clearAccess()
     token = nil
     snapshot = nil
     aiAvailable = false
@@ -372,42 +483,68 @@ final class AccountStore: ObservableObject {
     }
   }
 
-  private func loadCache(for token: String) -> CachedAccess? {
-    guard let data = try? Data(contentsOf: cacheURL) else { return nil }
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    guard let record = try? decoder.decode(SessionCache.self, from: data),
-      record.tokenFingerprint == Self.fingerprint(token) else { return nil }
-    return record.access
-  }
-
   private func saveToken(_ value: String) {
     if !tokenStorage.save(value) {
       infoMessage = "This session could not be saved to Keychain. You may need to sign in again after restarting MacMint."
     }
   }
 
-  private static func fingerprint(_ token: String) -> String {
-    SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+  /// Loads offline evidence for this session and Mac; anything that doesn't verify is discarded.
+  private func restoreOfflineEvidence(for token: String) {
+    guard let data = entitlementStorage.load() else { return }
+    guard let record = OfflineEntitlementRecord.decode(data),
+      let verified = record.verified(token: token, deviceId: deviceInfo.deviceId, verifier: verifier)
+    else {
+      entitlementStorage.delete()
+      return
+    }
+    offlineRecord = record
+    signedEntitlement = verified
+    highWater = OfflineEntitlementPolicy.advance(highWater, to: record.highWater)
+    snapshot = record.snapshot
   }
 
-  private func saveCache() {
-    guard let cachedAccess, let token else { return }
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    do {
-      let data = try encoder.encode(SessionCache(tokenFingerprint: Self.fingerprint(token), access: cachedAccess))
-      try FileManager.default.createDirectory(
-        at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try data.write(to: cacheURL, options: .atomic)
-    } catch {
-      infoMessage = "Access is verified for this session, but offline access could not be saved. Free some space or check permissions before restarting MacMint."
+  /// Advances the high-water mark and persists it when it has moved meaningfully.
+  private func noteClock() {
+    let current = OfflineEntitlementPolicy.advance(highWater, to: now())
+    highWater = current
+    if let record = offlineRecord, current.timeIntervalSince(record.highWater) >= 60 {
+      persist(record.with(highWater: current))
     }
   }
 
-  private func clearCache() {
+  private func rebindAccess(to session: AuthSession) {
+    if cachedAccess?.snapshot.user.id != session.user.id { cachedAccess = nil }
+    guard let record = offlineRecord else { return }
+    if record.userId == session.user.id {
+      persist(record.rebound(to: session.token))
+    } else {
+      clearOfflineEvidence()
+    }
+  }
+
+  private func persist(_ record: OfflineEntitlementRecord) {
+    offlineRecord = record
+    guard let data = try? record.encoded(), entitlementStorage.save(data) else {
+      infoMessage = "Access is verified for this session, but offline access could not be saved. Check Keychain access before restarting MacMint."
+      return
+    }
+  }
+
+  private func clearOfflineEvidence() {
+    signedEntitlement = nil
+    offlineRecord = nil
+    entitlementStorage.delete()
+  }
+
+  private func clearAccess() {
     cachedAccess = nil
-    try? FileManager.default.removeItem(at: cacheURL)
+    clearOfflineEvidence()
+    removeLegacyCache()
+  }
+
+  private func removeLegacyCache() {
+    try? FileManager.default.removeItem(at: legacyCacheURL)
   }
 
   private static func currentDevice() -> DeviceInfo {
@@ -424,11 +561,18 @@ final class AccountStore: ObservableObject {
       Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     return DeviceInfo(
       deviceId: deviceId,
-      name: Host.current().localizedName ?? "Mac",
+      name: computerName(),
       model: hardwareModel(),
       osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
       appVersion: version
     )
+  }
+
+  /// Runs during App init on the main thread. SCDynamicStore reads the local configuration;
+  /// Host.current().localizedName can block on reverse DNS on some networks.
+  private static func computerName() -> String {
+    guard let name = SCDynamicStoreCopyComputerName(nil, nil) as String?, !name.isEmpty else { return "Mac" }
+    return name
   }
 
   private static func hardwareModel() -> String {
