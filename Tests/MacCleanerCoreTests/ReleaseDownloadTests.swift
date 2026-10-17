@@ -18,6 +18,7 @@ final class ReleaseDownloadTests: XCTestCase {
       "https://github.com/QuntmTech/../evil/releases/download/v1/x.zip", "https://macmint.co/%2e%2e/x",
       "https://macmint.co/x?redirect=evil", "https://macmint.co/x#y", "https://macmint.co", "javascript:alert(1)",
       "file:///Applications/MacMint.app", "macmint://update", " https://macmint.co/x",
+      "https://github.com/QuntmTech/other-repo/releases/download/v1/MacMint.zip", "https://%6dacmint.co/x",
     ] as [String?] {
       XCTAssertNil(ReleaseChecker.trustedDownloadURL(url), url ?? "nil")
     }

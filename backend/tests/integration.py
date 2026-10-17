@@ -267,7 +267,8 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert webhook('checkout.session.completed', target=second_session)[0] == 200
             assert not active(second_token) and order_row(second_session['id'])[1] == 'refunded'
             assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == license_count
-            assert checkout_status(request_key, second_token) == (200, dict(state='refunded', can_start_new=False, offer=saved_offer))
+            assert checkout_status(request_key, second_token) == (200, dict(state='refunded', can_start_new=True, offer=saved_offer))
+            assert call('/api/macmint/checkout', dict(request_key=request_key), second_token)[1]['error'] == 'checkout_expired'
             print('PASS: signed full refund revokes the license and access in one transaction; replays and late success events stay revoked')
             charges['ch_test_partial'] = dict(id='ch_test_partial', object='charge', payment_intent=session['payment_intent'], amount=1900, amount_refunded=400, refunded=False, livemode=False, currency='usd')
             for _ in range(2): assert reversal('charge.refunded', 'ch_test_partial')[0] == 200

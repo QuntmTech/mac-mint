@@ -264,10 +264,12 @@ function settle(app, id, usage, knownNoCharge) {
   })
 }
 
-// Upper bound for input tokens without a second provider request. Claude averages about
+// Conservative input estimate without a second provider request. Claude averages about
 // 3.5-4 characters per token for English and JSON, so count ASCII at 3 characters per
-// token; other text can approach a token per UTF-16 unit, so count those at 2. The old
-// 4-tokens-per-character bound reserved 10-15x actual usage and starved the shared pool.
+// token; other text can approach a token per UTF-16 unit, so count those at 2. Digit-heavy
+// text can tokenize denser, so this is not a strict bound: settlement records actual usage
+// and the shared budget can overshoot by at most a fraction of the requests in flight. The
+// old 4-tokens-per-character bound reserved 10-15x actual usage and starved the shared pool.
 // No tools, images, fast mode, or regional pricing are used.
 function inputUpperBound(text) {
   let ascii = 0
@@ -392,9 +394,18 @@ function flagStaleReservations(app, nowMillis) {
   const now = nowMillis || Date.now()
   const cutoff = new Date(now - STALE_RESERVATION_MS).toISOString().replace("T", " ")
   const rows = app.findRecordsByFilter("ai_requests", "(state = 'pending' || state = 'uncertain') && created < {:c} && flagged_at = ''", "created", 500, 0, { c: cutoff }) || []
-  for (const row of rows) { row.set("flagged_at", new Date(now).toISOString()); app.save(row) }
-  if (rows.length) app.logger().warn("macmint: AI reservations need operator reconciliation", "count", rows.length)
-  return rows.length
+  let flagged = 0
+  for (const row of rows) {
+    // Re-read inside a transaction so a concurrent settlement is never overwritten.
+    app.runInTransaction(tx => {
+      const current = tx.findRecordById("ai_requests", row.id)
+      // Date fields return a wrapper object even when unset; its string form is "" then.
+      if (["pending", "uncertain"].indexOf(String(current.get("state"))) < 0 || String(current.get("flagged_at") || "")) return
+      current.set("flagged_at", new Date(now).toISOString()); tx.save(current); flagged++
+    })
+  }
+  if (flagged) app.logger().warn("macmint: AI reservations need operator reconciliation", "count", flagged)
+  return flagged
 }
 
 // ---------- explain cache ----------

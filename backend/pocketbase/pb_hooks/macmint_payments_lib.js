@@ -72,7 +72,7 @@ function checkoutStatus(app, user, key) {
   catch (_) { return { state: "not_found", can_start_new: false } }
   const state = String(order.get("state"))
   if (["created", "pending", "fulfilled", "failed", "expired", "refunded", "disputed"].indexOf(state) < 0) throw Error("Unknown checkout state")
-  const result = { state, can_start_new: state === "failed" || state === "expired" }
+  const result = { state, can_start_new: state === "failed" || state === "expired" || state === "refunded" }
   const snapshot = { enabled: true }
   for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode"]) snapshot[field] = order.get(field)
   if (validConfiguration(snapshot)) {
@@ -116,7 +116,7 @@ function checkout(app, user, key) {
   const client = new StripeClient(app)
   const order = orderForRequest(app, user, key, cfg)
   if (order.get("state") === "fulfilled") throw { code: "checkout_complete" }
-  if (["failed", "expired"].indexOf(order.get("state")) >= 0) throw { code: "checkout_expired" }
+  if (["failed", "expired", "refunded", "disputed"].indexOf(order.get("state")) >= 0) throw { code: "checkout_expired" }
   // Retrieve an existing session instead of POSTing again. Stripe can prune idempotency
   // keys after 24 hours; the durable order/session association lasts beyond that window.
   if (order.get("session_id")) {
@@ -236,10 +236,11 @@ function timestamp(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 function lib() { return require(`${__hooks}/macmint_lib.js`) }
+// Lookup errors propagate (and roll back the caller's transaction); only "no row" is null.
 function orderLicense(app, order) {
   if (!order.get("session_id")) return null
-  try { return app.findFirstRecordByFilter("licenses", "order_ref = {:s} && source = 'stripe'", { s: order.get("session_id") }) }
-  catch (_) { return null }
+  const rows = app.findRecordsByFilter("licenses", "order_ref = {:s} && source = 'stripe'", "", 1, 0, { s: order.get("session_id") }) || []
+  return rows.length ? rows[0] : null
 }
 // Rebuilds a license-derived entitlement from the user's remaining redeemed licenses,
 // replaying the same extension rule as applyLicense in redemption order. Operator-set
@@ -254,7 +255,7 @@ function recomputeEntitlement(app, userId) {
   const licenses = app.findRecordsByFilter("licenses", "redeemed_by = {:u} && status = 'redeemed'", "redeemed_at,created", 1000, 0, { u: userId }) || []
   let expires = 0, lifetime = false, devices = 0, last = null
   for (const license of licenses) {
-    const at = timestamp(license.get("redeemed_at")) || Date.now()
+    const at = timestamp(license.get("redeemed_at")) || timestamp(license.get("created")) || Date.now()
     const days = Number(license.get("duration_days") || 0)
     if (String(license.get("plan")) === "lifetime" || days <= 0) lifetime = true
     else if (!lifetime) expires = Math.max(expires, at) + days * 86400000
@@ -272,7 +273,8 @@ function recomputeEntitlement(app, userId) {
   return shared.entitlementPayload(ent)
 }
 // Marks the order, revokes its license and recomputes access in one transaction.
-// Replays are no-ops; a partial refund only flags the order for operator review.
+// Replays are no-ops; a partial refund or a dispute inquiry only flags the order for review.
+const REVIEW_ONLY = ["partial_refund", "dispute_inquiry"]
 function applyReversal(app, orderId, kind, details) {
   let outcome
   app.runInTransaction(tx => {
@@ -280,11 +282,11 @@ function applyReversal(app, orderId, kind, details) {
     const state = String(order.get("state"))
     if (REVERSED.indexOf(state) >= 0) { outcome = { result: "unchanged", state }; return }
     if (details.payment_intent && !order.get("payment_intent")) order.set("payment_intent", details.payment_intent)
-    if (kind === "partial_refund") {
+    if (REVIEW_ONLY.indexOf(kind) >= 0) {
       const refunded = Math.max(Number(order.get("refunded_minor") || 0), Math.floor(Number(details.refunded_minor) || 0))
-      if (order.get("attention") === "partial_refund" && Number(order.get("refunded_minor") || 0) === refunded) { outcome = { result: "unchanged", state }; return }
-      order.set("refunded_minor", refunded); order.set("attention", "partial_refund"); tx.save(order)
-      lib().logEvent(tx, "checkout_partial_refund", order.get("user"), { order: order.id, refunded_minor: refunded })
+      if (order.get("attention") === kind && Number(order.get("refunded_minor") || 0) === refunded) { outcome = { result: "unchanged", state }; return }
+      order.set("refunded_minor", refunded); order.set("attention", kind); tx.save(order)
+      lib().logEvent(tx, "checkout_" + kind, order.get("user"), { order: order.id, refunded_minor: refunded, reference: details.reference || "" })
       outcome = { result: "review", state }
       return
     }
@@ -321,12 +323,17 @@ function reverse(app, type, object) {
     charge = client.send("GET", "charges/" + object.id)
     if (!charge || charge.id !== object.id) throw Error("Invalid charge response")
     kind = charge.refunded === true ? "refunded" : (Number(charge.amount_refunded) > 0 ? "partial_refund" : null)
-  } else if (type === "charge.dispute.created") {
+  } else if (type === "charge.dispute.created" || type === "charge.dispute.updated") {
     if (!object || !/^(dp|du)_[A-Za-z0-9_]+$/.test(object.id || "")) throw Error("Invalid dispute")
     const dispute = client.send("GET", "disputes/" + object.id)
     if (!dispute || dispute.id !== object.id) throw Error("Invalid dispute response")
     charge = { payment_intent: dispute.payment_intent, livemode: dispute.livemode }
-    kind = "disputed"
+    // Inquiries (warning_*) withdraw no funds and may never escalate: flag them only.
+    // A formal chargeback (or an inquiry escalated to one) revokes. A won or closed
+    // dispute first seen late does not revoke; restoring access stays an operator choice.
+    const status = String(dispute.status || "")
+    kind = ["needs_response", "under_review", "lost"].indexOf(status) >= 0 ? "disputed"
+      : (["warning_needs_response", "warning_under_review"].indexOf(status) >= 0 ? "dispute_inquiry" : null)
   } else throw Error("Unsupported reversal")
   if (!kind) return { result: "ignored" }
   const paymentIntent = typeof charge.payment_intent === "string" ? charge.payment_intent : (charge.payment_intent && charge.payment_intent.id)
@@ -398,7 +405,7 @@ function reconcileOrder(app, ref) {
   return { order: order.id, state: after, changed: after !== before, session_status: String(full.status || ""), payment_status: String(full.payment_status || "") }
 }
 // Feed downloads open in the customer's browser. Accept only first-party HTTPS hosts:
-// the MacMint site and this repository's GitHub release assets (github.com redirects to
+// the MacMint site and QuntmTech/mac-mint GitHub release assets (github.com redirects to
 // signed, expiring githubusercontent URLs that can serve any repository, so those hosts
 // are not accepted as feed URLs). No credentials, ports, queries, encodings or dot segments.
 function trustedDownloadURL(value) {
@@ -407,7 +414,7 @@ function trustedDownloadURL(value) {
   if (!match || match[2].split("/").some(part => part === "." || part === "..")) return false
   const host = match[1].toLowerCase()
   if (host === "macmint.co") return true
-  return host === "github.com" && /^\/QuntmTech\/[A-Za-z0-9._-]+\/releases\/download\/[^/]+\/[^/]+$/.test(match[2])
+  return host === "github.com" && /^\/QuntmTech\/mac-mint\/releases\/download\/[^/]+\/[^/]+$/.test(match[2])
 }
 function publishableRelease(record) {
   return !record.get("published") || (!!record.get("validated") && !!record.get("notarized") &&

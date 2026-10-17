@@ -99,7 +99,7 @@ public struct ReleaseChecker: Sendable {
   public static let fallbackDownloadURL = URL(string: "https://macmint.co/account")!
 
   /// Feed URLs open in the browser, so only first-party HTTPS locations are trusted: the
-  /// MacMint site and this repository's GitHub release assets. GitHub redirects those to
+  /// MacMint site and QuntmTech/mac-mint GitHub release assets. GitHub redirects those to
   /// signed githubusercontent URLs, which serve any repository's assets and are therefore
   /// not accepted directly. No credentials, ports, queries, fragments, percent-encoding or
   /// dot segments. Mirrors `trustedDownloadURL` in backend macmint_payments_lib.js.
@@ -108,6 +108,7 @@ public struct ReleaseChecker: Sendable {
       let components = URLComponents(string: string),
       components.user == nil, components.password == nil, components.port == nil,
       components.query == nil, components.fragment == nil,
+      components.percentEncodedHost?.contains("%") == false,
       let host = components.host?.lowercased()
     else { return nil }
     let path = components.percentEncodedPath
@@ -119,8 +120,7 @@ public struct ReleaseChecker: Sendable {
     case "macmint.co":
       break
     case "github.com":
-      let repository = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
-      guard segments.count == 6, segments[0] == "QuntmTech", !segments[1].isEmpty, segments[1].allSatisfy(repository.contains),
+      guard segments.count == 6, segments[0] == "QuntmTech", segments[1] == "mac-mint",
         segments[2] == "releases", segments[3] == "download", !segments[4].isEmpty, !segments[5].isEmpty
       else { return nil }
     default:

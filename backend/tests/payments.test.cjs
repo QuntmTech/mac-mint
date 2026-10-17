@@ -324,7 +324,8 @@ test('full refunds revoke the order license and access once; replays and late su
   assert.equal(entitlement(f).active, false)
   assert.equal(licenses(f).length, 1)
   assert.ok(requests.every(r => !r.url.includes('payment_intent=')), 'stored payment intent avoids a provider lookup')
-  assert.deepEqual(payments.checkoutStatus(f.app, { id: 'user1' }, 'stable-request').state, 'refunded')
+  assert.deepEqual([payments.checkoutStatus(f.app, { id: 'user1' }, 'stable-request').state, payments.checkoutStatus(f.app, { id: 'user1' }, 'stable-request').can_start_new], ['refunded', true])
+  assert.throws(() => payments.checkout(f.app, { id: 'user1', get: () => 'fixture@example.invalid' }, 'stable-request'), e => e.code === 'checkout_expired')
 })
 
 test('partial refunds flag the order for review without revoking access', () => {
@@ -342,13 +343,32 @@ test('disputes on orders fulfilled before payment intents were stored map throug
   const f = fixture()
   payments.fulfill(f.app, { id: f.session.id })
   assert.equal(f.order.get('payment_intent'), undefined)
-  stripeRoutes(f, { dispute: { id: 'dp_fixture', charge: 'ch_fixture', payment_intent: 'pi_legacy', livemode: false },
+  stripeRoutes(f, { dispute: { id: 'dp_fixture', charge: 'ch_fixture', payment_intent: 'pi_legacy', livemode: false, status: 'needs_response' },
     charge: { id: 'ch_fixture', payment_intent: 'pi_legacy', refunded: true, amount_refunded: 1900, livemode: false },
     list: { object: 'list', data: [{ id: f.session.id, payment_intent: 'pi_legacy', metadata: { macmint_order: f.order.id } }] } })
   assert.equal(payments.reverse(f.app, 'charge.dispute.created', { id: 'dp_fixture' }).result, 'revoked')
   assert.deepEqual([f.order.get('state'), f.order.get('payment_intent')], ['disputed', 'pi_legacy'])
   assert.equal(entitlement(f).active, false)
   assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_fixture' }).result, 'unchanged')
+  assert.equal(payments.checkoutStatus(f.app, { id: 'user1' }, 'stable-request').can_start_new, false)
+})
+
+test('dispute inquiries only flag the order; escalation revokes; a dispute first seen as won does not', () => {
+  const f = fixture(); f.session.payment_intent = 'pi_fixture'
+  payments.fulfill(f.app, { id: f.session.id })
+  const dispute = { id: 'dp_fixture', charge: 'ch_fixture', payment_intent: 'pi_fixture', livemode: false, status: 'warning_needs_response' }
+  stripeRoutes(f, { dispute })
+  assert.equal(payments.reverse(f.app, 'charge.dispute.created', { id: 'dp_fixture' }).result, 'review')
+  assert.deepEqual([f.order.get('state'), f.order.get('attention')], ['fulfilled', 'dispute_inquiry'])
+  assert.equal(entitlement(f).active, true)
+  for (const status of ['won', 'warning_closed']) {
+    dispute.status = status
+    assert.equal(payments.reverse(f.app, 'charge.dispute.updated', { id: 'dp_fixture' }).result, 'ignored')
+  }
+  dispute.status = 'needs_response'
+  assert.equal(payments.reverse(f.app, 'charge.dispute.updated', { id: 'dp_fixture' }).result, 'revoked')
+  assert.equal(f.order.get('state'), 'disputed')
+  assert.equal(entitlement(f).active, false)
 })
 
 test('reversals for other payments are ignored, and mode mismatches fail for retry', () => {
@@ -429,7 +449,8 @@ test('release feed URLs are limited to first-party HTTPS hosts and this reposito
     'https://github.com/QuntmTech/mac-mint/archive/main.zip', 'https://objects.githubusercontent.com/x/MacMint.zip',
     'https://macmint.co.evil.test/x', 'https://macmint.co@evil.test/x', 'https://evil.test/macmint.co', 'https://macmint.co:8443/x',
     'https://github.com/QuntmTech/../evil/releases/download/v1/x.zip', 'https://macmint.co/%2e%2e/x', 'https://macmint.co/x?redirect=evil',
-    'https://macmint.co', 'javascript:alert(1)', 'file:///Applications/MacMint.app', ' https://macmint.co/x']) {
+    'https://macmint.co', 'javascript:alert(1)', 'file:///Applications/MacMint.app', ' https://macmint.co/x',
+    'https://github.com/QuntmTech/other-repo/releases/download/v1/MacMint.zip', 'https://%6dacmint.co/x']) {
     assert.equal(payments.trustedDownloadURL(url), false, String(url))
   }
   const release = values => ({ get: key => values[key] })

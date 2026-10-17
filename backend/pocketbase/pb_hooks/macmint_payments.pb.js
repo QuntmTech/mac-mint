@@ -51,7 +51,7 @@ routerAdd("POST", "/api/macmint/stripe/webhook", e => {
   if (!event || typeof event !== "object" || Array.isArray(event) || typeof event.type !== "string") return e.json(400, { error: "bad_event" })
   // Refunds and disputes revoke the order's license and recompute access. Charges are not
   // tagged with the order, so the handler maps their payment intent back to it.
-  if (["charge.refunded", "charge.dispute.created"].indexOf(event.type) >= 0) {
+  if (["charge.refunded", "charge.dispute.created", "charge.dispute.updated"].indexOf(event.type) >= 0) {
     try { payments.reverse(e.app, event.type, event.data && event.data.object) }
     catch (_) { return e.json(503, { error: "reversal_pending" }) }
     return e.json(200, { received: true })
