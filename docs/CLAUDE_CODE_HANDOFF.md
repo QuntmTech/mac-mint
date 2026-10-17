@@ -1,5 +1,32 @@
 # MacMint — handoff to Claude Code for independent review
 
+**Updated 2026-10-17, America/New_York. Start with [../HANDOFF.md](../HANDOFF.md) for checkout instructions and the review brief.**
+
+## 0. Current delivery status — read this before the historical checkpoints
+
+The latest verified application implementation is on `main` at **`c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`**. This handoff refresh changes documentation only. Fetch `origin/main` before reviewing; later documentation commits may follow that implementation SHA. The older branches, counts and “pending CI” language below describe their checkpoints, not the final delivery state.
+
+| Delivery | Merged evidence |
+| --- | --- |
+| Stripe readiness and account flow | [PR #25](https://github.com/QuntmTech/mac-mint/pull/25), merge `245b6c9b5465a9354f7069eaaf97968c4ee15840` |
+| Startup fix, permission onboarding and neutral palette | [PR #26](https://github.com/QuntmTech/mac-mint/pull/26), merge `c969d827a7dcba9333746339c6cb53f706197bbe` |
+| ProcessX-inspired Performance presentation | [PR #27](https://github.com/QuntmTech/mac-mint/pull/27), merge `c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423` |
+
+Final implementation validation is complete: [main native CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968758) and [main backend/website CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968760) both succeeded at `c0ade0e`. The [PR native run](https://github.com/QuntmTech/mac-mint/actions/runs/39065371113) and [implementation-head native run](https://github.com/QuntmTech/mac-mint/actions/runs/39065125666) also succeeded.
+
+- macOS 15 and 26 each passed the **220-test suite with zero failures and one expected skip**. Packaging reruns add the expected opt-in mounted-volume fixture skip; these are repeat runs, not additional unique tests.
+- Each native build rendered **113 screens/states**, including the 16 Performance variants and compact-row visibility assertions.
+- Ordinary packaged startup passed with menu-bar insertion off and on, normal-window metadata, the idle CPU-loop check and graceful Quit. Downloaded archives passed checksum/signature, rendering and ordinary-startup checks on separate runners.
+- Backend and both website packages passed their workflow checks. See section 20 for the 36 Node cases, 27 account-browser cases and disposable PocketBase integration scope; see the linked runs for exact commands/results.
+
+**Source completion is not launch certification.** The user's installed copy was not replaced from this Linux workspace. Permission dialogs, VoiceOver/full keyboard access, ordinary macOS 26 sidebar drawing, real PhotoKit/iCloud journeys and prolonged CPU/RAM profiling remain native checks. macOS 26 offscreen captures omit the glass sidebar; geometry and render counts do not prove its pixels. The startup CPU threshold detects the reported feedback loop and is not a daily-use energy benchmark.
+
+Stripe-only purchase preparation is committed, but pricing, intended account/sandbox setup, real-provider payment tests and production deployment remain pending. Earlier connector failures and live configuration observations are historical evidence, not current account access. No live pricing, consumer release/tag or deployment was performed in these passes. Developer ID/notarization/Gatekeeper, external inbox delivery, authenticated staging AI and bounded provider canaries remain operational gates. Auto Tame, CPU caps, GPU measurements and grouped helper totals are future work; current process controls are guarded Quit/Force Quit for regular apps' main processes.
+
+The next reviewer should verify this implementation, report concrete findings, and distinguish existing functionality from those open gates. Sections 1–22 preserve the detailed architecture, changes, failed approaches, tests and review map.
+
+### Historical delivery notes
+
 Desktop micro polish followed the original implementation checkpoint; see section 18 for the additional changes to review.
 
 A further interruption/lifecycle pass is described in section 19, including new regression tests and photo-deck resume/completion captures.
@@ -10,7 +37,7 @@ Section 21 covers the user's local startup-freeze handoff, contextual permission
 
 Section 22 describes the ProcessX-inspired Performance presentation and its separate verification requirements.
 
-Prepared 2026-10-16, America/New_York. This document accompanies delivery to `main` through [PR #22](https://github.com/QuntmTech/mac-mint/pull/22).
+Originally prepared 2026-10-16, America/New_York, for [PR #22](https://github.com/QuntmTech/mac-mint/pull/22). Sections 18–22 record later work; section 0 gives the final verified implementation status.
 
 Claude Code: please independently review the work described here. Treat these statements as claims to verify against the source and executable evidence, not as proof that the product is finished. Prioritize data safety, recovery, privacy, account boundaries, concurrency, native usability, and resource consumption. Report concrete findings with severity, file/line, trigger, consequence, and a regression or verification method. Separate confirmed defects from untested hypotheses and product limitations. Another green test run alone is not the requested review.
 
@@ -19,11 +46,11 @@ Claude Code: please independently review the work described here. Treat these st
 - Repository: `QuntmTech/mac-mint`, https://github.com/QuntmTech/mac-mint.
 - Actual source checkout on this shared Linux host: `/home/qrkit/src/mac-mint`.
 - `/home/qrkit/macmint.co` is a deployed website directory, **not** the source checkout. Do not edit the deployed site instead of the repository.
-- Implementation branch: `feature/trustworthy-cleanup-flow`.
-- Full implementation checkpoint before this handoff: `9214f5d0ca90aecfa90d4e88eb5ebe9bf17d229c`.
+- Original implementation branch (historical): `feature/trustworthy-cleanup-flow`. Review current `origin/main`.
+- Original implementation checkpoint before this handoff: `9214f5d0ca90aecfa90d4e88eb5ebe9bf17d229c`; latest verified implementation: `c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`.
 - Previous `main` / original review baseline: `05ecb65417f2d0a7a3c16748a2abd39284c7cf91`.
 - Before this document, the branch contained 60 commits ahead of that baseline, with 151 changed files, 9,771 insertions and 2,035 deletions. This is substantial work and warrants review by subsystem.
-- The user explicitly requested that all this work and the handoff be pushed to `main`. PR #22 records the final merge SHA; use the current `origin/main` after fetching, rather than assuming an older local branch is current.
+- The user explicitly requested that all this work and the handoff be pushed to `main`. PR #22 records the original merge; PRs #25–27 and section 0 identify the subsequent deliveries. Use current `origin/main` after fetching.
 - `VERSION` remains `0.9.0`. No new version tag or consumer release was created by this work.
 
 Useful comparison commands, after preserving any existing local work:
@@ -138,7 +165,7 @@ The design pass starts at `42ee70e` and runs through the compact-inspector/acces
 - Appearance supports **System / Light / Dark**, persists via one `AppAppearance.storageKey`, and applies to the main scene and menu-bar scene; sheets inherit appearance.
 - Light uses a pale neutral canvas/white cards; Dark uses graphite surfaces/brighter mint text. Surfaces are opaque, Increased Contrast strengthens boundaries, and motion respects Reduce Motion.
 - `AppearanceTests` measures primary/status text contrast against five surface backgrounds in both appearances, including white primary-button text.
-- `RootView` has a compact mint sidebar, disk-space footer, command search, contextual workspace bar, persistent Review badge, and account/help access.
+- `RootView` has a compact sidebar, disk-space footer, command search, contextual workspace bar, persistent Review badge, and account/help access. Section 21 supersedes the original mint-tinted surfaces with neutral grays/charcoal and small green accents.
 - The detail region is explicitly bounded by a `GeometryReader`; responsive headers keep their intrinsic height. These fixes prevent split-view minimum sizing from placing important controls outside a compact window.
 - The overview gives Quick Scan, available space, focused tools, recommendations, coverage and trends a clearer hierarchy.
 - Cleaner/app/developer/storage/history/photo views share headers, spacing, status language and compact control layouts. The app inspector's review actions use a fixed bottom inset and remain visible.
@@ -341,6 +368,14 @@ swift build -c release --product MacMint
 NO_OPEN=1 ./scripts/build_app.sh
 MACMINT_SCREENSHOT_DIR="$PWD/.build/interface-previews" ./scripts/smoke_test.sh dist/MacMint.app
 ```
+
+On a disposable graphical Mac with no existing MacMint instance running, also run the ordinary scene regression gate:
+
+```bash
+./scripts/native_startup_test.sh dist/MacMint.app
+```
+
+It refuses an existing instance and uses marker-verified test processes. It is distinct from the isolated view-rendering smoke test; read [PERMISSIONS_AND_STARTUP.md](PERMISSIONS_AND_STARTUP.md) before running it on a development Mac.
 
 Main CI additionally runs `MACMINT_VOLUME_TESTS=1 swift test` on a disposable macOS runner. Read `NativeVolumeTests.swift` before opting into that fixture elsewhere.
 
@@ -552,9 +587,9 @@ The user supplied ProcessX screenshots and requested a clearer resource/app inte
 
 Performance now emphasizes compact CPU/Memory cards that select sorting, an aligned app table with sortable headers and direction, name/PID/bundle search, per-row resource bars, visible confirmed Quit, and secondary confirmed Force Quit. Counts, live/paused state and sample time are next to the table. Supporting disk/swap details follow the app list. CPU text preserves 100% = one core and values above 100%; bars describe whole-machine capacity. Main-process-only coverage is explicit: helper totals and system-wide process groups are not invented.
 
-`PerformancePresentation.swift` is pure scalar display logic. It keeps unknown/nonfinite CPU readings last, sorts exact integer memory values, resolves ties deterministically, and clamps meter fractions. Six meaningful tests were run through a Linux XCTest adapter and the helper was Swift 6 typechecked. Native AppKit/SwiftUI compilation and final images remain CI gates. Pause retains its snapshot, apps and timestamp; nil timestamps cannot fall through into newer live readings. Sort-card arrows reflect the selected direction.
+`PerformancePresentation.swift` is pure scalar display logic. It keeps unknown/nonfinite CPU readings last, sorts exact integer memory values, resolves ties deterministically, and clamps meter fractions. Six meaningful tests were run through a Linux XCTest adapter and subsequently passed in the native suite on both macOS versions. Native AppKit/SwiftUI compilation and final render gates also passed; see section 0. Pause retains its snapshot, apps and timestamp; nil timestamps cannot fall through into newer live readings. Sort-card arrows reflect the selected direction.
 
-The existing `SystemMonitor` sampler, adaptive cadence, lease policy and final PID/birth/owner checks remain unchanged. Rows map real control handles using PID plus kernel birth identity. Read-only preview fixtures cannot control a process. App icons are rasterized to 64×64 and held in a bounded 64-entry/2 MiB cache. No sampling timer, shell polling or inference is added.
+The existing `SystemMonitor` sampler, adaptive cadence, lease policy and final PID/birth/owner checks remain unchanged. Rows map real control handles using PID plus kernel birth identity. Read-only preview fixtures cannot control a process. App icons are rasterized to 64×64 and held in an NSCache configured for 64 entries/2 MiB. Those NSCache limits are advisory, unlike the explicit photo-preview LRU budgets described in section 7; they are not a whole-app memory guarantee. No sampling timer, shell polling or inference is added.
 
 Smoke rendering adds 16 deterministic populated/paused/high-pressure/unknown-reading captures in both appearances at compact/full sizes. Preview-only row/viewport measurements require three complete app rows at 980×660 and five at 1200×800; later offscreen rows remain valid scrolling content. These assertions check usability beyond a successful render. Inspect artifacts, long names, unknown readings, keyboard/VoiceOver and a disposable app's normal/force quit. Longer Instruments sessions and actual UI interaction still have not been established by this presentation work.
 

@@ -1,0 +1,86 @@
+# MacMint — start here for independent review
+
+Updated 2026-10-17, America/New_York. This is the entry point for Claude Code or another reviewer. The complete change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md); read its current-status section first, then the detailed subsystem sections.
+
+## Goal and current progress
+
+Review a native Mac storage/cleanup app for everyday owners and developers, with particular attention to data safety, recovery, privacy, account boundaries, native usability and CPU/RAM use. The user requested an independent set of eyes on the implementation and subsequent refinements.
+
+The verified implementation is merged to `main` at `c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`. Later documentation commits may follow it. Source now includes the safety/recovery work, local inspection before sign-in, optional AI, preview-first organization, photo review deck, native UI redesign, Stripe readiness, startup correction, permission guidance, neutral themes and improved Performance view. The detailed handoff distinguishes implemented behavior from remaining release and native-test work.
+
+## Get the repository
+
+Repository: **https://github.com/QuntmTech/mac-mint**.
+
+For a fresh review checkout on a Mac, run the following in Terminal. If the destination already exists, inspect it first or choose another new directory; do not overwrite it.
+
+```bash
+mkdir -p "$HOME/Developer"
+cd "$HOME/Developer"
+git clone https://github.com/QuntmTech/mac-mint.git mac-mint-review
+cd mac-mint-review
+git status --short --branch
+git log -8 --oneline --decorate
+```
+
+If authentication is required, use the user's existing GitHub credential flow. Do not request tokens in the transcript. In an existing checkout, inspect `git status` before pulling or switching; preserve local/uncommitted installation fixes. `git fetch origin` can update remote references without modifying that working tree. For an isolated review from it:
+
+```bash
+git fetch origin
+git worktree add --detach ../mac-mint-independent-review origin/main
+cd ../mac-mint-independent-review
+```
+
+The shared Linux source path is `/home/qrkit/src/mac-mint`. `/home/qrkit/macmint.co` is a deployed website directory, **not** the source repository. The user's older Mac installation checkout had local fixes; do not assume its path, HEAD or installed bundle is current.
+
+## How the app works
+
+| Flow | Main boundary and behavior |
+| --- | --- |
+| Launch and navigation | SwiftUI `MacCleanerApp` creates the models/scenes. `RootView` provides seven primary workspaces, contextual tabs, Review, Settings and Help. Replayable onboarding explains optional access; scans start explicitly. |
+| Local inspection | Portable scanners feed `AppViewModel` findings, coverage and selections. Inspection, exclusions and local recovery remain available without an active paid account. |
+| Reviewed cleanup | Shared selections become an `OperationPlanner` plan. The coordinator checks paid mutation access; the executor revalidates identity, keepers, exclusions and owners before moving supported items to Trash. Durable journals remain until History commits. |
+| Recovery | `HistoryStore`, `RecoveryService` and `RestoreCoordinator` reconcile interrupted work and restore supported receipts without overwriting conflicts. Uncertain moves stay uncertain. |
+| Photos | Folder files use filesystem review/Trash. Photo-library assets use PhotoKit confirmation and Recently Deleted. Deck swipes change selections; they do not immediately delete. |
+| AI and Organizer | Desktop requests go to authenticated PocketBase routes; the Anthropic key stays server-side. Explain/Review/Ask are advisory. Organizer previews proposed names/moves, then requires approval and local policy checks; it has its own durable Undo records. |
+| Account and purchase | `AccountStore` manages session/entitlement/offline grace. Hosted Stripe Checkout is fulfilled through verified, idempotent server handling; a browser return URL grants no access. Live pricing/setup is pending. |
+| Performance | A utility sampler uses visible-consumer leases and adaptive cadence. Rows cover regular apps' main processes; confirmed Quit/Force Quit recheck PID, birth identity and owner. Auto Tame, caps, GPU data and grouped helper totals are not implemented. |
+
+Source map: `Sources/MacCleanerCore` for portable policy/engines; `Sources/MacCleanerApp` for native UI/adapters/coordinators; `backend/pocketbase/pb_hooks` and `pb_migrations` for PocketBase/Goja; `web` for Vite/React account/checkout; `ChatGPT sites the homepage V1` for the separate homepage/demo. Read section 15 of the detailed handoff for exact review files and tests.
+
+## Verification and build
+
+The implementation's [main native CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968758) and [backend/web CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968760) passed. Native evidence covers macOS 15 and 26, a 220-test suite with zero failures and expected skips, 113 rendered states, ordinary menu-bar-off/on startup, graceful Quit, and downloaded archive checks. These counts include shared core cases and repeated packaging runs; do not add them together as unique coverage.
+
+On macOS 14+ with a Swift 6/Xcode toolchain:
+
+```bash
+swift test
+NO_OPEN=1 ./scripts/build_app.sh
+MACMINT_SCREENSHOT_DIR="$PWD/.build/interface-previews" ./scripts/smoke_test.sh dist/MacMint.app
+```
+
+The generated local app is `dist/MacMint.app`; this does not replace the user's installed Test.app. For normal scene checks, read `docs/PERMISSIONS_AND_STARTUP.md` and use `./scripts/native_startup_test.sh dist/MacMint.app` on a disposable graphical Mac with no existing MacMint instance. Linux syntax parsing cannot establish native compilation. Section 14 of the full handoff has backend, web and benchmark commands.
+
+## What worked and what failed
+
+- Shared planner/executor policy, durable intents and idempotent history preserve removal/recovery authority across modules. AI proposes; local rules decide what can be applied.
+- Session/scan generations prevent delayed results from reviving old state. Photo review progress survives navigation; cancellations forward to supported thumbnail APIs.
+- An idempotent MenuBarExtra/AppStorage setter fixed the startup feedback loop reported by the user's installation chat. Normal-scene tests now supplement isolated view renders.
+- Explicit `@Sendable` notification and launch callbacks corrected older-SDK actor-isolation traps caught in native CI.
+- Passing unit tests and isolated renders had missed the real startup freeze. Do not repeat the assumption that those alone prove a responsive installed app.
+- Probing another app's protected directories was not a reliable Full Disk Access status query; that probe was removed.
+- The first Performance viewport assertion counted the sidebar inset twice. It was corrected without reducing the three/five visible-row requirement.
+- macOS 26 `cacheDisplay` images omit the system-composited glass sidebar. The normal-window sidebar still needs visual/interactive inspection; a green render count does not establish its pixels.
+- Stripe connector attempts failed despite reconnection. No real account/sandbox, Price or live payment was configured through that connector. Recheck availability before operational setup.
+
+## Review priorities and next steps
+
+1. Read the full handoff and compare the original baseline `05ecb65417f2d0a7a3c16748a2abd39284c7cf91` with current `origin/main`. Use the subsystem file map; distinguish historical checkpoints from the current status.
+2. Challenge keeper preservation, exclusions/aliases/mounted volumes, journal-to-History durability, uncertain outcomes, restore conflicts, and Organizer Apply/Undo recovery with meaningful fault injection.
+3. Challenge stale account/AI callbacks, consent preview/request equality, redaction and transactional usage/payment accounting. Inspect serialized requests using synthetic adversarial names; do not send personal data or incur live provider charges as a substitute for fixture tests.
+4. On a Mac, test ordinary startup, menu-bar toggling, light/dark/System appearance, actual permission grant/deny/re-enable flows, keyboard/VoiceOver, the macOS 26 sidebar, and normal/force quit using disposable apps. Profile sustained CPU/RAM with Instruments; short idle samples are not a battery guarantee.
+5. Before paid launch, complete pricing and intended Stripe account setup, staging payment/webhook/activation journeys, external email delivery, authenticated AI staging/canary, and Developer ID signing/notarization/Gatekeeper/update-feed validation. Source commits and existing keys do not prove these gates are complete.
+6. Return findings by severity with file/line, trigger, consequence, evidence, proposed correction and a meaningful verification method. Separate confirmed defects, hypotheses, untested paths and feature requests. Review first; preserve existing work and avoid unrelated rewrites or production changes.
+
+Keep the user's decisions: useful scanning before sign-in; recovery after expiry/sign-out; optional AI; explicit preview/approval for organization; Stripe only; neutral workspace backgrounds; no automatic process throttling or unsupported external-volume mutation claims. Do not put credentials into code, logs or this handoff.
