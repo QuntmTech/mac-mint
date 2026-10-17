@@ -23,6 +23,8 @@ enum SmokeTest {
     let updates = UpdateService()
     let appUpdates = AppUpdatesStore()
     monitor.sample()
+    // Normal windows refresh these summaries asynchronously; offscreen renders need them now.
+    model.refreshVolumeSummaryNow()
 
     var failures: [String] = []
     var rendered = 0
@@ -36,6 +38,7 @@ enum SmokeTest {
     if !model.selectedLargeFileIDs.contains(b.id) || !model.selectedDownloadIDs.contains(download.id) {
       failures.append("Cross-module queue selection")
     }
+    model.refreshQueueSummaryNow()
     if model.queuedCount != 1 || model.queuedBytes != 4096 { failures.append("Deduplicated queue totals") }
     model.setFileSelection(b.url, selected: false)
     if !model.selectedLargeFileIDs.isEmpty || !model.selectedDownloadIDs.isEmpty { failures.append("Cross-module keep") }
@@ -55,6 +58,7 @@ enum SmokeTest {
     model.isScanning = false
     model.assistantDraft = ""
     model.clearQueue(); model.largeFiles = []; model.downloadItems = []; model.duplicateGroups = []
+    model.refreshQueueSummaryNow()
     model.statusMessage = "Ready when you are · Local inspection"
 
     let screenshotDirectory = ProcessInfo.processInfo.environment["MACMINT_SCREENSHOT_DIR"].map { URL(fileURLWithPath: $0) }
@@ -148,6 +152,7 @@ enum SmokeTest {
       }
     }
     seedDesignFixtures(model, root: support.appendingPathComponent("Fixtures"))
+    model.refreshQueueSummaryNow()
     let review = OperationPlan(title: "Selected items", items: model.cleanupTargets.filter(\.isSelected).map { PlanItem.cleanup($0) })
     for appearance in [ColorScheme.light, .dark] {
       scheme = appearance

@@ -2,6 +2,42 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
+/// Planner estimates shown across the workspace. Building them resolves paths on disk, so
+/// they are computed off the main actor after selections settle, not during view updates.
+struct QueueSummary: Sendable, Equatable {
+  var items: [PlanItem] = []
+  var bytes: Int64 = 0
+  /// Photos-library assets are deleted through PhotoKit, never through a Trash plan.
+  var libraryPhotoCount = 0
+  var selectedCleanupBytes: Int64 = 0
+  var rebuildableBytes: Int64 = 0
+  var reviewableBytes: Int64 = 0
+  var safeRecommendationBytes: Int64 = 0
+
+  struct Inputs: Sendable {
+    let selections: [PlanItem]
+    let libraryPhotoCount: Int
+    let cleanupTargets: [CleanupTarget]
+    let safeRecommendationItems: [PlanItem]
+    let ignoredPaths: Set<String>
+
+    func summary() -> QueueSummary {
+      func estimate(_ items: [PlanItem]) -> Int64 {
+        items.isEmpty ? 0 : OperationPlanner.plan(title: "Estimate", items: items, ignoredPaths: ignoredPaths).totalBytes
+      }
+      func cleanup(_ include: (CleanupTarget) -> Bool) -> [PlanItem] {
+        cleanupTargets.filter(include).map { PlanItem.cleanup($0) }
+      }
+      let queue = OperationPlanner.plan(title: "Queue estimate", items: selections, ignoredPaths: ignoredPaths)
+      return QueueSummary(items: queue.items, bytes: queue.totalBytes, libraryPhotoCount: libraryPhotoCount,
+        selectedCleanupBytes: estimate(cleanup(\.isSelected)),
+        rebuildableBytes: estimate(cleanup { $0.risk == .safe }),
+        reviewableBytes: estimate(cleanup { $0.risk == .review }),
+        safeRecommendationBytes: estimate(safeRecommendationItems))
+    }
+  }
+}
+
 /// Review → execute → recover. Every action that moves files builds an OperationPlan, shows it
 /// in the review sheet, and runs through OperationExecutor so all checks and receipts are shared.
 extension AppViewModel {
@@ -37,13 +73,45 @@ extension AppViewModel {
       + queuedDownloads.map(PlanItem.download)
   }
 
-  private var queueEstimate: OperationPlan {
-    OperationPlanner.plan(title: "Queue estimate", items: sourceSelections, ignoredPaths: ignoredPaths)
+  var queuedItems: [PlanItem] { queueSummary.items }
+  /// Everything visibly queued, including Photos-library assets outside the Trash plan.
+  var queuedCount: Int { queueSummary.items.count + queueSummary.libraryPhotoCount }
+  var queuedBytes: Int64 { queueSummary.bytes }
+  var queuedLibraryPhotoCount: Int { queueSummary.libraryPhotoCount }
+
+  private var queueSummaryInputs: QueueSummary.Inputs {
+    QueueSummary.Inputs(
+      selections: sourceSelections, libraryPhotoCount: selectedPhotos.filter(\.isLibraryAsset).count,
+      cleanupTargets: cleanupTargets, safeRecommendationItems: RecommendationEngine.safeItems(recommendations),
+      ignoredPaths: ignoredPaths)
   }
 
-  var queuedItems: [PlanItem] { queueEstimate.items }
-  var queuedCount: Int { queueEstimate.items.count }
-  var queuedBytes: Int64 { queueEstimate.totalBytes }
+  /// Selection and exclusion changes arrive in bursts (one per row in a loop). Coalesce them,
+  /// then plan off the main actor; a result is dropped if inputs changed while it was built.
+  func queueInputsChanged() {
+    queueInputsGeneration &+= 1
+    guard queueSummaryTask == nil else { return }
+    queueSummaryTask = Task { [weak self] in
+      try? await Task.sleep(for: .milliseconds(120))
+      await self?.recomputeQueueSummary()
+    }
+  }
+
+  private func recomputeQueueSummary() async {
+    queueSummaryTask = nil
+    let generation = queueInputsGeneration
+    let inputs = queueSummaryInputs
+    let summary = await Task.detached(priority: .utility) { inputs.summary() }.value
+    guard generation == queueInputsGeneration, summary != queueSummary else { return }
+    queueSummary = summary
+  }
+
+  /// Synchronous refresh for tests and the offscreen render harness.
+  func refreshQueueSummaryNow() {
+    queueSummaryTask?.cancel()
+    queueSummaryTask = nil
+    queueSummary = queueSummaryInputs.summary()
+  }
 
   func dequeue(_ item: PlanItem) {
     let covered = sourceSelections.filter { FileSystem.path($0.url, isInsideOrEqual: item.url) }

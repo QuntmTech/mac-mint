@@ -128,9 +128,7 @@ extension AppViewModel {
       title: "Quick Scan — rebuildable items", items: items, ignoredPaths: ignoredPaths)
   }
 
-  var safeRecommendationBytes: Int64 {
-    OperationPlanner.plan(title: "estimate", items: RecommendationEngine.safeItems(recommendations), ignoredPaths: ignoredPaths).totalBytes
-  }
+  var safeRecommendationBytes: Int64 { queueSummary.safeRecommendationBytes }
 
   func open(_ destination: Recommendation.Destination) {
     switch destination {
@@ -184,9 +182,9 @@ extension AppViewModel {
 
   /// Records today's free space (at most one sample per day) and reloads the chart.
   func recordFreeSpace() {
-    let stats = volumeStats
     Task {
-      if let samples = try? await Self.spaceStore.record(freeBytes: stats.free, totalBytes: stats.total) {
+      let reading = await refreshVolumeSummary()
+      if let samples = try? await Self.spaceStore.record(freeBytes: reading.free, totalBytes: reading.total) {
         spaceHistory = samples
       }
     }
