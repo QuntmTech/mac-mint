@@ -10,7 +10,8 @@
 //   "Ask MacMint" assistant over restricted category summaries. Opus 5.5.
 // POST /api/macmint/admin/ai-cache/purge (superuser) { kind? }
 //
-// Kill switch: app_config key "ai" → { "enabled": false } (optionally per feature).
+// Kill switch: public app_config key "ai" → { "enabled": false } (optionally per feature).
+// Budgets, the per-user daily USD cap and model overrides live in the private "ai_limits" record.
 // Handlers run in isolated contexts, so prompts, schemas, and helpers live in macmint_ai_lib.js.
 
 routerAdd("POST", "/api/macmint/ai/explain", (e) => {
@@ -182,3 +183,9 @@ routerAdd("POST", "/api/macmint/ai/organize", (e) => {
     return e.json(200, { proposals, model: result.model })
   } catch (err) { return ai.handleError(e, err) }
 }, $apis.requireAuth("users"))
+
+// Flags (never frees) reservations left pending or uncertain for over an hour.
+cronAdd("macmint_ai_stale_reservations", "17 * * * *", () => {
+  try { require(`${__hooks}/macmint_ai_lib.js`).flagStaleReservations($app) }
+  catch (err) { $app.logger().error("macmint: stale AI reservation check failed", "error", String(err)) }
+})
