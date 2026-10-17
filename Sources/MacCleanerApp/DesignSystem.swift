@@ -72,18 +72,28 @@ struct SearchField: View {
   let prompt: String
   @Binding var text: String
   @Environment(\.colorSchemeContrast) private var contrast
+  @FocusState private var focused: Bool
   var body: some View {
     HStack(spacing: 8) {
-      Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+      Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
       TextField(prompt, text: $text).textFieldStyle(.plain).accessibilityLabel(prompt)
+        .focused($focused)
+        .onKeyPress(.escape) {
+          guard !text.isEmpty else { return .ignored }
+          text = ""
+          return .handled
+        }
       if !text.isEmpty {
-        Button { text = "" } label: { Image(systemName: "xmark.circle.fill") }
+        Button { text = ""; focused = true } label: { Image(systemName: "xmark.circle.fill") }
           .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+          .help("Clear search · Esc")
       }
     }
     .padding(.horizontal, 11).padding(.vertical, 9)
     .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(contrast == .increased ? Color.primary.opacity(0.6) : AppTheme.border))
+    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(
+      focused ? AppTheme.accentText : contrast == .increased ? Color.primary.opacity(0.6) : AppTheme.border,
+      lineWidth: focused || contrast == .increased ? 2 : 1))
   }
 }
 

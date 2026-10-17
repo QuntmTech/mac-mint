@@ -38,9 +38,10 @@ struct PhotoReviewDeck: View {
             .offset(x: reduceMotion ? 0 : drag * 0.25)
             .overlay(alignment: .topLeading) {
               if abs(drag) > 35 {
-                Label(drag < 0 ? "Queue removal" : "Keep", systemImage: drag < 0 ? "tray" : "heart")
+                Label(drag < 0 ? (isKeeper ? "Keeper protected" : "Queue removal") : "Keep",
+                  systemImage: drag < 0 ? (isKeeper ? "star.fill" : "tray") : "heart")
                   .font(.headline).padding(12).background(AppTheme.surface, in: Capsule()).padding(12)
-                  .foregroundStyle(drag < 0 ? AppTheme.danger : AppTheme.accentText)
+                  .foregroundStyle(drag < 0 ? (isKeeper ? AppTheme.warning : AppTheme.danger) : AppTheme.accentText)
               }
             }
             .gesture(DragGesture(minimumDistance: 20)
@@ -59,15 +60,26 @@ struct PhotoReviewDeck: View {
             .font(.caption).foregroundStyle(.secondary)
           HStack {
             if isKeeper { Label("Protected keeper", systemImage: "star.fill").foregroundStyle(AppTheme.accentText) }
+            else if model.selectedPhotoIDs.contains(photo.id) {
+              Label("Already queued for removal", systemImage: "tray.full").foregroundStyle(AppTheme.warning)
+            }
             if let group { Button("Compare \(group.photos.count) shots") { comparing = group }.controlSize(.small) }
             if photo.isLibraryAsset && !cloudPreview {
               Button("Load cloud preview") { cloudPreview = true }.controlSize(.small)
+            }
+            if !photo.isLibraryAsset {
+              Button("Reveal in Finder") { model.reveal(photo.url) }.controlSize(.small)
             }
           }.font(.caption)
         }
       } else {
         EmptyState(icon: "checkmark.circle", title: photos.isEmpty ? "No photos to review" : "You've reached the end",
-          detail: "Your choices are in the review queue. Inspect them before anything is removed.")
+          detail: model.selectedPhotoIDs.isEmpty
+            ? "No photos are queued for removal. Your kept photos stay where they are."
+            : "Your choices are in the review queue. Inspect them before anything is removed.",
+          actionTitle: model.selectedPhotoIDs.isEmpty ? nil : "Review \(model.selectedPhotoIDs.count) queued photos",
+          action: { model.reviewPhotos() })
+          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
       }
       if let message { Text(message).font(.caption).foregroundStyle(AppTheme.warning).accessibilityAddTraits(.updatesFrequently) }
     }
@@ -85,13 +97,15 @@ struct PhotoReviewDeck: View {
       HStack(spacing: 10) {
         Button { undo() } label: { Label("Undo choice", systemImage: "arrow.uturn.backward") }
           .disabled(trail.isEmpty || model.isWorking || model.isScanning)
+          .help("Undo the last review choice · Z")
         Spacer(minLength: 0)
         Button { decide(remove: true) } label: { Label("Queue removal", systemImage: "arrow.left") }
           .disabled(current == nil || isKeeper || model.isWorking || model.isScanning)
+          .help(isKeeper ? "Choose another keeper in Compare first" : "Queue this photo for review · ←")
         Button { decide(remove: false) } label: { Label("Keep", systemImage: "arrow.right") }
           .buttonStyle(MintButtonStyle()).disabled(current == nil || model.isWorking || model.isScanning)
       }
-      Text("Swipe left to queue, right to keep. Nothing is removed until you review and confirm.")
+      Text("Swipe or use ← to queue, → to keep, and Z to undo. Review and confirm before removal.")
         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
     }
     .padding(14)

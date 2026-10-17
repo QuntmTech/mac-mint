@@ -126,27 +126,42 @@ struct CommandPalette: View {
       Divider()
       ScrollViewReader { proxy in
         List(Array(current.enumerated()), id: \.element.id) { index, entry in
-          HStack(spacing: 10) {
-            Image(systemName: entry.icon).frame(width: 20).foregroundStyle(AppTheme.accentText)
-            Text(entry.title).lineLimit(1)
-            Spacer()
-            Text(entry.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-          }
-          .padding(.vertical, 3)
-          .contentShape(Rectangle())
-          .listRowBackground(index == highlighted ? AppTheme.selection : Color.clear)
-          .onTapGesture {
+          Button {
             highlighted = index
             run(current)
+          } label: {
+            HStack(spacing: 10) {
+              Image(systemName: entry.icon).frame(width: 20).foregroundStyle(AppTheme.accentText)
+                .accessibilityHidden(true)
+              Text(entry.title).lineLimit(1)
+              Spacer()
+              Text(entry.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
           }
+          .buttonStyle(.plain)
+          .accessibilityLabel(entry.title)
+          .accessibilityValue(entry.subtitle)
+          .accessibilityAddTraits(index == highlighted ? .isSelected : [])
+          .help(entry.title + " · " + entry.subtitle)
+          .listRowBackground(index == highlighted ? AppTheme.selection : Color.clear)
           .id(index)
         }
         .listStyle(.plain)
         .onChange(of: highlighted) { _, value in proxy.scrollTo(value) }
       }
       if current.isEmpty {
-        Text("No matches").foregroundStyle(.secondary).padding()
+        Text("No matches. Try a screen name, app, or file from your latest scan.")
+          .font(.callout).foregroundStyle(.secondary).padding()
       }
+      Divider()
+      HStack {
+        Text("↑ ↓ Navigate   ↵ Open   Esc Close")
+        Spacer()
+        Text(current.isEmpty ? "0 results" : "\(current.count) shown").monospacedDigit()
+      }
+      .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 10)
     }
     .frame(width: 600, height: 420)
     .scrollContentBackground(.hidden).background(AppTheme.surface)
