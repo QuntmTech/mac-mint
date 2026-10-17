@@ -126,10 +126,10 @@ function checkout(app, user, key) {
   // If a response was lost before its session ID committed, only retry within Stripe's
   // guaranteed retention window. Never create an orphan replacement for an old order.
   const created = Date.parse(String(order.get("created") || ""))
-  if (!Number.isFinite(created) || Date.now() - created >= 23 * 3600000) throw { code: "checkout_expired" }
+  if (!Number.isFinite(created) || Date.now() - created >= 23 * 3600000) throw { code: "checkout_attention" }
   // Historical unbound orders may already have POSTed with an unknown email. Changing
   // parameters under the same idempotency key is unsafe; webhooks can still reconcile them.
-  if (!order.get("customer_email")) throw Error("Checkout needs reconciliation.")
+  if (!order.get("customer_email")) throw { code: "checkout_attention" }
   const price = client.send("GET", "prices/" + encodeURIComponent(order.get("price_id")))
   if (!price.active || price.type !== "one_time" || price.unit_amount !== order.get("amount_minor") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
   // Old orders used this original hardcoded origin. Never replace it with current

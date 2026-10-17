@@ -98,8 +98,11 @@ test('fulfilled and old unbound orders never POST a new session after the retent
   f.order.set('state', 'fulfilled')
   assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_complete')
   f.order.set('state', 'created'); f.order.set('session_id', '')
-  f.order.set('created', new Date(Date.now() - 24 * 3600000).toISOString())
-  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_expired')
+  for (const created of [new Date(Date.now() - 24 * 3600000).toISOString(), '', 'invalid timestamp']) {
+    f.order.set('created', created)
+    assert.throws(() => payments.checkout(f.app, user, 'stable-request'), e => e.code === 'checkout_attention')
+    assert.equal(f.order.get('state'), 'created') // uncertainty is not a confirmed expiry
+  }
   assert.equal(calls, 0)
 })
 
@@ -148,7 +151,7 @@ test('new orders freeze email; legacy unknown-session orders cannot invent a new
   assert.equal(order.get('web_origin'), 'https://staging.macmint.test')
   f.order.set('state', 'created'); f.order.set('session_id', ''); f.order.set('customer_email', '')
   let calls = 0; global.$http = { send: () => { calls++; throw Error('No provider call permitted') } }
-  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), /reconciliation/)
+  assert.throws(() => payments.checkout(f.app, user, 'stable-request'), error => error.code === 'checkout_attention')
   assert.equal(calls, 0)
 })
 

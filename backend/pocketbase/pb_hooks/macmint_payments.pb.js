@@ -17,7 +17,7 @@ routerAdd("POST", "/api/macmint/checkout", e => {
     if (error.code === "checkout_in_progress") return e.json(409, { error: "checkout_in_progress", request_key: error.request_key, message: "Another checkout is open for your account. Resume that checkout instead of starting a second payment." })
     if (error.code === "checkout_attention") return e.json(409, { error: "checkout_attention", message: "Your earlier checkout attempts need to be checked before starting another payment. Contact support; do not pay again." })
     if (error.code === "checkout_complete") return e.json(409, { error: "checkout_complete", message: "This checkout is already complete or processing. Refresh your account to check access; do not pay again." })
-    if (error.code === "checkout_expired") return e.json(409, { error: "checkout_expired", message: "This checkout attempt expired. Start a new checkout attempt to continue." })
+    if (error.code === "checkout_expired") return e.json(409, { error: "checkout_expired", message: "This checkout is no longer open. Check its confirmed status before starting another attempt." })
     return e.json(503, { error: "checkout_unavailable", message: "Checkout could not be opened. Please try again later." })
   }
 }, $apis.requireAuth("users"))
