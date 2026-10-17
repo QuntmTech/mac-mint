@@ -246,26 +246,26 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
                 return call('/api/macmint/stripe/webhook', raw, headers={'Stripe-Signature': f't={timestamp},v1={signature if valid else "0" * 64}'})
             def reversal(event_type, object_id, valid=True):
                 return signed(dict(type=event_type, data=dict(object=dict(id=object_id, object='charge' if object_id.startswith('ch_') else 'dispute'))), valid)
-            def active(account_token): return call('/api/macmint/me', token=account_token)[1]['entitlement']['active']
+            def entitlement_active(account_token): return call('/api/macmint/me', token=account_token)[1]['entitlement']['active']
             def order_row(session_id): return db.execute('SELECT id, state, attention, refunded_minor, payment_intent FROM checkout_orders WHERE session_id=?', (session_id,)).fetchone()
             def license_status(session_id): return db.execute('SELECT status FROM licenses WHERE order_ref=?', (session_id,)).fetchone()[0]
             second_id = second_auth['record']['id']
             second_session = next(v for v in sessions.values() if v['client_reference_id'] == second_id)
             second_session.update(status='complete', payment_status='paid', payment_intent='pi_test_second')
-            assert not active(second_token)
+            assert not entitlement_active(second_token)
             assert webhook('checkout.session.completed', target=second_session)[0] == 200
-            assert active(second_token) and order_row(second_session['id'])[4] == 'pi_test_second'
+            assert entitlement_active(second_token) and order_row(second_session['id'])[4] == 'pi_test_second'
             charges['ch_test_second'] = dict(id='ch_test_second', object='charge', payment_intent='pi_test_second', amount=1900, amount_refunded=1900, refunded=True, livemode=False, currency='usd')
             assert reversal('charge.refunded', 'ch_test_second', valid=False)[0] == 400
-            assert active(second_token)
+            assert entitlement_active(second_token)
             assert reversal('charge.refunded', 'ch_test_second')[0] == 200
-            assert not active(second_token)
+            assert not entitlement_active(second_token)
             assert order_row(second_session['id'])[1:4] == ('refunded', '', 1900)
             assert license_status(second_session['id']) == 'revoked'
             license_count = db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0]
             for _ in range(2): assert reversal('charge.refunded', 'ch_test_second')[0] == 200
             assert webhook('checkout.session.completed', target=second_session)[0] == 200
-            assert not active(second_token) and order_row(second_session['id'])[1] == 'refunded'
+            assert not entitlement_active(second_token) and order_row(second_session['id'])[1] == 'refunded'
             assert db.execute('SELECT COUNT(*) FROM licenses').fetchone()[0] == license_count
             assert checkout_status(request_key, second_token) == (200, dict(state='refunded', can_start_new=True, offer=saved_offer))
             assert call('/api/macmint/checkout', dict(request_key=request_key), second_token)[1]['error'] == 'checkout_expired'
@@ -273,12 +273,12 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             charges['ch_test_partial'] = dict(id='ch_test_partial', object='charge', payment_intent=session['payment_intent'], amount=1900, amount_refunded=400, refunded=False, livemode=False, currency='usd')
             for _ in range(2): assert reversal('charge.refunded', 'ch_test_partial')[0] == 200
             assert order_row(session['id'])[1:4] == ('fulfilled', 'partial_refund', 400)
-            assert active(token) and license_status(session['id']) == 'redeemed'
+            assert entitlement_active(token) and license_status(session['id']) == 'redeemed'
             print('PASS: partial refund flags the order for operator review without revoking access')
             disputes['dp_test_failed'] = dict(id='dp_test_failed', object='dispute', charge='ch_test_failed', payment_intent=failed_session['payment_intent'], livemode=False, status='needs_response')
             assert reversal('charge.dispute.created', 'dp_test_failed')[0] == 200
             assert order_row(failed_session['id'])[1] == 'disputed' and license_status(failed_session['id']) == 'revoked'
-            assert active(token), 'the remaining purchase keeps its access'
+            assert entitlement_active(token), 'the remaining purchase keeps its access'
             charges['ch_test_other'] = dict(id='ch_test_other', object='charge', payment_intent='pi_not_macmint', amount=100, amount_refunded=100, refunded=True, livemode=False)
             assert reversal('charge.refunded', 'ch_test_other')[0] == 200
             print('PASS: dispute revokes only the disputed purchase; unrelated charges are acknowledged and ignored')
@@ -286,7 +286,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert call('/api/macmint/admin/licenses/revoke', dict(order=first_order), token)[0] in (401, 403)
             status, revoked = call('/api/macmint/admin/licenses/revoke', dict(order=first_order, reason='fixture'), admin)
             assert status == 200 and revoked['already_revoked'] is False and revoked['entitlement']['active'] is False, revoked
-            assert not active(token)
+            assert not entitlement_active(token)
             assert call('/api/macmint/admin/licenses/revoke', dict(order=first_order), admin)[1]['already_revoked'] is True
             assert call('/api/macmint/admin/licenses/revoke', dict(license='missingmissing1'), admin)[0] == 404
             assert call('/api/macmint/admin/licenses/revoke', {}, admin)[0] == 400
@@ -308,7 +308,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             paid = open_session(second_id); paid.update(status='complete', payment_status='paid', payment_intent='pi_test_reconciled')
             paid_order = order_row(paid['id'])[0]
             assert call('/api/macmint/admin/checkout/reconcile', dict(order=paid_order), admin)[1]['state'] == 'fulfilled'
-            assert active(second_token) and order_row(paid['id'])[4] == 'pi_test_reconciled'
+            assert entitlement_active(second_token) and order_row(paid['id'])[4] == 'pi_test_reconciled'
             assert call('/api/macmint/admin/checkout/reconcile', dict(order=paid_order), admin)[1]['changed'] is False
             assert call('/api/macmint/admin/checkout/reconcile', dict(order='missingmissing1'), admin)[0] == 404
             print('PASS: superuser reconciliation applies authoritative Stripe expiry and payment without webhooks')
