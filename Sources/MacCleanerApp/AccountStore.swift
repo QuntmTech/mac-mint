@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MacCleanerCore
+import SystemConfiguration
 
 /// Defaults to Keychain; injectable so lifecycle checks never touch a real session.
 @MainActor
@@ -560,11 +561,18 @@ final class AccountStore: ObservableObject {
       Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     return DeviceInfo(
       deviceId: deviceId,
-      name: Host.current().localizedName ?? "Mac",
+      name: computerName(),
       model: hardwareModel(),
       osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
       appVersion: version
     )
+  }
+
+  /// Runs during App init on the main thread. SCDynamicStore reads the local configuration;
+  /// Host.current().localizedName can block on reverse DNS on some networks.
+  private static func computerName() -> String {
+    guard let name = SCDynamicStoreCopyComputerName(nil, nil) as String?, !name.isEmpty else { return "Mac" }
+    return name
   }
 
   private static func hardwareModel() -> String {
