@@ -143,6 +143,15 @@ with ExitStack() as stack:
     token = auth['token']
     db = sqlite3.connect(folder / 'data/data.db')
     stack.callback(db.close)
+    # This runtime has no entitlement signing key: online access works, offline evidence is omitted.
+    device = 'SERVICE-FIXTURE-0001'
+    status, activated = call('/api/macmint/devices/activate', dict(device_id=device, reactivate=False, name='Fixture'), token)
+    assert status == 200 and activated['entitlement']['active'] and 'entitlement_assertion' not in activated, activated
+    status, me = call('/api/macmint/me?device_id=' + device, token=token)
+    assert status == 200 and me['devices'][0]['device_id'] == device and 'entitlement_assertion' not in me, me
+    log.flush()
+    assert (folder / 'server.log').read_text().count('no entitlement signing key configured') == 1
+    print('PASS: without a signing key, activation and /me stay usable online, omit the offline assertion and log it once')
     question = 'Why is storage full?'
     def ask(context=None): return call('/api/macmint/ai/ask', dict(question=question, context=context or {}), token)
     assert call('/api/macmint/ai/ask', dict(question=question))[0] in (401, 403)
