@@ -105,7 +105,8 @@ struct MenuBarView: View {
 
   private func open(_ section: AppViewModel.Section?) {
     if let section { model.selectedSection = section }
-    openWindow(id: "main")
+    // A WindowGroup creates another window on every openWindow call; reuse the open one.
+    if !MainWindow.focusExisting() { openWindow(id: "main") }
     NSApp.activate(ignoringOtherApps: true)
   }
 }

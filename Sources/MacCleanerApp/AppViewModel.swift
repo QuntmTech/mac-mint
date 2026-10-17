@@ -84,12 +84,12 @@ final class AppViewModel: ObservableObject {
   }
 
   @Published var selectedSection: Section = .dashboard
-  @Published var cleanupTargets: [CleanupTarget] = []
+  @Published var cleanupTargets: [CleanupTarget] = [] { didSet { queueInputsChanged() } }
   @Published var apps: [AppRecord] = []
   @Published var startupItems: [StartupItem] = []
-  @Published var largeFiles: [LargeFile] = []
-  @Published var duplicateGroups: [DuplicateGroup] = []
-  @Published var selectedDuplicateIDs: Set<UUID> = []
+  @Published var largeFiles: [LargeFile] = [] { didSet { queueInputsChanged() } }
+  @Published var duplicateGroups: [DuplicateGroup] = [] { didSet { queueInputsChanged() } }
+  @Published var selectedDuplicateIDs: Set<UUID> = [] { didSet { queueInputsChanged() } }
   @Published var selectedApp: AppRecord?
   @Published var appLeftovers: [AppLeftover] = []
   @Published var selectedLeftoverIDs: Set<UUID> = []
@@ -97,7 +97,7 @@ final class AppViewModel: ObservableObject {
   @Published var scanIssues: [ScanIssue] = []
   @Published var showingScanIssues = false
   @Published var recoveryWarnings: [ScanIssue] = []
-  @Published var ignoredPaths: Set<String> = []
+  @Published var ignoredPaths: Set<String> = [] { didSet { queueInputsChanged() } }
   @Published private(set) var exclusionsReady = false
   @Published private(set) var exclusionLoadError: String?
   var keptQueuePaths: Set<String> = []
@@ -108,34 +108,35 @@ final class AppViewModel: ObservableObject {
   @Published var operationTitle: String?
   @Published var lastScanDate: Date?
   @Published var lastScanDuration: TimeInterval?
-  @Published var selectedLargeFileIDs: Set<UUID> = []
+  @Published var selectedLargeFileIDs: Set<UUID> = [] { didSet { queueInputsChanged() } }
   @Published var largeFilesViaSpotlight = false
   @Published var showingCommandPalette = false
   @Published var storageRoot = FileManager.default.homeDirectoryForCurrentUser
-  @Published var storageScan: StorageScan?
+  @Published var storageScan: StorageScan? { didSet { queueInputsChanged() } }
   @Published var storagePath: String?
   @Published var storageScannedCount = 0
-  @Published var selectedStoragePaths: Set<String> = []
-  @Published var devItems: [DevStorageItem] = []
-  @Published var selectedDevIDs: Set<String> = []
+  @Published var selectedStoragePaths: Set<String> = [] { didSet { queueInputsChanged() } }
+  @Published var devItems: [DevStorageItem] = [] { didSet { queueInputsChanged() } }
+  @Published var selectedDevIDs: Set<String> = [] { didSet { queueInputsChanged() } }
   @Published var photoSource: PhotoSource = .library
   @Published var photoReviewSession = PhotoReviewSession()
   @Published var photoScan: PhotoScanResult? {
     didSet {
       if oldValue?.generation != photoScan?.generation { photoReviewSession = PhotoReviewSession() }
+      queueInputsChanged()
     }
   }
   @Published var photoProgress: (done: Int, total: Int)?
-  @Published var selectedPhotoIDs: Set<String> = []
-  @Published var photoKeeperOverrides: [String: String] = [:]
-  @Published var orphans: [OrphanedItem] = []
-  @Published var selectedOrphanIDs: Set<String> = []
+  @Published var selectedPhotoIDs: Set<String> = [] { didSet { queueInputsChanged() } }
+  @Published var photoKeeperOverrides: [String: String] = [:] { didSet { queueInputsChanged() } }
+  @Published var orphans: [OrphanedItem] = [] { didSet { queueInputsChanged() } }
+  @Published var selectedOrphanIDs: Set<String> = [] { didSet { queueInputsChanged() } }
   @Published var orphansScanned = false
   @Published var trashStatus: TrashBinService.Status?
-  @Published var recommendations: [Recommendation] = []
+  @Published var recommendations: [Recommendation] = [] { didSet { queueInputsChanged() } }
   @Published var smartCareRanAt: Date?
-  @Published var downloadItems: [DownloadItem] = []
-  @Published var selectedDownloadIDs: Set<String> = []
+  @Published var downloadItems: [DownloadItem] = [] { didSet { queueInputsChanged() } }
+  @Published var selectedDownloadIDs: Set<String> = [] { didSet { queueInputsChanged() } }
   @Published var downloadsScanned = false
   @Published var spaceHistory: [SpaceSample] = []
   @Published var storageGrowth: [StorageGrowth] = []
@@ -161,6 +162,16 @@ final class AppViewModel: ObservableObject {
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?
+  /// Views read these stored summaries; planning and volume queries run off the main actor.
+  @Published var queueSummary = QueueSummary()
+  @Published var volume = VolumeSummary()
+  var queueInputsGeneration = 0
+  var queueSummaryTask: Task<Void, Never>?
+  var planPreparationTask: Task<Void, Never>?
+  var planPreparationGeneration = 0
+  var aiReviewGeneration = UUID()
+  var recommendationFingerprint: Int?
+  @Published var photoDeletionError: String?
   @Published var lastReport: OperationReport?
   @Published var restoreConflicts: [RestoreConflict] = []
   @Published var largeFileRoot = FileManager.default.homeDirectoryForCurrentUser
@@ -173,7 +184,7 @@ final class AppViewModel: ObservableObject {
   private let largeFileFinder = LargeFileFinder()
   private let duplicateFinder = DuplicateFinder()
   let safetyPolicy = SafetyPolicy()
-  let duplicateVerifier = DuplicateRemovalVerifier()
+  var duplicateVerifier = DuplicateRemovalVerifier()
   let organizationStore: OrganizationStore
   let historyStore: HistoryStore
   let supportDirectory: URL
@@ -205,7 +216,7 @@ final class AppViewModel: ObservableObject {
   }
 
   var selectedCleanupBytes: Int64 {
-    OperationPlanner.plan(title: "Selected cleanup", items: cleanupTargets.filter(\.isSelected).map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
+    queueSummary.selectedCleanupBytes
   }
 
   var selectedReviewBytes: Int64 {
@@ -213,19 +224,14 @@ final class AppViewModel: ObservableObject {
   }
 
   var reclaimableBytes: Int64 {
-    OperationPlanner.plan(title: "Rebuildable estimate", items: cleanupTargets.filter { $0.risk == .safe }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
+    queueSummary.rebuildableBytes
   }
 
   var reviewableBytes: Int64 {
-    OperationPlanner.plan(title: "Review estimate", items: cleanupTargets.filter { $0.risk == .review }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
+    queueSummary.reviewableBytes
   }
 
-  var volumeName: String {
-    let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
-      .volumeLocalizedNameKey
-    ])
-    return values?.volumeLocalizedName ?? "Startup Disk"
-  }
+  var volumeName: String { volume.name }
 
   var duplicateSelectedBytes: Int64 {
     duplicateGroups.flatMap(\.files).filter { selectedDuplicateIDs.contains($0.id) }.reduce(0) {
@@ -238,23 +244,16 @@ final class AppViewModel: ObservableObject {
     return !runningInstances(of: app).isEmpty
   }
 
+  /// A live reading for actions (AI context, history samples). Views use the cached `volume`.
   var volumeStats: (used: Int64, free: Int64, total: Int64) {
-    let home = FileManager.default.homeDirectoryForCurrentUser
-    let values = try? home.resourceValues(forKeys: [
-      .volumeTotalCapacityKey,
-      .volumeAvailableCapacityForImportantUsageKey,
-      .volumeAvailableCapacityKey,
-    ])
-    let total = Int64(values?.volumeTotalCapacity ?? 0)
-    let free =
-      values?.volumeAvailableCapacityForImportantUsage
-      ?? Int64(values?.volumeAvailableCapacity ?? 0)
-    return (max(0, total - free), max(0, free), max(0, total))
+    let reading = VolumeSummary.read()
+    return (reading.used, reading.free, reading.total)
   }
 
   func runSmartScan() { runSmartCare() }
 
   func cancelCurrentOperation() {
+    if isPreparingPlan, !isScanning, !isWorking { cancelPlanPreparation(); return }
     guard isScanning || isWorking else { return }
     currentTask?.cancel()
     statusMessage = isWorking ? "Stopping after the current item…" : "Stopping scan…"
@@ -437,34 +436,41 @@ final class AppViewModel: ObservableObject {
   }
 
   func ignore(_ url: URL) {
-    Task {
-      do {
-        ignoredPaths = try await ignoreStore.add(url)
-        cleanupTargets.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
-        largeFiles.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
-        selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))
-        duplicateGroups = duplicateGroups.compactMap { group in
-          let updated = DuplicateGroup(
-            id: group.id, fingerprint: group.fingerprint,
-            files: group.files.filter { !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) })
-          return updated.physicalCopyCount > 1 ? updated : nil
-        }
-        selectedDuplicateIDs.formIntersection(duplicateGroups.flatMap(\.files).map(\.id))
-        // Cleanup targets that contain the new exclusion can no longer be acted on as a whole.
-        cleanupTargets.removeAll {
-          FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
-        }
-        let blockedLeftovers = Set(
-          appLeftovers.filter {
-            FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
-              || FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
-          }.map(\.id))
-        appLeftovers.removeAll { blockedLeftovers.contains($0.id) }
-        selectedLeftoverIDs.subtract(blockedLeftovers)
-        statusMessage = "Added \(url.lastPathComponent) to exclusions"
-      } catch {
-        statusMessage = "Could not save exclusion: \(error.localizedDescription)"
+    Task { await addExclusion(url) }
+  }
+
+  /// Returns the error shown to the person, or nil once the exclusion is saved and applied.
+  @discardableResult
+  func addExclusion(_ url: URL) async -> String? {
+    do {
+      ignoredPaths = try await ignoreStore.add(url)
+      cleanupTargets.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
+      largeFiles.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
+      selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))
+      duplicateGroups = duplicateGroups.compactMap { group in
+        let updated = DuplicateGroup(
+          id: group.id, fingerprint: group.fingerprint,
+          files: group.files.filter { !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) })
+        return updated.physicalCopyCount > 1 ? updated : nil
       }
+      selectedDuplicateIDs.formIntersection(duplicateGroups.flatMap(\.files).map(\.id))
+      // Cleanup targets that contain the new exclusion can no longer be acted on as a whole.
+      cleanupTargets.removeAll {
+        FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+      }
+      let blockedLeftovers = Set(
+        appLeftovers.filter {
+          FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
+            || FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+        }.map(\.id))
+      appLeftovers.removeAll { blockedLeftovers.contains($0.id) }
+      selectedLeftoverIDs.subtract(blockedLeftovers)
+      statusMessage = "Added \(url.lastPathComponent) to exclusions"
+      return nil
+    } catch {
+      let message = "Could not save exclusion: \(error.localizedDescription)"
+      statusMessage = message
+      return message
     }
   }
 
@@ -568,6 +574,13 @@ final class AppViewModel: ObservableObject {
 
   func beginScan(title: String, message: String) -> Bool {
     guard requireExclusions() else { return false }
+    // A scan replaces the findings a pending or preparing review was built from.
+    guard !isPreparingPlan, pendingPlan == nil else {
+      statusMessage = isPreparingPlan
+        ? "A review is being prepared. Cancel it or wait for it before starting a scan."
+        : "Finish or cancel the open review before starting a scan."
+      return false
+    }
     isScanning = true
     operationTitle = title
     invalidateAIReview()

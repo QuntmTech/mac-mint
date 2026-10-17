@@ -11,6 +11,9 @@ struct LargeFilesView: View {
       set: { model.setFileSelection(file.url, selected: $0) })
   }
 
+  /// Another module's scan leaves these results visible.
+  private var scanningHere: Bool { model.isScanning && model.operationTitle == "Large Files" }
+
   var body: some View {
     VStack(spacing: 0) {
       header
@@ -18,11 +21,11 @@ struct LargeFilesView: View {
       controls
       Divider()
 
-      if model.largeFiles.isEmpty && !model.isScanning {
+      if model.largeFiles.isEmpty && !scanningHere {
         EmptyState(
           icon: "externaldrive", title: "No large files found yet",
           detail: "Choose a folder or scan your home folder. Large files are always review-only.")
-      } else if model.isScanning {
+      } else if scanningHere {
         VStack(spacing: 12) {
           ProgressView().controlSize(.large)
           Text("Scanning for files larger than \(ByteFormatter.string(model.largeFileMinimum))…")
@@ -31,6 +34,7 @@ struct LargeFilesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
+        if model.isScanning { OtherScanNote() }
         List(model.largeFiles) { file in
           HStack(spacing: 12) {
             Toggle("", isOn: selection(file))

@@ -244,7 +244,8 @@ public enum PhotoAnalysis {
 // MARK: - Scanner (macOS image decoding)
 
 public struct PhotoScanResult: Sendable {
-  public let generation = UUID()
+  /// Identifies one scan. A result pruned after removals passes its scan's generation on.
+  public let generation: UUID
   private let groupIndex: [String: Int]
   private let photoIndex: [String: Int]
   private let fileNameIndex: [String: [Int]]
@@ -259,8 +260,9 @@ public struct PhotoScanResult: Sendable {
   public init(
     photos: [PhotoFingerprint], similarGroups: [SimilarPhotoGroup], blurry: [PhotoFingerprint],
     screenshots: [PhotoFingerprint], skippedLibraries: [String], issues: [ScanIssue],
-    wasCancelled: Bool
+    wasCancelled: Bool, generation: UUID = UUID()
   ) {
+    self.generation = generation
     var index: [String: Int] = [:]
     for (offset, group) in similarGroups.enumerated() {
       for photo in group.photos where index[photo.id] == nil { index[photo.id] = offset }
