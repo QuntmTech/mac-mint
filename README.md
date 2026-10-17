@@ -13,7 +13,7 @@ See [startup and permissions](docs/PERMISSIONS_AND_STARTUP.md) for guided setup,
 The [Performance interface notes](docs/PERFORMANCE_UX.md) describe resource units, inventory limits and the ProcessX-inspired app table.
 
 - Backend: PocketBase at `https://macmint.cloudpod.pro`. Routes and rules live in [`backend/pocketbase/pb_hooks`](backend/pocketbase/pb_hooks) (`/api/macmint/me`, `/redeem`, `/devices/activate`, `/devices/deactivate`, superuser-only `/admin/licenses`).
-- The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for 14 days.
+- The app stores the session token in the Keychain and re-verifies every 6 hours. A previously verified plan keeps working offline for up to 14 days only with a server-signed, device-bound entitlement assertion ([signed entitlements](docs/ENTITLEMENTS.md)).
 - Account and license checks touch the network. File contents stay local. Optional AI sends the user's own typed questions and a restricted automatic context after consent.
 - Optional AI features (off until the user turns them on) send previewable fixed categories, numeric summaries and allowlisted tool/app identifiers, plus the user's typed questions and recent conversation — to the PocketBase server, which calls Anthropic. See [MacMint AI](#macmint-ai).
 
