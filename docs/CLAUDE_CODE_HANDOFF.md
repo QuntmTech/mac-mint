@@ -4,6 +4,8 @@ Desktop micro polish followed the original implementation checkpoint; see sectio
 
 A further interruption/lifecycle pass is described in section 19, including new regression tests and photo-deck resume/completion captures.
 
+Section 20 records the subsequent Stripe readiness and account-flow improvements. Pricing, real Stripe account configuration, sandbox provider verification and production deployment remain pending.
+
 Prepared 2026-10-16, America/New_York. This document accompanies delivery to `main` through [PR #22](https://github.com/QuntmTech/mac-mint/pull/22).
 
 Claude Code: please independently review the work described here. Treat these statements as claims to verify against the source and executable evidence, not as proof that the product is finished. Prioritize data safety, recovery, privacy, account boundaries, concurrency, native usability, and resource consumption. Report concrete findings with severity, file/line, trigger, consequence, and a regression or verification method. Separate confirmed defects from untested hypotheses and product limitations. Another green test run alone is not the requested review.
@@ -488,3 +490,40 @@ A second critical pass found three gaps beyond visual polish:
 `PhotoReviewTests` adds navigation/resume/Undo, cancelled scans, changed-result invalidation, changed keepers, and queue-preserving restart checks. `OrganizationSuggestionTests` uses deliberately delayed operations that ignore cancellation to verify stale-response and retry behavior. `ThumbnailRequestTests` covers cancellation before start, cancellation during generation, repeated cancellation and late images, and normal completion. The smoke harness also captures resumed and completed photo decks in both appearances.
 
 The Linux host can run portable tests and syntax parsing; new app-level tests require macOS CI. Inspect the final commit's native test, render and package evidence. Interactive keyboard/VoiceOver, real PhotoKit/iCloud, provider shutdown behavior and prolonged Instruments measurements remain outstanding as described above. No paid operation authority, production AI flag, release tag or deployment is added by this follow-up.
+
+## 20. Stripe readiness and account-flow follow-up (2026-10-17)
+
+The user requested purchase integration readiness while researching pricing, plus useful micro improvements. Work started from `86a0b2ec0ae671130dfaccc392f91d67c82c9907` on `feature/stripe-readiness`. The existing hosted one-time Checkout architecture remains in place; no retail price, product, recurring subscription or live sales configuration was selected or created. See [STRIPE_SETUP.md](STRIPE_SETUP.md) for setup commands, prerequisites and operational verification.
+
+### Backend changes to review
+
+- `macmint_payments_lib.js` snapshots the account email, canonical trusted return origin and offer terms before the first provider POST. Lost-response retries retain exactly the original parameters and idempotency key, including after the email, price or origin changes. A legacy unbound order without its original email fails closed for reconciliation rather than guessing. Existing bound sessions remain retrievable.
+- Order creation checks for another unresolved purchase within its transaction. Eight racing distinct keys produce one order/session; a single existing order returns its owner-only canonical key for explicit Resume. Ambiguous legacy orders require operator reconciliation instead of another payment. Unbound attempts outside the safe retention window or missing their frozen email report `checkout_attention`, preserving uncertainty rather than describing them as confirmed expiry.
+- `/checkout/status` is authenticated, owner-scoped, database-only and `no-store`. It returns immutable offer terms and allows a replacement only after a verified persisted failure/expiry. Missing or unknown attempts remain uncertain. Polling never consumes provider calls.
+- `checkout.session.expired` joins completed/asynchronous success/failure handling. The server fetches authoritative Session/line items before terminal transitions, cannot downgrade fulfilled orders, and can fulfill an already-paid session even when a late terminal notification triggers the check. A delayed creation response cannot reopen a terminal order. Missing terminal deliveries require reconciliation rather than inferred failure.
+- `1792109400_checkout_lifecycle.js` adds the immutable email/origin fields and expired state. Old evidence is retained on rollback. Test the additive migration on the actual staging database/runtime.
+- Pure config validation rejects invalid types, unsafe numeric/date arithmetic and unsafe origins. HTTPS origins are canonicalized; HTTP loopback is permitted only in explicit non-live mode. Browser-provided return URLs remain unused. The superuser-only readiness endpoint returns reason codes without secrets or raw config.
+
+### Website and desktop changes to review
+
+- The account page distinguishes loading, disabled sales and availability failures, displays configured currency/access/device terms, and uses the original order's offer when resuming. Stripe minor-unit currency special cases are covered. Query-string payment returns never grant access.
+- Checkout cancellation/transport failures preserve the retry identity. Another tab's unresolved purchase is adopted only from a valid server-provided owner key and resumed explicitly. Storage failure blocks checkout creation rather than losing its retry identity. Failed/expired Start New consumes the old return query before permitting a new request.
+- Payment confirmation uses bounded sequential status checks, pauses while hidden and retains the same request budget on foregrounding. Manual refresh remains available. Account loads, redemptions and redirect callbacks reject late responses after an account switch or sign-out.
+- `AccountStore.checkPurchase()` explicitly activates this Mac using a browser purchase, without requiring a redemption code. It supersedes pre-purchase quiet verification and retains session/sign-out/duplicate-action guards. New native tests exercise pending/completed purchase, stale verification and repeated checks interrupted by sign-out. Background verification still cannot reactivate a removed Mac.
+- The native account sheet scrolls when content exceeds the viewport. Purchase and redemption wording are distinct, and the account uses “Access until” rather than implying automatic renewal.
+
+### Setup tooling and executable evidence
+
+`backend/commerce.example.json` is intentionally disabled with commercial inputs unset. `backend/scripts/check-commerce-readiness.cjs` reads a local ignored config and injected environment values without network access, changes or secret/config echo. A successful preflight means local prerequisites only; it always reports `launch_ready: false`. Five CLI regressions cover pending pricing, key mode, unrestricted keys, secret-safe malformed config handling and trusted origins.
+
+Verified locally for this follow-up: **165 portable Swift tests**, **36 backend Node tests**, **27 Playwright browser cases**, website build, lint with zero warnings, browser-test TypeScript checking, Swift syntax parsing and the real disposable PocketBase integration and service suites. The integration suite covers concurrent distinct checkout attempts, owner isolation/database-only polling, duplicate/concurrent fulfillment, expired/failed/out-of-order webhooks and migration compatibility. The service suite checks authenticated AI/organization contracts and real loopback SMTP token flows; it does not contact Anthropic or prove external inbox delivery. Native CI results should be checked at the final delivery SHA; older counts in this document are historical. The independent read-only payment review's three concrete findings—terminal restart query state, wrong offer shown on resume, and late redemption across accounts—were corrected and covered by regressions.
+
+macOS CI at `9ddccec` also passed **207 tests with one expected skip**, the release build and **89 rendered screens**. Packaging reruns tests without the opt-in volume flag, adding an expected volume-fixture skip. The three new Check Purchase regressions passed in the native suite. Check the PR's final head for the subsequent backend-only uncertainty-message correction and final package-verification status.
+
+### Explicitly unverified and not deployed
+
+The Stripe connector first returned `UNAUTHORIZED` / requires reauthentication. The user reported reconnecting; subsequent calls still failed, and the final retry returned “MCP tool call blocked by app configuration.” No intended account or sandbox was obtained. Official Stripe documentation was read using the local Stripe CLI documentation command; its unauthenticated account check did not supply access. No real Stripe API mutation, product/Price provisioning, webhook registration or actual payment canary occurred.
+
+A read-only GET to `https://macmint.cloudpod.pro/api/macmint/checkout/config` returned HTTP 404. Source readiness does not mean these hooks/migrations or website changes are deployed. No production database/config/secret, release tag, AI flag, pricing or deployment was changed. Existing notarization/consumer-build, SMTP inbox-delivery and real-provider gates still apply.
+
+Claude: challenge retry identity across every mutable input, legacy unresolved-order reconciliation, terminal webhook ordering, cross-tab/account transitions, currency formatting, viewport overflow and Check Purchase interrupted by sign-out. Run the actual sandbox → signed webhook → entitlement → explicit Mac activation journey before opening sales. If the chosen business model is recurring, implement and test a separate subscription lifecycle; a positive `duration_days` is only a one-time access term.

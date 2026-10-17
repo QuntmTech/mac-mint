@@ -5,3 +5,4 @@ dist/
 .swiftpm/
 web/test-results/
 web/playwright-report/
+backend/commerce.local.json

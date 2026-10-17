@@ -156,6 +156,27 @@ final class AccountStore: ObservableObject {
 
   // MARK: Plan + devices
 
+  /// A browser purchase can grant access without a redemption code. Registering
+  /// this Mac still requires an explicit user action, never a foreground recheck.
+  func checkPurchase() async {
+    guard let token else {
+      phase = .signedOut
+      return
+    }
+    // Supersede a quiet verification that may have read the account before the
+    // purchase settled. Its late response must not replace this activation.
+    await perform(replacingSession: true) { generation in
+      try await self.activate(token: token, generation: generation)
+      guard generation == self.sessionGeneration else { return }
+      if self.isUnlocked {
+        self.infoMessage = "Purchase verified. This Mac is activated."
+      } else if self.phase == .needsPlan {
+        self.infoMessage = "No completed purchase is linked to this account yet. If you just paid, wait a moment and check again. Use the same account on the website."
+      }
+      self.scheduleRecheck()
+    }
+  }
+
   func redeem(code: String) async {
     let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else {

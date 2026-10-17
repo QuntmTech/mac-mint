@@ -65,16 +65,21 @@ private struct GateScaffold<Content: View>: View {
       )
       .ignoresSafeArea()
 
-      VStack(spacing: 22) {
-        VStack(spacing: 10) {
-          BrandMark(size: 56)
-          Text("MacMint").font(.system(size: 27, weight: .semibold))
+      GeometryReader { geometry in
+        ScrollView {
+          VStack(spacing: 22) {
+            VStack(spacing: 10) {
+              BrandMark(size: 56)
+              Text("MacMint").font(.system(size: 27, weight: .semibold))
+            }
+            SurfaceCard { content }
+              .frame(width: 420)
+            GateMessages()
+          }
+          .padding(40)
+          .frame(maxWidth: .infinity, minHeight: geometry.size.height)
         }
-        SurfaceCard { content }
-          .frame(width: 420)
-        GateMessages()
       }
-      .padding(40)
     }
   }
 }
@@ -115,8 +120,8 @@ private struct AuthForm: View {
         Text(isCreating ? "Create your account" : "Sign in").font(.title2.bold())
         Text(
           isCreating
-            ? "Create an account, then redeem the code from your purchase email."
-            : "Sign in with the account you used to buy MacMint."
+            ? "Create an account to connect a purchase or redeem a code. Local inspection stays available."
+            : "Sign in with the same account you use on the MacMint website."
         )
         .font(.callout)
         .foregroundStyle(.secondary)
@@ -191,8 +196,19 @@ private struct RedeemForm: View {
           Text("Signed in as \(email)").font(.callout).foregroundStyle(.secondary)
         }
       }
-      Text("Enter the redemption code from your purchase email to activate this Mac.")
+      Text("Bought MacMint on the website? Check your purchase to activate this Mac, or enter a redemption code below.")
         .font(.callout)
+        .fixedSize(horizontal: false, vertical: true)
+      Button {
+        Task { await account.checkPurchase() }
+      } label: {
+        Label("Check Purchase", systemImage: "arrow.clockwise")
+          .frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.borderedProminent)
+      .controlSize(.large)
+      .disabled(account.isBusy)
+
       TextField("MINT-XXXX-XXXX-XXXX-XXXX", text: $code)
         .textFieldStyle(.roundedBorder)
         .font(.body.monospaced())
@@ -204,7 +220,7 @@ private struct RedeemForm: View {
           Text("Redeem Code").frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(.bordered)
       .controlSize(.large)
       .keyboardShortcut(.defaultAction)
       .disabled(account.isBusy || code.isEmpty)
@@ -358,7 +374,7 @@ struct AccountSettingsCard: View {
   private func planLabel(_ entitlement: Entitlement) -> String {
     guard entitlement.active else { return "No active plan" }
     if let expiry = entitlement.expiryDate {
-      return "Pro • renews/expires \(expiry.formatted(date: .abbreviated, time: .omitted))"
+      return "Pro • Access until \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
     return "Pro • Lifetime"
   }

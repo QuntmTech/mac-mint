@@ -7,8 +7,15 @@ async function backend(page: Page, signedIn = false, verified = true) {
   const token = [{ alg: 'HS256', typ: 'JWT' }, { exp: Math.floor(Date.now() / 1000) + 3600,
     id: user.id, collectionId: user.collectionId, type: 'auth' }]
     .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.') + '.fixture'
-  const state = { user, token, verificationAttempts: 0, verificationFails: false,
-    checkoutError: '' as '' | 'checkout_complete' | 'checkout_expired',
+  const state = { user, currentUser: user, token, redeemWait: Promise.resolve(), redeemRequests: 0, verificationAttempts: 0, verificationFails: false,
+    checkoutError: '' as '' | 'checkout_complete' | 'checkout_expired' | 'checkout_unavailable' | 'checkout_in_progress' | 'checkout_attention',
+    canonicalKey: '84bfa09d-9db2-4f79-a680-b3a461d7af08', checkoutURLOverride: null as string | null,
+    statusOffer: undefined as { amount_minor: number; currency: string; plan: string; duration_days: number; max_devices: number } | undefined,
+    offer: { enabled: true, amount_minor: 7900, currency: 'usd', duration_days: 365, max_devices: 3 },
+    configFails: false, configWait: Promise.resolve(), checkoutWait: Promise.resolve(),
+    status: 'pending' as 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'not_found',
+    statusCanStartNew: false, statusFails: false, statusRequests: [] as string[],
+    active: false, accountRequests: 0,
     checkoutRequests: [] as { request_key: string }[], analytics: 0, unexpected: [] as string[] }
   if (signedIn) await page.addInitScript(auth => {
     if (location.origin === 'http://127.0.0.1:4173') localStorage.setItem('pocketbase_auth', JSON.stringify(auth))
@@ -22,17 +29,36 @@ async function backend(page: Page, signedIn = false, verified = true) {
     }
     const path = url.pathname
     const respond = (body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
-    if (path.endsWith('/auth-refresh')) return respond({ token, record: user })
-    if (path === '/api/macmint/me') return respond({ user, entitlement: { plan: 'free', active: false,
-      status: 'active', expires_at: null, max_devices: 0, source: 'signup' }, devices: [], server_time: new Date().toISOString() })
+    if (path.endsWith('/auth-refresh')) return respond({ token, record: state.currentUser })
+    if (path === '/api/macmint/me') {
+      state.accountRequests++
+      return respond({ user: state.currentUser, entitlement: { plan: state.active ? 'pro' : 'free', active: state.active,
+        status: 'active', expires_at: null, max_devices: state.active ? 3 : 0, source: state.active ? 'stripe' : 'signup' }, devices: [], server_time: new Date().toISOString() })
+    }
+    if (path === '/api/macmint/redeem') {
+      const redeemUser = { ...state.currentUser }
+      state.redeemRequests++
+      await state.redeemWait
+      return respond({ user: redeemUser, entitlement: { plan: 'pro', active: true, status: 'active', expires_at: null,
+        max_devices: 3, source: 'manual' }, devices: [], server_time: new Date().toISOString(), redeemed: true })
+    }
     if (path.includes('/app_releases/records')) return respond({ page: 1, perPage: 1, totalItems: 0, totalPages: 0, items: [] })
-    if (path === '/api/macmint/checkout/config') return respond({ enabled: true, duration_days: 365, max_devices: 3 })
+    if (path === '/api/macmint/checkout/config') {
+      await state.configWait
+      return state.configFails ? respond({ message: 'temporarily unavailable' }, 503) : respond(state.offer)
+    }
+    if (path === '/api/macmint/checkout/status') {
+      state.statusRequests.push(url.searchParams.get('request_key') ?? '')
+      return state.statusFails ? respond({ message: 'Status temporarily unavailable.' }, 503)
+        : respond({ state: state.status, can_start_new: state.statusCanStartNew, offer: state.statusOffer })
+    }
     if (path === '/api/macmint/checkout') {
       state.checkoutRequests.push(route.request().postDataJSON())
-      if (state.checkoutError) return respond({ error: state.checkoutError, message: state.checkoutError === 'checkout_complete'
+      await state.checkoutWait
+      if (state.checkoutError) return respond({ error: state.checkoutError, request_key: state.checkoutError === 'checkout_in_progress' ? state.canonicalKey : undefined, message: state.checkoutError === 'checkout_complete'
         ? 'This checkout is already complete or processing. Refresh your account to check access; do not pay again.'
-        : 'This checkout attempt expired. Start a new checkout attempt to continue.' }, 409)
-      return respond({ url: state.checkoutRequests.length === 1 ? 'https://attacker.invalid/checkout' : 'https://checkout.stripe.com/c/pay/cs_test_fixture' })
+        : state.checkoutError === 'checkout_expired' ? 'This checkout attempt expired. Start a new checkout attempt to continue.' : 'Checkout could not be opened. Please try again later.' }, state.checkoutError === 'checkout_unavailable' ? 503 : 409)
+      return respond({ url: state.checkoutURLOverride ?? (state.checkoutRequests.length === 1 ? 'https://attacker.invalid/checkout' : 'https://checkout.stripe.com/c/pay/cs_test_fixture') })
     }
     if (path.endsWith('/request-verification')) {
       state.verificationAttempts++
@@ -92,13 +118,14 @@ test('checkout rejects foreign redirects, preserves retry identity and cannot gr
   await page.getByRole('button', { name: 'Continue to checkout' }).click()
   await expect(page.getByRole('alert')).toBeVisible()
   await expect(page).toHaveURL(/\/account$/)
-  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Resume checkout' }).click()
   await expect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_fixture')
   expect(state.checkoutRequests).toHaveLength(2)
   expect(state.checkoutRequests[0].request_key).toBe(state.checkoutRequests[1].request_key)
   await page.goto('/account?checkout=processing')
   await expect(page.getByText('No active plan', { exact: true })).toBeVisible()
-  await expect(page.getByRole('status')).toContainText('after Stripe confirms payment')
+  await expect(page.getByRole('status').filter({ hasText: 'after Stripe confirms payment' })).toBeVisible()
   expect(state.unexpected).toEqual([])
 })
 
@@ -117,17 +144,296 @@ test('invalid reset links give a recoverable error without changing the password
 test('completed checkout prevents another payment attempt and expired checkout can restart explicitly', async ({ page }) => {
   const state = await backend(page, true)
   state.checkoutError = 'checkout_expired'
+  state.status = 'expired'; state.statusCanStartNew = true
   await page.goto('/account')
   await page.getByRole('button', { name: 'Continue to checkout' }).click()
   await expect(page.getByRole('alert')).toContainText('expired')
   await page.getByRole('button', { name: 'Start a new checkout attempt' }).click()
-  state.checkoutError = 'checkout_complete'
+  state.checkoutError = 'checkout_complete'; state.status = 'pending'; state.statusCanStartNew = false
   await page.getByRole('button', { name: 'Continue to checkout' }).click()
   await expect(page.getByRole('alert')).toContainText('do not pay again')
-  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Refresh account' })).toBeVisible()
   expect(state.checkoutRequests).toHaveLength(2)
   expect(state.checkoutRequests[0].request_key).not.toBe(state.checkoutRequests[1].request_key)
   expect(state.unexpected).toEqual([])
+})
+
+const retainedRequestKey = '84bfa09d-9db2-4f79-a680-b3a461d7af08'
+async function retainCheckout(page: Page) {
+  await page.addInitScript(key => {
+    if (location.origin === 'http://127.0.0.1:4173') sessionStorage.setItem('mm_checkout_fixtureuser1234', key)
+  }, retainedRequestKey)
+}
+
+test('offer loading, offline retry and closed checkout are distinct without an invented price', async ({ page }) => {
+  const state = await backend(page, true)
+  let resolveConfig!: () => void
+  state.configWait = new Promise<void>(resolve => { resolveConfig = resolve })
+  await page.goto('/account')
+  await expect(page.getByRole('status')).toContainText('Checking purchase availability')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toHaveCount(0)
+  state.configFails = true; resolveConfig()
+  await expect(page.getByText('Purchase availability could not be checked.')).toBeVisible()
+  await expect(page.getByText('Checkout is not open yet.', { exact: false })).toHaveCount(0)
+  state.configFails = false; state.offer.enabled = false
+  await page.getByRole('button', { name: 'Check purchase availability again' }).click()
+  await expect(page.getByText('Checkout is not open yet.', { exact: false })).toBeVisible()
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+for (const [currency, amount, display] of [['usd', 7900, '$79.00'], ['jpy', 7900, '¥7,900'], ['kwd', 12345, 'KWD 12.345'], ['isk', 1200, 'ISK 12'], ['ugx', 1200, 'UGX 12']] as const) {
+  test(`configured ${currency} price uses Stripe minor units`, async ({ page }) => {
+    const state = await backend(page, true)
+    state.offer.currency = currency; state.offer.amount_minor = amount
+    await page.goto('/account')
+    // Normalize the narrow/no-break spaces Intl inserts for some currencies.
+    await expect(page.locator('p.text-lg.font-semibold')).toBeVisible()
+    const text = await page.locator('p.text-lg.font-semibold').innerText()
+    expect(text.replace(/\s/g, ' ')).toContain(display)
+    await expect(page.getByText('365 days of access · Up to 3 Macs')).toBeVisible()
+    expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+  })
+}
+
+test('cancel return and ambiguous errors preserve the original checkout identity', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  state.checkoutError = 'checkout_unavailable'
+  await page.goto('/account?checkout=cancelled')
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeEnabled()
+  await page.getByRole('button', { name: 'Resume checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('could not be opened')
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Resume checkout' }).click()
+  expect(state.checkoutRequests.map(value => value.request_key)).toEqual([retainedRequestKey, retainedRequestKey])
+  expect(await page.evaluate(() => sessionStorage.getItem('mm_checkout_fixtureuser1234'))).toBe(retainedRequestKey)
+  expect(state.unexpected).toEqual([])
+})
+
+test('processing checkout polls briefly, blocks another payment and refreshes access from the server', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  await page.clock.install()
+  await page.goto('/account?checkout=processing')
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeDisabled()
+  await expect.poll(() => state.statusRequests.length).toBe(1)
+  for (let index = 2; index <= 6; index++) {
+    await page.clock.runFor(3000)
+    await expect.poll(() => state.statusRequests.length).toBe(index)
+  }
+  await expect(page.getByRole('status')).toContainText('Automatic checks have paused')
+  await page.clock.runFor(30000)
+  expect(state.statusRequests).toHaveLength(6)
+  state.status = 'fulfilled'; state.active = true
+  await page.getByRole('button', { name: 'Refresh account' }).click()
+  await expect(page.getByRole('status')).toContainText('Your plan is active')
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toHaveCount(0)
+  expect(state.checkoutRequests).toHaveLength(0)
+  expect(state.statusRequests.every(key => key === retainedRequestKey)).toBe(true)
+  expect(state.unexpected).toEqual([])
+})
+
+test('a return URL without a saved checkout cannot assert payment or open a second checkout', async ({ page }) => {
+  const state = await backend(page, true)
+  await page.goto('/account?checkout=processing')
+  await expect(page.getByRole('status').filter({ hasText: 'cannot identify the original checkout' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Refresh account' }).click()
+  await expect(page.getByText('No active plan', { exact: true })).toBeVisible()
+  expect(state.statusRequests).toHaveLength(0); expect(state.checkoutRequests).toHaveLength(0)
+  expect(state.unexpected).toEqual([])
+})
+
+test('an expiry message or unrecognized checkout cannot authorize replacing a pending payment', async ({ page }) => {
+  const state = await backend(page, true)
+  state.checkoutError = 'checkout_expired'; state.status = 'not_found'
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('expired')
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  state.status = 'failed'; state.statusCanStartNew = true
+  await page.getByRole('button', { name: 'Refresh account' }).click()
+  await page.getByRole('button', { name: 'Start a new checkout attempt' }).click()
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+  expect(await page.evaluate(() => sessionStorage.getItem('mm_checkout_fixtureuser1234'))).toBeNull()
+  expect(state.unexpected).toEqual([])
+})
+
+for (const terminal of ['expired', 'failed'] as const) {
+  test(`a processing return can start anew after server-confirmed ${terminal}`, async ({ page }) => {
+    const state = await backend(page, true)
+    await retainCheckout(page)
+    state.status = terminal; state.statusCanStartNew = true
+    await page.goto('/account?checkout=processing&keep=example')
+    await page.getByRole('button', { name: 'Start a new checkout attempt' }).click()
+    await expect(page).toHaveURL('/account?keep=example')
+    await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+    await expect(page.locator('p.text-lg.font-semibold')).toContainText('$79.00')
+    await page.getByRole('button', { name: 'Continue to checkout' }).click()
+    await expect(page.getByRole('alert')).toContainText('Checkout could not be opened')
+    expect(state.checkoutRequests).toHaveLength(1)
+    expect(state.checkoutRequests[0].request_key).not.toBe(retainedRequestKey)
+    expect(state.unexpected).toEqual([])
+  })
+}
+
+test('resuming a saved order does not substitute the current offer terms', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  state.offer.amount_minor = 9900; state.offer.duration_days = 30; state.offer.max_devices = 1
+  await page.goto('/account?checkout=cancelled')
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeEnabled()
+  await expect(page.getByText('Review its saved price and payment details', { exact: false })).toBeVisible()
+  await expect(page.locator('p.text-lg.font-semibold')).toHaveCount(0)
+  await expect(page.getByText('30 days of access · Up to 1 Mac')).toHaveCount(0)
+  expect(state.unexpected).toEqual([])
+})
+
+
+test('a different browser attempt adopts the owner-scoped existing checkout only on explicit resume', async ({ page }) => {
+  const state = await backend(page, true)
+  state.checkoutError = 'checkout_in_progress'
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeEnabled()
+  expect(state.checkoutRequests).toHaveLength(1)
+  expect(await page.evaluate(() => sessionStorage.getItem('mm_checkout_fixtureuser1234'))).toBe(state.canonicalKey)
+  state.checkoutError = ''
+  await page.getByRole('button', { name: 'Resume checkout' }).click()
+  await expect(page).toHaveURL('https://checkout.stripe.com/c/pay/cs_test_fixture')
+  expect(state.checkoutRequests[1].request_key).toBe(state.canonicalKey)
+  expect(state.unexpected).toEqual([])
+})
+
+test('ambiguous legacy checkouts cannot open another payment or silently replace their key', async ({ page }) => {
+  const state = await backend(page, true)
+  state.checkoutError = 'checkout_attention'
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('button', { name: 'Resume checkout' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Start a new checkout attempt' })).toHaveCount(0)
+  expect(state.checkoutRequests).toHaveLength(1); expect(state.unexpected).toEqual([])
+})
+
+test('saved checkout displays its immutable offer and can verify payment while fresh sales are disabled', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  state.statusOffer = { amount_minor: 2400, currency: 'usd', plan: 'pro', duration_days: 90, max_devices: 2 }
+  state.offer.amount_minor = 9900; state.offer.duration_days = 30; state.offer.max_devices = 1
+  await page.goto('/account?checkout=cancelled')
+  await expect(page.locator('p.text-lg.font-semibold')).toContainText('$24.00')
+  await expect(page.getByText('90 days of access · Up to 2 Macs')).toBeVisible()
+  await expect(page.getByText('30 days of access · Up to 1 Mac')).toHaveCount(0)
+  state.offer.enabled = false
+  await page.goto('/account?checkout=processing')
+  await expect(page.getByText('Checkout is not open yet.', { exact: false })).toBeVisible()
+  state.status = 'fulfilled'; state.active = true
+  await page.getByRole('button', { name: 'Refresh account' }).click()
+  await expect(page.getByRole('status')).toContainText('Your plan is active')
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+
+test('signing out during checkout prevents a late redirect into the previous account payment', async ({ page }) => {
+  const state = await backend(page, true)
+  let release!: () => void
+  state.checkoutWait = new Promise<void>(resolve => { release = resolve })
+  state.checkoutURLOverride = 'https://checkout.stripe.com/c/pay/cs_test_fixture'
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect.poll(() => state.checkoutRequests.length).toBe(1)
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await expect(page).toHaveURL(/\/login\?next=/)
+  const checkoutResponse = page.waitForResponse(response => response.url().endsWith('/api/macmint/checkout'))
+  release()
+  await (await checkoutResponse).finished()
+  await page.getByRole('heading', { name: 'Sign in' }).waitFor()
+  await expect(page).toHaveURL(/\/login\?next=/)
+  expect(state.unexpected).toEqual([])
+})
+
+test('unavailable session storage blocks payment creation with a recoverable explanation', async ({ page }) => {
+  const state = await backend(page, true)
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function(key, value) {
+      if (this === sessionStorage) throw new DOMException('Storage blocked', 'SecurityError')
+      return setItem.call(this, key, value)
+    }
+  })
+  await page.goto('/account')
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('needs browser session storage')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeDisabled()
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+for (const currency of ['isk', 'ugx']) {
+  test(`fractional ${currency} special-case amounts cannot display a misleading offer`, async ({ page }) => {
+    const state = await backend(page, true)
+    state.offer.currency = currency; state.offer.amount_minor = 1250
+    await page.goto('/account')
+    await expect(page.getByText('Purchase availability could not be checked.')).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Continue to checkout' })).toHaveCount(0)
+    expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+  })
+}
+
+
+test('a delayed redemption for the previous user cannot replace the newly signed-in account', async ({ page }) => {
+  const state = await backend(page, true)
+  let release!: () => void
+  state.redeemWait = new Promise<void>(resolve => { release = resolve })
+  await page.goto('/account')
+  await page.getByLabel('Redemption code').fill('MINT-AAAA-BBBB-CCCC-DDDD')
+  await page.getByRole('button', { name: 'Redeem', exact: true }).click()
+  await expect.poll(() => state.redeemRequests).toBe(1)
+  state.currentUser = { ...state.user, id: 'seconduser12345', email: 'second@example.invalid' }
+  await page.evaluate(auth => {
+    const serialized = JSON.stringify(auth)
+    localStorage.setItem('pocketbase_auth', serialized)
+    window.dispatchEvent(new StorageEvent('storage', { key: 'pocketbase_auth', newValue: serialized }))
+  }, { token: state.token, record: state.currentUser })
+  await expect(page.getByText('second@example.invalid', { exact: true })).toBeVisible()
+  await expect(page.getByText('No active plan', { exact: true })).toBeVisible()
+  const redemptionResponse = page.waitForResponse(response => response.url().endsWith('/api/macmint/redeem'))
+  release()
+  await (await redemptionResponse).finished()
+  // An interaction also proves the account view remains responsive after the old reply.
+  await page.getByRole('button', { name: 'Continue to checkout' }).click()
+  await expect(page.getByRole('alert')).toContainText('Checkout could not be opened')
+  await expect(page.getByText('second@example.invalid', { exact: true })).toBeVisible()
+  await expect(page.getByText('No active plan', { exact: true })).toBeVisible()
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0)
+  expect(state.unexpected).toEqual([])
+})
+
+test('payment polling pauses while hidden and resumes with its original finite request budget', async ({ page }) => {
+  const state = await backend(page, true)
+  await retainCheckout(page)
+  await page.clock.install()
+  await page.goto('/account?checkout=processing')
+  await expect.poll(() => state.statusRequests.length).toBe(1)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await page.clock.runFor(15000)
+  expect(state.statusRequests).toHaveLength(1)
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => state.statusRequests.length).toBe(2)
+  for (let index = 3; index <= 6; index++) {
+    await page.clock.runFor(3000)
+    await expect.poll(() => state.statusRequests.length).toBe(index)
+  }
+  await expect(page.getByRole('status')).toContainText('Automatic checks have paused')
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+  await page.clock.runFor(30000)
+  expect(state.statusRequests).toHaveLength(6)
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
 })
