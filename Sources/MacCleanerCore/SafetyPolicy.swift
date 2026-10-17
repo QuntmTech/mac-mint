@@ -1,15 +1,17 @@
 import Foundation
 
 /// The write gate for every removal. Paths are compared in canonical form: parent symlinks are
-/// resolved (so a symlinked folder can't smuggle a protected location in) and comparisons ignore
-/// case, matching APFS's default case-insensitive behaviour.
+/// resolved (so a symlinked folder can't smuggle a protected location in). Authority boundaries
+/// follow the volume's case sensitivity; restrictive category rules also protect case variants.
 public struct SafetyPolicy: Sendable {
   public let homeDirectory: URL
   private let home: String
+  private let scopedHome: String
 
   public init(homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) {
     self.homeDirectory = homeDirectory.standardizedFileURL
     self.home = Self.canonicalPath(of: homeDirectory.standardizedFileURL.resolvingSymlinksInPath())
+    self.scopedHome = FileSystem.comparisonPath(homeDirectory.standardizedFileURL.resolvingSymlinksInPath())
   }
 
   // MARK: Canonical paths
@@ -37,21 +39,35 @@ public struct SafetyPolicy: Sendable {
     roots.contains { inside(path, $0, strict: strict) }
   }
 
-  private var isUnderHomeCheck: (String) -> Bool { { [home] in $0.hasPrefix(home + "/") } }
+  private func isUnderHome(_ url: URL) -> Bool {
+    FileSystem.comparisonPath(url).hasPrefix(scopedHome + "/")
+  }
+
+  private func volumeProblem(for url: URL, within root: URL) -> String? {
+    if let allowed = FileSystem.volumeIdentity(at: root.resolvingSymlinksInPath()),
+      let actual = FileSystem.volumeIdentity(at: url), allowed != actual {
+      return "This item is on a separate mounted volume. MacMint can inspect it, but removal is read-only until volume-specific recovery is supported."
+    }
+    return nil
+  }
 
   // MARK: Decisions
 
   /// Baseline automatic-cleanup policy: only user-owned paths below the home directory,
   /// never system-owned paths, personal content roots, the Trash, or symbolic links.
   public func deletionDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries must be changed through their owning app.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
     if inside(path, roots: personalRoots()) {
       return (false, "Personal-content folders are never automatic-cleanup targets.")
     }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Automatic cleanup is limited to user-owned paths below the home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not automatic-cleanup targets.") }
     return (true, "User-owned path passes the baseline automatic-cleanup policy.")
@@ -106,11 +122,15 @@ public struct SafetyPolicy: Sendable {
   public func developerArtifactDecision(for url: URL, extraRoots: [URL] = []) -> (
     allowed: Bool, reason: String
   ) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries are protected.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) { return (false, "System-owned location is protected by the app.") }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Developer cleanup is limited to your home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not removed.") }
     let extra = DeveloperStorageScanner.validatedRoots(extraRoots, home: homeDirectory).map(canonical)
@@ -128,21 +148,27 @@ public struct SafetyPolicy: Sendable {
 
   /// Applications may be uninstalled from /Applications or ~/Applications, never /System.
   public func appBundleDecision(for url: URL) -> (allowed: Bool, reason: String) {
-    let path = canonical(url)
     guard url.pathExtension.lowercased() == "app" else {
       return (false, "Only application bundles can be uninstalled.")
     }
-    guard inside(path, "/applications", strict: true) || inside(path, homePath("Applications"), strict: true)
+    guard FileSystem.path(url, isInsideOrEqual: URL(fileURLWithPath: "/Applications"))
+      || FileSystem.path(url, isInsideOrEqual: homeDirectory.appendingPathComponent("Applications"))
     else {
       return (false, "This application path is not eligible for uninstall.")
     }
     if isSymlink(url) { return (false, "Symbolic links are not uninstalled.") }
+    let root = FileSystem.path(url, isInsideOrEqual: homeDirectory.appendingPathComponent("Applications"))
+      ? homeDirectory : URL(fileURLWithPath: "/Applications")
+    if let problem = volumeProblem(for: url, within: root) { return (false, problem) }
     return (true, "Application bundle is in an Applications folder.")
   }
 
   /// Explicit-review policy used by Large Files, Duplicates, and Storage. It permits personal
   /// files, but still blocks system/support data, the Trash, and symlinks.
   public func reviewedFileDecision(for url: URL) -> (allowed: Bool, reason: String) {
+    if PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()) {
+      return (false, "Managed photo libraries and their contents are protected. Use Photos or the owning app.")
+    }
     let path = canonical(url)
     if isSystemOwned(path) {
       return (false, "System-owned locations cannot be removed from review tools.")
@@ -153,9 +179,10 @@ public struct SafetyPolicy: Sendable {
         "~/Library is managed by dedicated cleanup and uninstaller modules, not generic file removal."
       )
     }
-    guard isUnderHomeCheck(path) else {
+    guard isUnderHome(url) else {
       return (false, "Reviewed file removal is limited to files inside your home folder.")
     }
+    if let problem = volumeProblem(for: url, within: homeDirectory) { return (false, problem) }
     if isTrash(path) { return (false, "Items already in the Trash are left alone.") }
     if isSymlink(url) { return (false, "Symbolic links are not removed by the review tools.") }
     return (true, "Explicitly reviewed user file passes the safety policy.")

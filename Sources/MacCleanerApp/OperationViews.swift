@@ -7,28 +7,51 @@ struct PlanItemRow: View {
   let item: PlanItem
   var onRemove: (() -> Void)? = nil
   @EnvironmentObject private var model: AppViewModel
+  @State private var expanded = false
+  @State private var childNames: [String] = []
 
   var body: some View {
     HStack(spacing: 11) {
       ZStack {
         RoundedRectangle(cornerRadius: 8, style: .continuous)
-          .fill((item.needsAttention ? Color.orange : AppTheme.accent).opacity(0.12))
+          .fill((item.needsAttention ? AppTheme.warning : AppTheme.accent).opacity(0.12))
           .frame(width: 30, height: 30)
         Image(systemName: Self.icon(for: item.kind))
           .accessibilityHidden(true)
           .font(.system(size: 13, weight: .semibold))
-          .foregroundStyle(item.needsAttention ? Color.orange : AppTheme.accentText)
+          .foregroundStyle(item.needsAttention ? AppTheme.warning : AppTheme.accentText)
       }
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 6) {
           Text(item.displayName).fontWeight(.medium).lineLimit(1)
           if item.needsAttention {
-            StatusPill(title: "Review", icon: "eye.fill", tint: .orange)
+            StatusPill(title: "Review", icon: "eye.fill", tint: AppTheme.warning)
           }
         }
-        Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-        Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+        Text(item.kind.label + " · " + (item.ownerBundleID ?? "Owner not identified"))
+          .font(.caption2).foregroundStyle(.secondary)
+        Text(item.snapshot?.modified.map { "Last changed " + $0.formatted() } ?? "Change time not recorded")
+          .font(.caption2).foregroundStyle(.secondary)
+        Text(item.reason).font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+        Text(item.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
           .truncationMode(.middle)
+        if (try? item.url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+          DisclosureGroup("Inspect folder contents", isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 3) {
+              Text("First 100 direct children; use Finder for the complete folder.").foregroundStyle(.secondary)
+              ForEach(childNames, id: \.self) { Text($0).textSelection(.enabled) }
+            }.font(.caption)
+          }
+          .task(id: expanded) {
+            guard expanded else { return }
+            let url = item.url
+            childNames = await Task.detached(priority: .utility) {
+              do { return Array(try FileManager.default.contentsOfDirectory(atPath: url.path).sorted().prefix(100)) }
+              catch { return ["Contents could not be read: " + error.localizedDescription] }
+            }.value
+          }
+        }
       }
       Spacer(minLength: 8)
       Text(ByteFormatter.string(item.expectedBytes))
@@ -51,7 +74,7 @@ struct PlanItemRow: View {
         .help("Remove from review")
       }
     }
-    .padding(.vertical, 3)
+    .padding(.vertical, 10)
     .accessibilityElement(children: .contain)
   }
 
@@ -82,7 +105,10 @@ struct PlanItemRow: View {
 // MARK: - Review sheet (shown before anything moves)
 
 struct PlanReviewSheet: View {
-  let plan: OperationPlan
+  @State private var plan: OperationPlan
+
+  init(plan: OperationPlan) { _plan = State(initialValue: plan) }
+
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var showExcluded = false
@@ -104,7 +130,17 @@ struct PlanReviewSheet: View {
         List {
           ForEach(grouped, id: \.0) { source, items in
             Section {
-              ForEach(items) { PlanItemRow(item: $0) }
+              ForEach(items, id: \.url) { item in
+                PlanItemRow(item: item, onRemove: { remove(item) })
+                  .contextMenu {
+                    Button("Keep this item") { remove(item) }
+                    Button("Exclude from Future Scans") {
+                      model.ignore(item.url)
+                      remove(item)
+                    }
+                    Button("Show Folder Contents in Finder") { model.reveal(item.url) }
+                  }
+              }
             } header: {
               HStack {
                 Text(source)
@@ -127,31 +163,43 @@ struct PlanReviewSheet: View {
     }
     .frame(width: 720)
     .frame(minHeight: 420, maxHeight: 680)
+    .scrollContentBackground(.hidden).background(AppTheme.canvas)
+  }
+
+  private func remove(_ item: PlanItem) {
+    let remaining = (plan.items + plan.covered).filter {
+      !FileSystem.path($0.url, isInsideOrEqual: item.url)
+    }
+    for removed in (plan.items + plan.covered) where FileSystem.path(removed.url, isInsideOrEqual: item.url) {
+      model.dequeue(removed)
+    }
+    plan = OperationPlanner.plan(title: plan.title, items: remaining,
+      ignoredPaths: model.ignoredPaths, excluded: plan.excluded, protecting: plan.keeperConstraints, validationItems: plan.validationItems)
   }
 
   private var header: some View {
-    HStack(alignment: .top, spacing: 14) {
-      Image(systemName: "trash.circle.fill")
-        .font(.system(size: 38))
-        .foregroundStyle(AppTheme.accentText)
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Review: \(plan.title)").font(.title2.bold())
-        Text(
-          "\(plan.items.count) item\(plan.items.count == 1 ? "" : "s") • \(ByteFormatter.string(plan.totalBytes)) will be moved to the Trash."
-        )
-        .foregroundStyle(.secondary)
-        if !plan.attentionItems.isEmpty {
-          Label(
-            "\(plan.attentionItems.count) item\(plan.attentionItems.count == 1 ? " needs" : "s need") a closer look (\(ByteFormatter.string(plan.attentionBytes))) — personal files, backups, or data that may not be rebuilt.",
-            systemImage: "exclamationmark.triangle.fill"
-          )
-          .font(.callout)
-          .foregroundStyle(.orange)
+    VStack(alignment: .leading, spacing: 18) {
+      HStack(alignment: .top, spacing: 14) {
+        IconTile(symbol: "checklist", size: 46)
+        VStack(alignment: .leading, spacing: 5) {
+          Text("One last look").font(.system(size: 25, weight: .semibold)).tracking(-0.5)
+          Text(plan.title).font(.callout).foregroundStyle(.secondary)
+        }
+        Spacer()
+        VStack(alignment: .trailing, spacing: 4) {
+          Text(ByteFormatter.string(plan.totalBytes)).font(.system(size: 25, weight: .semibold)).monospacedDigit()
+          Text("\(plan.items.count) items · to Trash").font(.caption).foregroundStyle(.secondary)
         }
       }
-      Spacer()
-    }
-    .padding(20)
+      if !plan.attentionItems.isEmpty {
+        Label("\(plan.attentionItems.count) items need a closer look: personal files, backups, or data that may not rebuild.", systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
+          .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+          .background(AppTheme.warning.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+      }
+      Text("Remove anything you want to keep. Only the items below will move.")
+        .font(.callout).foregroundStyle(.secondary)
+    }.padding(24)
   }
 
   private var notes: some View {
@@ -181,7 +229,7 @@ struct PlanReviewSheet: View {
             systemImage: "hand.raised.fill"
           )
           .font(.caption.weight(.semibold))
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
         }
       }
     }
@@ -193,7 +241,7 @@ struct PlanReviewSheet: View {
   private var footer: some View {
     HStack {
       Label(
-        "Everything goes to the Trash and can be restored from History.",
+        "Files go to Trash. Restore is available while the recorded items remain there.",
         systemImage: "arrow.uturn.backward.circle"
       )
       .font(.caption)
@@ -206,7 +254,7 @@ struct PlanReviewSheet: View {
       } label: {
         Text("Move \(plan.items.count) Item\(plan.items.count == 1 ? "" : "s") to Trash")
       }
-      .buttonStyle(.borderedProminent)
+      .buttonStyle(MintButtonStyle())
       .keyboardShortcut(.defaultAction)
       .disabled(plan.isEmpty)
     }
@@ -221,7 +269,7 @@ struct OperationReportSheet: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
 
-  private var allGood: Bool { report.problems.isEmpty && !report.wasCancelled }
+  private var allGood: Bool { report.problems.isEmpty && !report.wasCancelled && report.persistenceError == nil }
 
   var body: some View {
     VStack(spacing: 0) {
@@ -234,9 +282,9 @@ struct OperationReportSheet: View {
             .font(.title2.bold())
           Text(report.summary + ".")
             .foregroundStyle(.secondary)
-          Text("Space is freed when you empty the Trash.")
+          Text("Moving to Trash may not change free space. Emptying Trash, snapshots, clones, and cloud storage affect the eventual savings.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
         }
         Spacer()
       }
@@ -246,7 +294,7 @@ struct OperationReportSheet: View {
         Divider()
         List {
           if !report.problems.isEmpty {
-            Section("Skipped") {
+            Section("Items needing attention") {
               ForEach(report.problems) { outcome in
                 VStack(alignment: .leading, spacing: 2) {
                   Text(outcome.item.displayName).fontWeight(.medium)
@@ -271,9 +319,9 @@ struct OperationReportSheet: View {
           Button {
             model.undo(report)
           } label: {
-            Label("Undo", systemImage: "arrow.uturn.backward")
+            Label("Restore items", systemImage: "arrow.uturn.backward")
           }
-          .help("Put every moved item back where it was")
+          .help("Attempt to restore moved items to their original locations without overwriting existing files")
         }
         Button("Show History") {
           model.selectedSection = .history
@@ -281,7 +329,7 @@ struct OperationReportSheet: View {
         }
         Spacer()
         Button("Done") { dismiss() }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MintButtonStyle())
           .keyboardShortcut(.defaultAction)
       }
       .padding(16)
@@ -305,26 +353,16 @@ struct ReviewQueueView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(alignment: .center, spacing: 14) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Review").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Everything you've selected across Cleaner, Storage, Developer & AI, Duplicates, and Large Files — in one place.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
-        if model.queuedCount > 0 {
-          Button("Clear All") { model.clearQueue() }
-          Button {
-            model.reviewEverything()
-          } label: {
-            if model.isPreparingPlan {
-              ProgressView().controlSize(.small)
-            } else {
-              Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist")
-            }
+      PageHeader(title: "Your review queue", subtitle: "Selections from across MacMint, together in one place. Nothing has moved yet.") {
+        HStack(spacing: 8) {
+          if model.queuedCount > 0 {
+            Button("Clear selection") { model.clearQueue() }.buttonStyle(MintButtonStyle(prominent: false))
+            Button { model.reviewEverything() } label: {
+              if model.isPreparingPlan { ProgressView().controlSize(.small) }
+              else { Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist") }
+            }.buttonStyle(MintButtonStyle())
+              .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
           }
-          .buttonStyle(.borderedProminent)
-          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
         }
       }
       .padding(AppTheme.pagePadding)
@@ -333,12 +371,13 @@ struct ReviewQueueView: View {
       if model.queuedCount == 0 {
         EmptyState(
           icon: "checklist", title: "Nothing selected yet",
-          detail: "Select items in Cleaner, Storage, Developer & AI, Duplicates, or Large Files and they'll gather here for one final review.")
+          detail: "Select items in Cleanup, Storage, Developer, Duplicates, or Large Files. They’ll gather here for your final review.",
+          actionTitle: "Explore Cleanup", action: { model.selectedSection = .cleaner })
       } else {
         List {
           ForEach(grouped, id: \.0) { source, items in
             Section {
-              ForEach(items) { item in
+              ForEach(items, id: \.url) { item in
                 PlanItemRow(item: item) { model.dequeue(item) }
               }
             } header: {
@@ -353,5 +392,31 @@ struct ReviewQueueView: View {
         .listStyle(.inset)
       }
     }
+  }
+}
+
+
+struct RestoreConflictsSheet: View {
+  @EnvironmentObject private var model: AppViewModel
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Restore needs attention").font(.title2.bold())
+      Text("Choose what to do with each item. Existing files are never overwritten.")
+        .foregroundStyle(.secondary)
+      List(model.restoreConflicts) { conflict in
+        VStack(alignment: .leading, spacing: 6) {
+          Text(conflict.receipt.originalPath).font(.callout.weight(.medium)).textSelection(.enabled)
+          Text(conflict.message).font(.caption).foregroundStyle(.secondary)
+          HStack {
+            Button("Restore Elsewhere…") { model.restoreElsewhere(conflict) }
+            Button("Show in Trash") { model.revealInTrash(conflict.receipt) }
+            Button("Skip") { model.skipRestoreConflict(conflict) }
+          }.disabled(model.isWorking)
+        }.padding(.vertical, 5)
+      }
+      Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+    }.padding(20).frame(width: 680, height: 460)
   }
 }

@@ -15,6 +15,7 @@ enum PhotoSource: Equatable {
 }
 
 enum PhotoTab: String, CaseIterable, Identifiable {
+  case deck = "Review deck"
   case similar = "Similar"
   case blurry = "Blurry"
   case screenshots = "Screenshots"
@@ -35,10 +36,10 @@ extension AppViewModel {
   }
 
   func group(containing photo: PhotoFingerprint) -> SimilarPhotoGroup? {
-    photoScan?.similarGroups.first { group in group.photos.contains { $0.id == photo.id } }
+    photoScan?.group(containing: photo.id)
   }
 
-  var selectedPhotos: [PhotoFingerprint] { allScannedPhotos.filter { selectedPhotoIDs.contains($0.id) } }
+  var selectedPhotos: [PhotoFingerprint] { photoScan?.selectedPhotos(ids: selectedPhotoIDs) ?? [] }
 
   var selectedPhotoBytes: Int64 { selectedPhotos.reduce(0) { $0 + $1.bytes } }
 
@@ -59,7 +60,7 @@ extension AppViewModel {
       } else if photo.isScreenshot {
         reason = "Screenshot you chose to remove."
       } else {
-        reason = "Blurry photo you chose to remove."
+        reason = "Photo you chose to remove."
       }
       if let item = PlanItem.photo(photo, keeper: kept, reason: reason) { items.append(item) }
     }
@@ -77,7 +78,7 @@ extension AppViewModel {
   func scanPhotos() {
     guard !isScanning, !isWorking else { return }
     let source = photoSource
-    beginScan(title: "Photos", message: "Looking for similar, blurry, and screenshot photos…")
+    guard beginScan(title: "Photos", message: "Looking for similar, blurry, and screenshot photos…") else { return }
     photoProgress = (0, 0)
 
     currentTask = Task { [weak self] in
@@ -97,11 +98,15 @@ extension AppViewModel {
           finishScan(message: "MacMint needs access to Photos — allow it in System Settings ▸ Privacy & Security ▸ Photos")
           return
         }
-        let photos = await PhotoLibraryService.fingerprints(progress: report)
-        result = PhotoScanResult(
-          photos: photos, similarGroups: PhotoAnalysis.group(photos),
-          blurry: PhotoAnalysis.blurry(photos), screenshots: [], skippedLibraries: [], issues: [],
-          wasCancelled: Task.isCancelled)
+        let library = await PhotoLibraryService.fingerprints(progress: report)
+        let issues = library.total > library.photos.count ? [ScanIssue(area: "Photos", path: nil, severity: .info,
+          message: "\(library.total - library.photos.count) library assets could not be analyzed from local thumbnails. Cloud-only, unreadable or unsupported items may be omitted. No cloud downloads were requested.")] : []
+        let analysis = Task.detached(priority: .userInitiated) {
+          PhotoScanResult(photos: library.photos, similarGroups: PhotoAnalysis.group(library.photos),
+            blurry: PhotoAnalysis.blurry(library.photos), screenshots: [], skippedLibraries: [], issues: issues,
+            wasCancelled: Task.isCancelled)
+        }
+        result = await withTaskCancellationHandler(operation: { await analysis.value }, onCancel: { analysis.cancel() })
       case .folder(let url):
         result = await PhotoScanner().scan([url], ignoredPaths: ignoredPaths, progress: report)
       }
@@ -125,6 +130,7 @@ extension AppViewModel {
   // MARK: Selection
 
   func togglePhoto(_ photo: PhotoFingerprint) {
+    if !photo.isLibraryAsset { setFileSelection(photo.url, selected: !selectedPhotoIDs.contains(photo.id)); return }
     if selectedPhotoIDs.contains(photo.id) {
       selectedPhotoIDs.remove(photo.id)
       return
@@ -140,13 +146,15 @@ extension AppViewModel {
   func keepInstead(_ photo: PhotoFingerprint) {
     guard let group = group(containing: photo) else { return }
     photoKeeperOverrides[group.id] = photo.id
-    selectedPhotoIDs.remove(photo.id)
+    if photo.isLibraryAsset { selectedPhotoIDs.remove(photo.id) } else { setFileSelection(photo.url, selected: false) }
   }
 
   /// Selects every shot except the kept one — only when the user asks.
   func selectAllButKeeper(in group: SimilarPhotoGroup) {
     let kept = keeper(of: group).id
-    for photo in group.photos where photo.id != kept { selectedPhotoIDs.insert(photo.id) }
+    for photo in group.photos where photo.id != kept {
+      if photo.isLibraryAsset { selectedPhotoIDs.insert(photo.id) } else { setFileSelection(photo.url, selected: true) }
+    }
   }
 
   // MARK: Removing
@@ -165,7 +173,7 @@ extension AppViewModel {
   /// Library photos go through Photos itself (system confirmation, Recently Deleted for 30 days).
   func deleteSelectedLibraryPhotos() async {
     let assets = selectedPhotos.filter(\.isLibraryAsset)
-    guard !assets.isEmpty, !isWorking else { return }
+    guard !assets.isEmpty, !isWorking, requirePaidAccess() else { return }
     isWorking = true
     operationTitle = "Photos"
     statusMessage = "Waiting for your confirmation in Photos…"
@@ -174,7 +182,11 @@ extension AppViewModel {
       operationTitle = nil
     }
     do {
-      let deleted = try await PhotoLibraryService.delete(assetIDs: assets.compactMap(\.assetID))
+      let selectedIDs = Set(assets.map(\.id))
+      let keepers = (photoScan?.similarGroups ?? []).filter { group in
+        group.photos.contains { selectedIDs.contains($0.id) }
+      }.compactMap { keeper(of: $0).assetID }
+      let deleted = try await PhotoLibraryService.delete(assetIDs: assets.compactMap(\.assetID), protecting: keepers)
       guard deleted else {
         statusMessage = "Nothing was deleted"
         return
@@ -183,7 +195,7 @@ extension AppViewModel {
       await record(
         HistoryEntry(
           action: "Photos: \(assets.count) moved to Recently Deleted", paths: [], bytes: bytes,
-          notes: "Restore them from Photos ▸ Recently Deleted within 30 days."))
+          notes: "Restore through Photos ▸ Recently Deleted while available. Deletion can sync to other devices. Local byte savings are unavailable from Photos.", recoveryKind: .photos))
       let ids = Set(assets.map(\.id))
       removePhotos { ids.contains($0.id) }
       statusMessage = "\(assets.count) photo\(assets.count == 1 ? "" : "s") moved to Photos ▸ Recently Deleted"
@@ -196,6 +208,7 @@ extension AppViewModel {
   func removePhotos(where shouldRemove: (PhotoFingerprint) -> Bool) {
     guard let scan = photoScan else { return }
     let photos = scan.photos.filter { !shouldRemove($0) }
+    guard photos.count != scan.photos.count else { return }
     let remaining = Set(photos.map(\.id))
     let groups = scan.similarGroups.compactMap { group -> SimilarPhotoGroup? in
       let members = group.photos.filter { remaining.contains($0.id) }
@@ -219,16 +232,8 @@ extension AppViewModel {
   }
 
   func emptyTrash() {
-    do {
-      let freed = try TrashBinService.empty()
-      statusMessage =
-        freed > 0 ? "Trash emptied — \(ByteFormatter.string(freed)) freed" : "Trash emptied"
-    } catch {
-      statusMessage = error.localizedDescription
-    }
-    refreshTrashStatus()
-    // Receipts that pointed into the Trash are now unrestorable; redraw History's buttons.
-    Task { history = await historyStore.load() }
+    NSWorkspace.shared.open(TrashBinService.trashURL)
+    statusMessage = "Review Trash in Finder. Emptying it permanently erases items and prevents Restore."
   }
 
   // MARK: Removed apps
@@ -237,7 +242,7 @@ extension AppViewModel {
 
   func scanOrphans() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Removed Apps", message: "Looking for data left by apps you've removed…")
+    guard beginScan(title: "Removed Apps", message: "Looking for data left by apps you've removed…") else { return }
     let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     let scanner = OrphanScanner()
     currentTask = Task { [weak self] in

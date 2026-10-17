@@ -4,7 +4,7 @@ import SwiftUI
 struct StartupItemsView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
-  @State private var search = ""
+  @SceneStorage("startup.search") private var search = ""
 
   private var filtered: [StartupItem] {
     search.isEmpty
@@ -18,29 +18,22 @@ struct StartupItemsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Startup Items").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text(
-            "A read-only inventory of launch agents and daemons. System changes remain outside the base app's trust boundary."
-          )
-          .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Startup Items", subtitle: "Inspect declared launch settings. Open Login Items to manage what starts with your Mac.") {
+        HStack(spacing: 8) {
         StatusPill(
           title: "\(model.startupItems.count) items", icon: "bolt.horizontal.circle",
           tint: AppTheme.accentText)
-        Button("Open System Settings") { model.openSystemSettings() }
+        Button("Open System Settings") { model.openLoginItemsSettings() }
         Button("Refresh") { model.runSmartScan() }
           .disabled(model.isScanning || model.isWorking)
+      }
       }
       .padding(AppTheme.pagePadding)
 
       Divider()
 
       HStack {
-        TextField("Search startup items", text: $search)
-          .textFieldStyle(.roundedBorder)
+        SearchField(prompt: "Search startup items", text: $search)
           .frame(maxWidth: 340)
         Spacer()
         Text("Read-only")
@@ -49,7 +42,7 @@ struct StartupItemsView: View {
       }
       .padding(.horizontal, AppTheme.pagePadding)
       .padding(.vertical, 12)
-      .background(.bar)
+      .background(AppTheme.surface)
 
       Divider()
 
@@ -69,17 +62,18 @@ struct StartupItemsView: View {
             }
             VStack(alignment: .leading, spacing: 3) {
               Text(item.label).fontWeight(.medium)
+              Text(possibleOwner(item.label)).font(.caption2).foregroundStyle(.secondary)
               Text(item.program ?? item.url.path)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             }
             Spacer()
-            if item.disabled { StatusPill(title: "Disabled", icon: "pause.circle") }
+            if item.disabled { StatusPill(title: "Declared disabled", icon: "pause.circle") }
             if item.runAtLoad {
-              StatusPill(title: "Run at load", icon: "arrow.clockwise", tint: .orange)
+              StatusPill(title: "Requests run at load", icon: "arrow.clockwise", tint: AppTheme.warning)
             }
-            if item.keepAlive { StatusPill(title: "Keep alive", icon: "heart.fill", tint: .red) }
+            if item.keepAlive { StatusPill(title: "Requests keep alive", icon: "heart.fill", tint: AppTheme.danger) }
             Text(item.scope)
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -92,7 +86,7 @@ struct StartupItemsView: View {
             }
             .buttonStyle(.plain)
             .help("Reveal property list in Finder")
-            if account.aiAvailable {
+            if account.aiStatus.allows("explain") {
               Button {
                 model.explain(model.aiTarget(for: item))
               } label: {
@@ -109,4 +103,12 @@ struct StartupItemsView: View {
       }
     }
   }
+  private func possibleOwner(_ label: String) -> String {
+    let matches = model.apps.filter { app in
+      guard let id = app.bundleIdentifier else { return false }
+      return label == id || label.hasPrefix(id + ".")
+    }
+    return matches.first.map { "Possible owner: " + $0.name } ?? "Owner not identified"
+  }
+
 }

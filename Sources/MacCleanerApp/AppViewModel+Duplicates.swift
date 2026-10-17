@@ -21,8 +21,8 @@ extension AppViewModel {
       choosePreferredDuplicateFolder()
       guard !duplicatePreferredFolders.isEmpty else { return }
     }
-    selectedDuplicateIDs = DuplicateKeeper.copiesToSelect(
-      in: duplicateGroups, rule: rule, preferredFolders: duplicatePreferredFolders)
+    applyDuplicateSelection(DuplicateKeeper.copiesToSelect(
+      in: duplicateGroups, rule: rule, preferredFolders: duplicatePreferredFolders))
     statusMessage = "\(rule.rawValue): \(selectedDuplicateIDs.count) copies selected for review"
   }
 

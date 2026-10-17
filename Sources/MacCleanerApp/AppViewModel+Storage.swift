@@ -24,13 +24,13 @@ extension AppViewModel {
   func scanStorage() {
     guard !isScanning, !isWorking else { return }
     let root = storageRoot
-    beginScan(title: "Storage", message: "Mapping \(root.lastPathComponent)…")
+    guard beginScan(title: "Storage", message: "Mapping \(root.lastPathComponent)…") else { return }
     storageScannedCount = 0
     let scanner = StorageTreeScanner()
 
     currentTask = Task { [weak self] in
       guard let self else { return }
-      let scan = await scanner.scan(root) { count, _ in
+      let scan = await scanner.scan(root, ignoredPaths: ignoredPaths) { count, _ in
         Task { @MainActor [weak self] in
           guard let self, self.isScanning else { return }
           self.storageScannedCount = count
@@ -68,13 +68,16 @@ extension AppViewModel {
     storagePath = node.id
   }
 
+  func storageRemovalAllowed(_ node: StorageNode) -> Bool {
+    node.isActionable && safetyPolicy.reviewedFileDecision(for: node.url).allowed
+      && !FileSystem.containsIgnoredDescendant(node.url, ignoredPaths: ignoredPaths)
+  }
+
   func toggleStorageSelection(_ node: StorageNode) {
-    guard node.isActionable else { return }
-    if selectedStoragePaths.contains(node.id) {
-      selectedStoragePaths.remove(node.id)
-    } else {
-      selectedStoragePaths.insert(node.id)
+    guard storageRemovalAllowed(node) else {
+      statusMessage = "This location can be inspected. Generic removal is limited to eligible items in your home folder."; return
     }
+    setFileSelection(node.url, selected: !selectedStoragePaths.contains(node.id))
   }
 
   func reviewStorageSelection() {

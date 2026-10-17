@@ -5,18 +5,19 @@ struct PerformanceView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var monitor: SystemMonitor
   @State private var pendingQuit: SystemMonitor.AppUsage?
+  @Environment(\.scenePhase) private var scenePhase
+  @State private var monitoringLease = UUID()
+  @State private var paused = false
+  @State private var search = ""
+  @State private var sortByCPU = false
+  @State private var forceQuit = false
   @State private var insights: DiskInsights?
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Performance").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Live readings, refreshed every few seconds while this screen is open.")
-            .foregroundStyle(.secondary)
-        }
-
-        HStack(spacing: 14) {
+        PageHeader("Performance", subtitle: "Live readings, with context that helps you decide when to act.")
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
           gauge(
             "Memory pressure", value: monitor.snapshot.pressure.rawValue,
             detail: memoryDetail, icon: "memorychip", tint: pressureTint)
@@ -25,14 +26,26 @@ struct PerformanceView: View {
             detail: "Across all cores", icon: "cpu", tint: AppTheme.accentText)
           gauge(
             "Swap", value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
-            detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: .blue)
+            detail: "Memory written to disk", icon: "arrow.left.arrow.right", tint: AppTheme.info)
           gauge(
             "Free space", value: ByteFormatter.string(monitor.snapshot.freeBytes),
             detail: "of \(ByteFormatter.string(monitor.snapshot.totalBytes))", icon: "internaldrive",
-            tint: monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accentText)
+            tint: monitor.snapshot.diskUsedFraction > 0.9 ? AppTheme.warning : AppTheme.accentText)
         }
 
+        processCard
         diskInsightsCard
+        SurfaceCard {
+          VStack(alignment: .leading, spacing: 8) {
+            Text("When to take action").font(.headline)
+            Text("Short CPU spikes during builds or photo analysis are normal. If CPU stays high while the Mac is slow, inspect Activity Monitor. If free space stays below 10%, review storage. Quit unused apps when memory pressure remains elevated.")
+              .font(.callout).foregroundStyle(.secondary)
+            HStack {
+              Button("Review Storage") { model.selectedSection = .storage }
+              Button("Open Activity Monitor") { model.openActivityMonitor() }
+            }
+          }
+        }
 
         SurfaceCard {
           VStack(alignment: .leading, spacing: 10) {
@@ -46,53 +59,85 @@ struct PerformanceView: View {
           }
         }
 
-        SurfaceCard {
-          VStack(alignment: .leading, spacing: 10) {
-            Text("Apps using the most memory").font(.headline)
-            if monitor.topApps.isEmpty {
-              Text("Measuring…").foregroundStyle(.secondary)
-            }
-            ForEach(monitor.topApps) { app in
-              HStack(spacing: 10) {
-                if let icon = app.icon {
-                  Image(nsImage: icon).resizable().frame(width: 22, height: 22)
-                } else {
-                  Image(systemName: "app").frame(width: 22, height: 22)
-                }
-                Text(app.name)
-                Spacer()
-                Text(ByteFormatter.string(app.memoryBytes))
-                  .font(.callout.monospacedDigit())
-                  .foregroundStyle(.secondary)
-                if app.bundleID != Bundle.main.bundleIdentifier {
-                  Button("Quit…") { pendingQuit = app }
-                    .controlSize(.small)
-                }
-              }
-              if app.id != monitor.topApps.last?.id { Divider() }
-            }
-          }
-        }
+
       }
       .padding(AppTheme.pagePadding)
     }
-    .onAppear { monitor.start() }
+    .onAppear { updateMonitoring() }
+    .onChange(of: scenePhase) { _, _ in updateMonitoring() }
+    .onChange(of: paused) { _, _ in updateMonitoring() }
     .task { insights = await DiskInsightsService.load() }
-    .onDisappear { monitor.stop() }
+    .onDisappear { monitor.stop(lease: monitoringLease) }
     .alert(
-      "Quit \(pendingQuit?.name ?? "app")?",
+      "\(forceQuit ? "Force quit" : "Quit") \(pendingQuit?.name ?? "app")?",
       isPresented: Binding(get: { pendingQuit != nil }, set: { if !$0 { pendingQuit = nil } }),
       presenting: pendingQuit
     ) { app in
       Button("Cancel", role: .cancel) {}
-      Button("Quit") {
+      Button(forceQuit ? "Force Quit" : "Quit", role: forceQuit ? .destructive : nil) {
         model.statusMessage =
-          monitor.requestQuit(app)
-          ? "Asked \(app.name) to quit — it may ask you to save first"
-          : "\(app.name) didn't respond to the quit request"
+          monitor.requestQuit(app, force: forceQuit)
+          ? (forceQuit ? "Sent a force-quit request to \(app.name)" : "Asked \(app.name) to quit — it may ask you to save first")
+          : "The app changed, exited, or refused the request. Refresh and try again."
       }
     } message: { _ in
-      Text("The app is asked to quit normally, so it can prompt you to save any unsaved work.")
+      Text(forceQuit ? "Unsaved changes may be lost. Use Force Quit only when normal Quit has not worked." : "The app is asked to quit normally, so it can prompt you to save any unsaved work.")
+    }
+  }
+
+  private func updateMonitoring() {
+    if !paused && scenePhase == .active { monitor.start(lease: monitoringLease) }
+    else { monitor.stop(lease: monitoringLease) }
+  }
+
+  private var visibleApps: [SystemMonitor.AppUsage] {
+    monitor.apps.filter { search.isEmpty || $0.name.localizedCaseInsensitiveContains(search) }
+      .sorted {
+        let left = sortByCPU ? ($0.cpuPercent ?? -1) : Double($0.memoryBytes)
+        let right = sortByCPU ? ($1.cpuPercent ?? -1) : Double($1.memoryBytes)
+        return left == right ? $0.name < $1.name : left > right
+      }
+  }
+
+  private var processCard: some View {
+    let displayed = visibleApps
+    return SurfaceCard {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Label("Running apps", systemImage: "waveform.path.ecg").font(.headline)
+          Spacer()
+          Button(paused ? "Resume" : "Pause") { paused.toggle() }.controlSize(.small)
+        }
+        HStack {
+          SearchField(prompt: "Find an app", text: $search)
+          Picker("Sort apps", selection: $sortByCPU) { Text("Memory").tag(false); Text("CPU").tag(true) }
+            .pickerStyle(.segmented).labelsHidden().frame(width: 170)
+        }
+        Text(paused ? "Readings paused in this window. The menu bar may continue sampling while open." : "Main app processes · 100% CPU equals one core · refreshes every \(Int(monitor.samplingInterval ?? 4)) seconds")
+          .font(.caption).foregroundStyle(.secondary)
+        if displayed.isEmpty { Text(search.isEmpty ? "Waiting for a sample…" : "No matching apps").foregroundStyle(.secondary) }
+        ForEach(displayed) { app in
+          HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(app.name).font(.callout.weight(.medium))
+              Text("PID \(app.id)").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(app.cpuPercent.map { String(format: "%.1f%%", $0) } ?? "—")
+              .font(.callout.monospacedDigit()).frame(width: 70, alignment: .trailing).accessibilityLabel("CPU")
+            Text(ByteFormatter.string(app.memoryBytes)).font(.callout.monospacedDigit())
+              .frame(width: 85, alignment: .trailing).accessibilityLabel("Memory")
+            Menu {
+              Button("Quit…") { forceQuit = false; pendingQuit = app }
+              Button("Force Quit…", role: .destructive) { forceQuit = true; pendingQuit = app }
+            } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("Actions for " + app.name) }
+              .menuStyle(.borderlessButton).fixedSize().disabled(!app.canControl)
+          }
+          if app.id != displayed.last?.id { Divider() }
+        }
+        Text("Helper processes are shown in Activity Monitor. MacMint reduces its sampling in Low Power Mode and when your Mac is hot.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
     }
   }
 
@@ -107,7 +152,7 @@ struct PerformanceView: View {
             detail: insights.health == .failing
               ? "The drive reports it may fail soon. Back up now with Time Machine."
               : "Reported by the drive's self-monitoring (SMART).",
-            tint: insights.health == .failing ? .red : insights.health == .verified ? .green : .secondary)
+            tint: insights.health == .failing ? AppTheme.danger : insights.health == .verified ? AppTheme.accentText : .secondary)
           if let fs = insights.fileSystem {
             insightRow("File system", value: fs, detail: "Copies of a file on APFS can share space, so freed space may be less than a file's size.", tint: .secondary)
           }
@@ -150,9 +195,9 @@ struct PerformanceView: View {
 
   private var pressureTint: Color {
     switch monitor.snapshot.pressure {
-    case .normal: return .green
-    case .warning: return .orange
-    case .critical: return .red
+    case .normal: return AppTheme.accentText
+    case .warning: return AppTheme.warning
+    case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
   }

@@ -18,8 +18,8 @@ public actor SmartScanService {
   public func scan(ignoredPaths: Set<String> = []) async -> ScanSummary {
     let started = Date()
     async let cleanup = cleanupScanner.scanReport(ignoredPaths: ignoredPaths)
-    async let apps = appScanner.installedAppsReport()
-    async let startup = startupScanner.scanReport()
+    async let apps = appScanner.installedAppsReport(ignoredPaths: ignoredPaths)
+    async let startup = startupScanner.scanReport(ignoredPaths: ignoredPaths)
     let (cleanupReport, appReport, startupReport) = await (cleanup, apps, startup)
 
     let targets = cleanupReport.value

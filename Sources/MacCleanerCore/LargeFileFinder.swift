@@ -35,6 +35,7 @@ public actor LargeFileFinder {
           value: sorted(found, limit: limit), issues: collector.issues,
           duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(root.resolvingSymlinksInPath()) { continue }
       guard fileManager.fileExists(atPath: root.path) else {
         collector.append(
           ScanIssue(
@@ -63,7 +64,7 @@ public actor LargeFileFinder {
 
       FileSystem.walk(enumerator) { url in
         if Task.isCancelled { return .stop }
-        if shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
+        if PhotoAnalysis.isInsideLibraryPackage(url) || shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
           return isDirectory(url) ? .skipDescendants : .continue
         }
         guard let meta = FileSystem.fileMetadata(at: url), meta.size >= minimumSize else {

@@ -107,8 +107,11 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
     PlanItem(
       url: target.url, displayName: target.displayName,
       kind: .cleanupTarget(category: target.category, risk: target.risk),
-      expectedBytes: target.size, reason: target.reason, source: source,
-      needsAttention: target.risk != .safe,
+      expectedBytes: target.size,
+      reason: target.category == .developerJunk
+        ? target.reason + " Activity may be incomplete for this aggregate target. Prefer individual Developer findings."
+        : target.reason, source: source,
+      needsAttention: target.risk != .safe || target.category == .developerJunk,
       identity: target.identity, ownerBundleID: target.ownerBundleID)
   }
 
@@ -176,6 +179,12 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
   }
 }
 
+public struct KeeperConstraint: Hashable, Sendable {
+  public let source: URL
+  public let keeper: KeeperSnapshot
+  public init(source: URL, keeper: KeeperSnapshot) { self.source = source; self.keeper = keeper }
+}
+
 public struct OperationPlan: Identifiable, Sendable {
   public let id: UUID
   public let title: String
@@ -184,16 +193,23 @@ public struct OperationPlan: Identifiable, Sendable {
   public let covered: [PlanItem]
   /// Selected items that cannot be part of this plan, with the reason.
   public let excluded: [OperationFailure]
+  /// Constraints survive collapsing a selected file into a selected ancestor.
+  public let keeperConstraints: [KeeperConstraint]
+  public let validationItems: [PlanItem]
 
   public init(
     id: UUID = UUID(), title: String, items: [PlanItem], covered: [PlanItem] = [],
-    excluded: [OperationFailure] = []
+    excluded: [OperationFailure] = [], protecting: [KeeperConstraint] = [], validationItems: [PlanItem] = []
   ) {
     self.id = id
     self.title = title
     self.items = items
     self.covered = covered
     self.excluded = excluded
+    self.validationItems = validationItems
+    self.keeperConstraints = protecting + (items + covered).compactMap { item in
+      item.keeper.map { KeeperConstraint(source: item.url, keeper: $0) }
+    }
   }
 
   public var totalBytes: Int64 { items.reduce(0) { $0 + $1.expectedBytes } }
@@ -212,12 +228,19 @@ public enum OperationPlanner {
   /// and moves anything currently excluded into `excluded` so it is never acted on.
   public static func plan(
     title: String, items: [PlanItem], ignoredPaths: Set<String> = [],
-    excluded: [OperationFailure] = []
+    excluded: [OperationFailure] = [], protecting: [KeeperConstraint] = [], validationItems: [PlanItem] = []
   ) -> OperationPlan {
     var rejected = excluded
     var eligible: [PlanItem] = []
     for item in items {
-      if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
+      if protecting.contains(where: { FileSystem.path(URL(fileURLWithPath: $0.keeper.path), isInsideOrEqual: item.url) }) {
+        rejected.append(OperationFailure(url: item.url, message: "This selection includes a copy you are keeping in Duplicates or Photos. Choose another keeper or select smaller items."))
+      } else if case .cleanupTarget(_, .safe) = item.kind, validationItems.contains(where: { child in
+        guard case .developerArtifact = child.kind else { return false }
+        return child.needsAttention && FileSystem.path(child.url, isInsideOrEqual: item.url)
+      }) {
+        rejected.append(OperationFailure(url: item.url, message: "This broad target includes recent or hard-to-recreate developer data. Review individual items in Developer."))
+      } else if FileSystem.isIgnored(item.url, ignoredPaths: ignoredPaths) {
         rejected.append(OperationFailure(url: item.url, message: "Item is on your exclusion list."))
       } else if FileSystem.containsIgnoredDescendant(item.url, ignoredPaths: ignoredPaths) {
         rejected.append(
@@ -226,6 +249,23 @@ public enum OperationPlanner {
       } else {
         eligible.append(item)
       }
+    }
+
+    // Reject the ancestor, rather than merely hiding the duplicate it covers. Otherwise
+    // selecting one folder can discard the last-copy protection along with its child row.
+    let constraints = eligible.compactMap { item in
+      item.keeper.map { KeeperConstraint(source: item.url, keeper: $0) }
+    }
+    eligible.removeAll { item in
+      let threatensBoth = constraints.contains {
+        FileSystem.path($0.source, isInsideOrEqual: item.url)
+          && FileSystem.path(URL(fileURLWithPath: $0.keeper.path), isInsideOrEqual: item.url)
+      }
+      if threatensBoth {
+        rejected.append(OperationFailure(url: item.url,
+          message: "This selection contains both a selected copy and the copy being kept. Choose smaller selections."))
+      }
+      return threatensBoth
     }
 
     // Parents first, so a child whose ancestor is already planned is recognised as covered.
@@ -238,7 +278,7 @@ public enum OperationPlanner {
     var keptIDs: Set<UUID> = []
     var covered: [PlanItem] = []
     for (_, item) in ordered {
-      let path = item.url.standardizedFileURL.path
+      let path = FileSystem.comparisonPath(item.url)
       if keptPaths.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
         covered.append(item)
       } else {
@@ -253,7 +293,8 @@ public enum OperationPlanner {
     // (selected directly, or inside a selected folder, from any screen).
     kept.removeAll { item in
       guard let keeper = item.keeper?.path else { return false }
-      let threatened = keptPaths.contains { keeper == $0 || keeper.hasPrefix($0 + "/") }
+      let key = FileSystem.comparisonPath(URL(fileURLWithPath: keeper))
+      let threatened = keptPaths.contains { key == $0 || key.hasPrefix($0 + "/") }
       if threatened {
         rejected.append(
           OperationFailure(
@@ -262,6 +303,6 @@ public enum OperationPlanner {
       }
       return threatened
     }
-    return OperationPlan(title: title, items: kept, covered: covered, excluded: rejected)
+    return OperationPlan(title: title, items: kept, covered: covered, excluded: rejected, protecting: protecting, validationItems: validationItems)
   }
 }

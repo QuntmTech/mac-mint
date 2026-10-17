@@ -12,14 +12,10 @@ final class AIAssistantTests: XCTestCase {
   // MARK: Anonymization
 
   func testSanitizeStripsAccountNameAndEmailsAndDropsOutsidePaths() {
-    XCTAssertEqual(
-      AIContextBuilder.sanitize("/Users/coltonwood/Documents/coltonwood-taxes", home: home),
-      "~/Documents/user-taxes")
-    XCTAssertEqual(
-      AIContextBuilder.sanitize("/Users/coltonwood/Library/Mail/jane.doe@example.com/INBOX", home: home),
-      "~/Library/Mail/[email]/INBOX")
-    XCTAssertEqual(AIContextBuilder.sanitize("/Applications/Xcode.app", home: home), "/Applications/Xcode.app")
-    XCTAssertEqual(AIContextBuilder.sanitize("/Library/Application Support/X", home: home), "/Library/Application Support/X")
+    XCTAssertNil(AIContextBuilder.sanitize("/Users/coltonwood/Documents/coltonwood-taxes", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Users/coltonwood/Library/Mail/jane.doe@example.com/INBOX", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Applications/Xcode.app", home: home))
+    XCTAssertNil(AIContextBuilder.sanitize("/Library/Application Support/X", home: home))
     XCTAssertNil(AIContextBuilder.sanitize("/Volumes/Backup/coltonwood", home: home))
     XCTAssertNil(AIContextBuilder.sanitize("/Users/someoneelse/Desktop", home: home))
     XCTAssertEqual(AIContextBuilder.sanitize("/Users/coltonwood", home: home), "~")
@@ -68,8 +64,32 @@ final class AIAssistantTests: XCTestCase {
     XCTAssertFalse(json.contains("@example.com"))
     XCTAssertEqual(Set(context.biggestFolders.map(\.path)), ["~/Library", "~/Documents", "~/Library/Caches"])
     XCTAssertEqual(context.downloadsGB["Documents"], 1.0)
-    XCTAssertEqual(context.unusedApps.map(\.name), ["Old Editor"])
+    XCTAssertTrue(context.unusedApps.isEmpty, "Unrecognized display names are omitted")
     XCTAssertEqual(context.disk["freeGB"], 20)
+  }
+
+  func testAutomaticPayloadAllowlistRejectsPackagesCustomAppsAndAdversarialNames() throws {
+    let privateName = "Jane Doe jane@example.com Medical Report.pages 删除"
+    var inputs = AIContextBuilder.Inputs(homeDirectory: home)
+    inputs.storageRoot = StorageNode(url: home.appendingPathComponent("Documents"), kind: .folder,
+      allocatedBytes: 10, logicalBytes: 10, itemCount: 1, children: [
+        StorageNode(url: home.appendingPathComponent("Documents/" + privateName), kind: .package,
+          allocatedBytes: 10, logicalBytes: 10, itemCount: 1)])
+    inputs.apps = [AppRecord(url: URL(fileURLWithPath: "/Applications/Private.app"), name: privateName,
+      bundleIdentifier: "com.custom.private", version: "1", bundleSize: 10, lastModified: nil,
+      lastUsed: Date().addingTimeInterval(-300 * 86400))]
+    inputs.recommendations = [Recommendation(id: "caches", symbol: "x", title: privateName,
+      detail: privateName, bytes: 10, count: 1, confidence: .safe, items: [], destination: .cleaner)]
+    inputs.startupLabels = [privateName]
+    let encoder = JSONEncoder()
+    let context = try encoder.encode(AIContextBuilder.build(inputs))
+    let review = try encoder.encode(AIContextBuilder.reviewRequest(recommendations: inputs.recommendations,
+      totalBytes: 10, freeBytes: 1, growth: [], home: home))
+    let explain = try encoder.encode(AIExplainRequest(kind: .libraryItem, identifier: privateName, location: privateName))
+    for data in [context, review, explain] {
+      let json = String(decoding: data, as: UTF8.self)
+      for secret in ["Jane", "@example", "Medical", "删除", "coltonwood"] { XCTAssertFalse(json.contains(secret)) }
+    }
   }
 
   func testReviewRequestMapsConfidenceAndSanitizesGrowth() {
@@ -140,5 +160,6 @@ final class AIAssistantTests: XCTestCase {
     let offline = AccountClient(baseURL: URL(string: "https://example.test")!) { _ in throw URLError(.notConnectedToInternet) }
     let offlineStatus = await offline.aiStatus()
     XCTAssertFalse(offlineStatus.enabled)
+    XCTAssertFalse(offlineStatus.reachable)
   }
 }

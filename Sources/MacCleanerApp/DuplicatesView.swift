@@ -5,6 +5,7 @@ import SwiftUI
 struct DuplicatesView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var previewURL: URL?
+  @State private var comparing: DuplicateGroup?
 
   private var totalReclaimable: Int64 {
     model.duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
@@ -30,7 +31,7 @@ struct DuplicatesView: View {
             .foregroundStyle(.secondary)
           Text("Large files are streamed in chunks to keep memory use bounded.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
           Button("Cancel") { model.cancelCurrentOperation() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,6 +48,7 @@ struct DuplicatesView: View {
                 Text("•")
                 Text(ByteFormatter.string(group.reclaimableBytes) + " reclaimable")
                 Spacer()
+                Button("Compare") { comparing = group }
                 Button("Select copies") { model.selectDuplicateCopies(in: group.id) }
                   .buttonStyle(.link)
         .tint(AppTheme.accentText)
@@ -60,17 +62,13 @@ struct DuplicatesView: View {
         .listStyle(.inset)
       }
     }
+    .sheet(item: $comparing) { group in DuplicateComparisonSheet(group: group) }
     .quickLookPreview($previewURL, in: model.duplicateGroups.flatMap { $0.files.map(\.url) })
   }
 
   private var header: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Duplicates").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("Exact content matching, with no filename-based deletion guesses.").foregroundStyle(
-          .secondary)
-      }
-      Spacer()
+    PageHeader(title: "Duplicates", subtitle: "Compare exact copies. Choose a keeper before reviewing the rest.") {
+      HStack(spacing: 8) {
       if totalReclaimable > 0 {
         StatusPill(
           title: ByteFormatter.string(totalReclaimable) + " possible", icon: "square.on.square",
@@ -83,27 +81,32 @@ struct DuplicatesView: View {
           if model.isPreparingPlan {
             ProgressView().controlSize(.small)
           } else {
-            Label("Review \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "trash")
+            Label("Review \(ByteFormatter.string(model.duplicateSelectedBytes))", systemImage: "checklist")
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
         .help("Each kept copy is re-verified before anything moves")
       }
+    }
     }
     .padding(AppTheme.pagePadding)
   }
 
   private var controls: some View {
-    HStack(spacing: 10) {
+    VStack(spacing: 12) {
+      HStack(spacing: 10) {
       Label(model.duplicateRoot.path, systemImage: "folder")
         .font(.caption)
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(1).truncationMode(.middle)
         .frame(maxWidth: 360, alignment: .leading)
+      Spacer(minLength: 8)
       Button("Choose Folder…") { model.chooseDuplicateFolder() }
 
-      Divider().frame(height: 22)
+      }
+      HStack(spacing: 10) {
+
 
       Picker("Minimum size", selection: $model.duplicateMinimum) {
         Text("1 MB").tag(Int64(1_048_576))
@@ -141,9 +144,10 @@ struct DuplicatesView: View {
         .buttonStyle(.borderedProminent)
         .disabled(model.isScanning || model.isWorking)
     }
+    }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 
   private func duplicateRow(_ file: LargeFile, group: DuplicateGroup) -> some View {
@@ -177,7 +181,7 @@ struct DuplicatesView: View {
       }
       Spacer()
       if !selected {
-        StatusPill(title: "Keep", icon: "checkmark", tint: .green)
+        StatusPill(title: "Keep", icon: "checkmark", tint: AppTheme.accentText)
       }
       Text(ByteFormatter.string(file.size))
         .font(.callout.monospacedDigit())
@@ -192,6 +196,9 @@ struct DuplicatesView: View {
       .help("Quick Look")
       .accessibilityLabel("Quick Look \(file.url.lastPathComponent)")
       Menu {
+        Button("Keep this copy") {
+          model.keepDuplicate(file, in: group)
+        }
         Button("Quick Look") { previewURL = file.url }
         Button("Reveal in Finder") { model.reveal(file.url) }
         Button("Exclude from future scans") { model.ignore(file.url) }

@@ -5,7 +5,7 @@ import MacCleanerCore
 /// The user's Trash. Emptying it is permanent and invalidates every Restore receipt, so it is
 /// never part of an OperationPlan: it is a separate, explicit action, and Finder does the work.
 enum TrashBinService {
-  struct Status: Equatable {
+  struct Status: Equatable, Sendable {
     let bytes: Int64
     let items: Int
     /// False when macOS privacy settings hide the Trash (Full Disk Access not granted).
@@ -37,24 +37,4 @@ enum TrashBinService {
     }.value
   }
 
-  /// Asks Finder to empty the Trash and returns the measured change in free space.
-  @MainActor
-  static func empty() throws -> Int64 {
-    let before = availableBytes()
-    var error: NSDictionary?
-    let script = NSAppleScript(source: "tell application \"Finder\" to empty trash")
-    script?.executeAndReturnError(&error)
-    if let error {
-      throw EmptyError.finderRefused(
-        (error[NSAppleScript.errorMessage] as? String) ?? "permission was denied")
-    }
-    return max(0, availableBytes() - before)
-  }
-
-  private static func availableBytes() -> Int64 {
-    let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
-      .volumeAvailableCapacityForImportantUsageKey
-    ])
-    return values?.volumeAvailableCapacityForImportantUsage ?? 0
-  }
 }

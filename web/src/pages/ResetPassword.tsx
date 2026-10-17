@@ -45,7 +45,7 @@ export const ResetPassword = () => {
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-4">
-          {error && <Alert>{error}</Alert>}
+          {error && <Alert>{error} <Link to="/forgot-password" className="underline">Request a new link</Link>.</Alert>}
           <Field label="New password" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
           <Field label="Confirm new password" type="password" autoComplete="new-password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} />
           <Button type="submit" busy={busy} className="w-full">

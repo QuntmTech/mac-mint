@@ -11,7 +11,7 @@ jobs:
   release:
     runs-on: macos-15
     env:
-      HAS_SIGNING: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.DEVELOPER_ID_IDENTITY != '' }}
+      HAS_SIGNING: ${{ secrets.DEVELOPER_ID_P12 != '' && secrets.DEVELOPER_ID_P12_PASSWORD != '' && secrets.DEVELOPER_ID_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,11 +40,20 @@ jobs:
       - name: Build, sign, notarize
         env:
           NO_OPEN: "1"
+          REQUIRE_NOTARIZATION: ${{ env.HAS_SIGNING == 'true' && '1' || '0' }}
           SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.DEVELOPER_ID_IDENTITY || '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: ./scripts/build_app.sh
+
+      - name: Validate packaged app
+        run: |
+          ./scripts/smoke_test.sh dist/MacMint.app
+          if [[ "$HAS_SIGNING" == "true" ]]; then
+            xcrun stapler validate dist/MacMint.app
+            spctl --assess --type execute --verbose=2 dist/MacMint.app
+          fi
 
       - name: Publish GitHub release
         env:

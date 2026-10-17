@@ -48,6 +48,70 @@ public final class IssueCollector: @unchecked Sendable {
 }
 
 public enum FileSystem {
+  /// Unlike fileExists, a permission failure cannot be mistaken for an absent recovery item.
+  static func entryExists(at url: URL) throws -> Bool {
+    var info = stat()
+    if lstat(url.path, &info) == 0 { return true }
+    let failure = errno
+    if failure == ENOENT || failure == ENOTDIR { return false }
+    throw NSError(domain: NSPOSIXErrorDomain, code: Int(failure))
+  }
+  /// Atomically replace a local recovery record and sync the file and directory before
+  /// acknowledging it. A successful JSON encode alone is not a durable History commit.
+  static func writeDurably(_ data: Data, to url: URL) throws {
+    try data.write(to: url, options: .atomic)
+    for path in [url.path, url.deletingLastPathComponent().path] {
+      let descriptor = open(path, O_RDONLY)
+      guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+      let result = fsync(descriptor)
+      let failure = errno
+      _ = close(descriptor)
+      guard result == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(failure)) }
+    }
+  }
+
+  /// Refuse moving a folder containing managed photo data or a separate mounted volume.
+  static func managedLibraryProblem(in url: URL, fileManager: FileManager) -> String? {
+    guard (try? fresh(url).resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+      (try? fresh(url).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { return nil }
+    guard let device = volumeIdentity(at: url) else { return "The selected folder's volume could not be verified." }
+    let failures = IssueCollector()
+    guard let enumerator = fileManager.enumerator(at: url,
+      includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+      options: [], errorHandler: { path, _ in
+        failures.append(ScanIssue(area: "Safety", path: path.path, message: "Could not inspect folder contents."))
+        return false
+      }) else { return "Folder contents could not be checked for managed photo libraries." }
+    var problem: String?
+    walk(enumerator) { child in
+      if Task.isCancelled { return .stop }
+      if PhotoAnalysis.isInsideLibraryPackage(child) {
+        problem = "This folder contains a managed photo library. Choose smaller selections and manage library photos in Photos."
+        return .stop
+      }
+      guard let childDevice = volumeIdentity(at: child) else {
+        problem = "Folder contents changed or could not be inspected. Rescan before moving this folder."
+        return .stop
+      }
+      if childDevice != device {
+        problem = "This folder contains a separate mounted volume. Choose smaller selections; mounted volumes remain read-only."
+        return .stop
+      }
+      return .continue
+    }
+    if let problem { return problem }
+    return failures.issues.isEmpty ? nil : "Folder contents could not be fully checked for managed photo libraries."
+  }
+
+  public static func isCloudPlaceholder(_ url: URL) -> Bool {
+    #if canImport(Darwin)
+      var info = stat()
+      return lstat(url.path, &info) == 0 && info.st_flags & 0x40000000 != 0 // SF_DATALESS
+    #else
+      return false
+    #endif
+  }
+
   public static let resourceKeys: Set<URLResourceKey> = [
     .isRegularFileKey,
     .isDirectoryKey,
@@ -83,7 +147,8 @@ public enum FileSystem {
 
   /// Allocated size of a file or folder, including package contents, with unreadable
   /// descendants counted instead of silently treated as empty.
-  public static func measure(at url: URL, fileManager: FileManager = .default) -> SizeMeasurement {
+  public static func measure(at url: URL, fileManager: FileManager = .default, ignoredPaths: Set<String> = []) -> SizeMeasurement {
+    if isIgnored(url, ignoredPaths: ignoredPaths) { return SizeMeasurement(bytes: 0) }
     let url = fresh(url)
     let values: URLResourceValues
     do {
@@ -116,6 +181,7 @@ public enum FileSystem {
     var seenIdentities: Set<String> = []
     walk(enumerator) { child in
       if Task.isCancelled { return .stop }
+      if isIgnored(child, ignoredPaths: ignoredPaths) { return .skipDescendants }
       guard let childValues = try? child.resourceValues(forKeys: resourceKeys) else {
         errors.record(nil)
         return .continue
@@ -183,28 +249,54 @@ public enum FileSystem {
     return "\(info.st_dev):\(info.st_ino)"
   }
 
+  /// st_dev distinguishes a mounted filesystem even when it appears below the home folder.
+  public static func volumeIdentity(at url: URL) -> String? {
+    var info = stat()
+    guard lstat(url.path, &info) == 0 else { return nil }
+    return String(info.st_dev)
+  }
+
   public static func linkCount(at url: URL) -> Int {
     var info = stat()
     guard lstat(url.path, &info) == 0 else { return 0 }
     return Int(info.st_nlink)
   }
 
+  /// Resolve parents without following the item itself. Case folding follows the nearest
+  /// existing volume, so case-sensitive APFS and Linux keep distinct names distinct.
+  public static func comparisonPath(_ url: URL) -> String {
+    let normalized = url.standardizedFileURL
+    let parent = normalized.deletingLastPathComponent().resolvingSymlinksInPath()
+    let path = normalized.path == "/" ? "/" : parent.appendingPathComponent(normalized.lastPathComponent).path
+    #if os(macOS)
+      var probe = parent
+      while !FileManager.default.fileExists(atPath: probe.path), probe.path != "/" {
+        probe.deleteLastPathComponent()
+      }
+      let sensitive = (try? fresh(probe).resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey]))?
+        .volumeSupportsCaseSensitiveNames
+      return sensitive == true ? path : path.lowercased()
+    #else
+      return path
+    #endif
+  }
+
   public static func path(_ child: URL, isInsideOrEqual root: URL) -> Bool {
-    let childPath = child.standardizedFileURL.path
-    let rootPath = root.standardizedFileURL.path
-    return childPath == rootPath || childPath.hasPrefix(rootPath + "/")
+    let childPath = comparisonPath(child)
+    let rootPath = comparisonPath(root)
+    return rootPath == "/" || childPath == rootPath || childPath.hasPrefix(rootPath + "/")
   }
 
   public static func isIgnored(_ url: URL, ignoredPaths: Set<String>) -> Bool {
-    let path = url.standardizedFileURL.path
-    return ignoredPaths.contains { ignored in path == ignored || path.hasPrefix(ignored + "/") }
+    ignoredPaths.contains { path(url, isInsideOrEqual: URL(fileURLWithPath: $0)) }
   }
 
   /// True when an excluded path lives strictly inside `url`, so acting on `url` as a whole
   /// would also act on something the user asked to protect.
   public static func containsIgnoredDescendant(_ url: URL, ignoredPaths: Set<String>) -> Bool {
-    let path = url.standardizedFileURL.path
-    return ignoredPaths.contains { $0.hasPrefix(path + "/") }
+    guard !ignoredPaths.isEmpty else { return false }
+    let path = comparisonPath(url)
+    return ignoredPaths.contains { comparisonPath(URL(fileURLWithPath: $0)).hasPrefix(path + "/") }
   }
 
   /// Splits `url` into the largest pieces that do not include any excluded path. Returns

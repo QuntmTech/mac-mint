@@ -1,4 +1,4 @@
-/** Release URL intentionally unset: upstream had no published release assets at review. */
+/** Consumer download remains unset until a validated, notarized release is available. */
 export const productConfig = {
   name: "MacMint",
   minimumMacOS: "macOS 14+",

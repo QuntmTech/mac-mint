@@ -8,6 +8,7 @@ import MacCleanerCore
 final class UpdateService: ObservableObject {
   @Published private(set) var status: UpdateStatus = .current
   @Published private(set) var lastChecked: Date?
+  @Published private(set) var checkError: String?
   @Published var dismissedVersion: String?
 
   static var currentVersion: String {
@@ -26,9 +27,11 @@ final class UpdateService: ObservableObject {
   }
 
   func check() async {
-    guard let result = try? await checker.check(currentVersion: Self.currentVersion) else { return }
-    status = result
-    lastChecked = Date()
+    do {
+      status = try await checker.check(currentVersion: Self.currentVersion)
+      lastChecked = Date()
+      checkError = nil
+    } catch { checkError = "Check failed. The available version could not be verified." }
   }
 
   var bannerRelease: ReleaseInfo? {

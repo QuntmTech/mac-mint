@@ -58,7 +58,7 @@ final class DeveloperStorageTests: XCTestCase {
     let item = try XCTUnwrap(scanned.first { $0.tool == "Ollama" })
     XCTAssertEqual(item.title, "llama3:8b")
     XCTAssertEqual(item.bytes, 4_000_001_200)
-    XCTAssertEqual(item.removal, .command("ollama rm llama3:8b"))
+    XCTAssertEqual(item.removal, .command("ollama rm -- 'llama3:8b'"))
     XCTAssertFalse(item.canTrash)
     XCTAssertNil(PlanItem.developer(item), "managed models never become Trash plan items")
   }
@@ -71,7 +71,7 @@ final class DeveloperStorageTests: XCTestCase {
     let scanned = await scanner(home).scan().value
     let item = try XCTUnwrap(scanned.first { $0.tool == "Hugging Face" })
     XCTAssertEqual(item.title, "meta-llama/Llama-3-8B")
-    XCTAssertEqual(item.rebuild, .redownload)
+    XCTAssertEqual(item.rebuild, .review)
     XCTAssertTrue(item.canTrash)
   }
 

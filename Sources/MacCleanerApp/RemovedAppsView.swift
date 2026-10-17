@@ -20,15 +20,10 @@ struct RemovedAppsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Removed Apps").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Settings, caches, and containers left behind by apps that are no longer installed.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Removed Apps", subtitle: "Settings, caches, and containers left behind by apps you’ve removed.") {
+        HStack(spacing: 8) {
         if !model.selectedOrphanIDs.isEmpty {
-          Button("Deselect") { model.selectedOrphanIDs = [] }
+          Button("Deselect") { model.keepQueuedFiles(model.queuedOrphans.map(\.url)) }
           Button {
             model.reviewOrphans()
           } label: {
@@ -40,6 +35,7 @@ struct RemovedAppsView: View {
         Button(model.orphansScanned ? "Rescan" : "Scan") { model.scanOrphans() }
           .buttonStyle(.borderedProminent)
           .disabled(model.isScanning || model.isWorking)
+      }
       }
       .padding(AppTheme.pagePadding)
       Divider()
@@ -87,7 +83,7 @@ struct RemovedAppsView: View {
         isOn: Binding(
           get: { model.selectedOrphanIDs.contains(item.id) },
           set: { isOn in
-            if isOn { model.selectedOrphanIDs.insert(item.id) } else { model.selectedOrphanIDs.remove(item.id) }
+            model.setFileSelection(item.url, selected: isOn)
           })
       )
       .labelsHidden()
@@ -101,10 +97,10 @@ struct RemovedAppsView: View {
             tint: item.confidence == .medium ? .green : .orange)
         }
         Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        Text(item.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+        Text(item.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         if let modified = item.modified {
           Text("Last changed \(modified.formatted(.relative(presentation: .named)))")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
         }
       }
       Spacer()

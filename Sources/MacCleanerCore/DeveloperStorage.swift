@@ -86,6 +86,7 @@ public actor DeveloperStorageScanner {
   private let fileManager: FileManager
   private let home: URL
   private let environment: [String: String]
+  private var ignoredPaths: Set<String> = []
   private let activeWindow: TimeInterval
 
   /// Folder names that are always build output, recreated by their tool.
@@ -120,13 +121,15 @@ public actor DeveloperStorageScanner {
   /// A custom cache root is only trusted when it is a dedicated folder: not the home folder,
   /// not a personal folder (or inside one), not an ancestor of home, and not a system path.
   public static func validatedRoots(_ roots: [URL], home: URL) -> [URL] {
-    let homePath = SafetyPolicy.canonicalPath(of: home.resolvingSymlinksInPath())
+    let homePath = FileSystem.comparisonPath(home.resolvingSymlinksInPath())
     let personal = ["Desktop", "Documents", "Pictures", "Movies", "Music", "Downloads", "Library"]
       .map { (homePath + "/" + $0).lowercased() }
     return roots.filter { root in
-      let path = SafetyPolicy.canonicalPath(of: root)
+      let path = FileSystem.comparisonPath(root)
       guard path.hasPrefix(homePath + "/") else { return false }
-      if personal.contains(where: { path == $0 || path.hasPrefix($0 + "/") }) { return false }
+      // Personal-folder variants stay conservatively blocked; scope itself is volume-aware.
+      let restrictedPath = path.lowercased()
+      if personal.contains(where: { restrictedPath == $0 || restrictedPath.hasPrefix($0 + "/") }) { return false }
       // At least two levels below home (e.g. ~/models/hub), so a top-level folder of
       // arbitrary files is never treated as a cache.
       let depth = path.dropFirst(homePath.count).split(separator: "/").count
@@ -134,7 +137,8 @@ public actor DeveloperStorageScanner {
     }
   }
 
-  public func scan(projectRoots: [URL] = []) async -> ScanReport<[DevStorageItem]> {
+  public func scan(projectRoots: [URL] = [], ignoredPaths: Set<String> = []) async -> ScanReport<[DevStorageItem]> {
+    self.ignoredPaths = ignoredPaths
     let started = Date()
     var items: [DevStorageItem] = []
     var issues: [ScanIssue] = []
@@ -148,11 +152,15 @@ public actor DeveloperStorageScanner {
     }
     for root in projectRoots {
       if Task.isCancelled { break }
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(root) { continue }
       let report = projectArtifacts(in: root)
       items += report.items
       issues += report.issues
     }
-    let sorted = items.filter { $0.bytes > 0 }.sorted { $0.bytes > $1.bytes }
+    let sorted = items.filter { item in
+      item.bytes > 0 && item.url.map { !FileSystem.isIgnored($0, ignoredPaths: ignoredPaths)
+        && !FileSystem.containsIgnoredDescendant($0, ignoredPaths: ignoredPaths) } != false
+    }.sorted { $0.bytes > $1.bytes }
     return ScanReport(
       value: sorted, issues: issues, duration: Date().timeIntervalSince(started),
       wasCancelled: Task.isCancelled)
@@ -272,6 +280,7 @@ public actor DeveloperStorageScanner {
     var found: [URL] = []
     FileSystem.walk(enumerator) { url in
       if Task.isCancelled { return .stop }
+      if FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(url) { return .skipDescendants }
       guard (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true,
         (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true
       else { return .continue }
@@ -328,11 +337,13 @@ public actor DeveloperStorageScanner {
     let root = environment["OLLAMA_MODELS"].map { URL(fileURLWithPath: $0) }
       ?? home.appendingPathComponent(".ollama/models")
     let manifests = root.appendingPathComponent("manifests")
-    guard exists(manifests),
+    guard !FileSystem.isIgnored(manifests, ignoredPaths: ignoredPaths), exists(manifests),
       let enumerator = fileManager.enumerator(at: manifests, includingPropertiesForKeys: [.isRegularFileKey])
     else { return [] }
     var files: [URL] = []
     FileSystem.walk(enumerator) { url in
+      if Task.isCancelled { return .stop }
+      if FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) { return .skipDescendants }
       if (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true { files.append(url) }
       return .continue
     }
@@ -349,9 +360,9 @@ public actor DeveloperStorageScanner {
       let name = namespace == "library" ? "\(model):\(tag)" : "\(namespace)/\(model):\(tag)"
       return DevStorageItem(
         id: "ollama:\(name)", group: .aiModels, tool: "Ollama", title: name,
-        subtitle: "Stored in \(root.path.replacingOccurrences(of: home.path, with: "~")) — layers shared between models are freed only when unused",
-        url: manifest, bytes: size, lastUsed: modified(manifest), rebuild: .redownload,
-        removal: .command("ollama rm \(name)"))
+        subtitle: "Stored in \(root.path.replacingOccurrences(of: home.path, with: "~")) — origin is not verified; custom models may need manual recovery. Shared layers are freed only when unused",
+        url: manifest, bytes: size, lastUsed: modified(manifest), rebuild: .review,
+        removal: ShellArgument.isToolIdentifier(name) ? .command("ollama rm -- \(ShellArgument.quote(name))") : .none("This model name needs review in Ollama; no shell command was generated."))
     }
   }
 
@@ -382,8 +393,8 @@ public actor DeveloperStorageScanner {
       let name = parts.dropFirst().joined(separator: "/")
       return item(
         repo, group: .aiModels, tool: "Hugging Face", title: name,
-        subtitle: "\(kind.dropLast()) cache — whole repository, all revisions",
-        rebuild: .redownload)
+        subtitle: "\(kind.dropLast()) cache — whole repository, all revisions. Private, modified or unavailable models may need manual recovery.",
+        rebuild: .review)
     }
   }
 
@@ -407,10 +418,10 @@ public actor DeveloperStorageScanner {
     rebuild: RebuildCost, forceActive: Bool = false, activityURL: URL? = nil
   ) -> DevStorageItem {
     let lastUsed = modified(activityURL ?? url)
-    let recent = lastUsed.map { Date().timeIntervalSince($0) < activeWindow } ?? false
+    let recent = lastUsed.map { Date().timeIntervalSince($0) < activeWindow } ?? true
     return DevStorageItem(
       group: group, tool: tool, title: title, subtitle: subtitle, url: url,
-      bytes: FileSystem.itemSize(at: url, fileManager: fileManager), lastUsed: lastUsed,
+      bytes: FileSystem.measure(at: url, fileManager: fileManager, ignoredPaths: ignoredPaths).bytes, lastUsed: lastUsed,
       rebuild: rebuild, removal: .trash, isActive: forceActive || recent,
       ownerBundleID: Self.owner(for: group))
   }
@@ -425,14 +436,27 @@ public actor DeveloperStorageScanner {
   }
 
   private func children(of url: URL) -> [URL] {
-    (try? fileManager.contentsOfDirectory(
-      at: url, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]))
-      ?? []
+    guard !FileSystem.isIgnored(url, ignoredPaths: ignoredPaths) else { return [] }
+    return ((try? fileManager.contentsOfDirectory(
+      at: url, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])) ?? [])
+      .filter { !FileSystem.isIgnored($0, ignoredPaths: ignoredPaths) }
   }
 
   private func exists(_ url: URL) -> Bool { fileManager.fileExists(atPath: url.path) }
 
   private func modified(_ url: URL) -> Date? {
     (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+  }
+}
+
+/// POSIX shell escaping for commands explicitly copied by the user; never executed by MacMint.
+public enum ShellArgument {
+  public static func isToolIdentifier(_ value: String) -> Bool {
+    guard let first = value.first, first.isASCII && (first.isLetter || first.isNumber), value.count <= 300 else { return false }
+    return value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "/:._-".contains($0)) }
+  }
+
+  public static func quote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
   }
 }

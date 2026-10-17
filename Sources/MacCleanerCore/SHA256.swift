@@ -4,6 +4,11 @@ import Foundation
   import CryptoKit
 #endif
 
+public enum FileFingerprintError: LocalizedError {
+  case cloudOnly
+  public var errorDescription: String? { "This file is only in the cloud and was not downloaded for comparison." }
+}
+
 public enum SHA256 {
   static let chunkSize = 1_048_576
 
@@ -15,6 +20,7 @@ public enum SHA256 {
 
   /// Streams the file in bounded chunks. `sampleLimit` hashes only the first N bytes.
   public static func hexDigest(file url: URL, sampleLimit: Int? = nil) throws -> String {
+    guard !FileSystem.isCloudPlaceholder(url) else { throw FileFingerprintError.cloudOnly }
     let handle = try FileHandle(forReadingFrom: url)
     defer { try? handle.close() }
     var hasher = StreamingHasher()

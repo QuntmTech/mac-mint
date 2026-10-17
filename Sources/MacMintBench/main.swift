@@ -152,6 +152,17 @@ func buildFixture(root: URL, items: Int) {
   }
   created += 18
 
+  // Real project metadata and rebuildable dependency trees exercise Developer inventory,
+  // rather than timing only an empty search through source files.
+  for project in 0..<50 {
+    let root = home.appendingPathComponent("Documents/Projects/p\(project)")
+    write(root.appendingPathComponent("package.json"), Data("{\"name\":\"benchmark-project\"}".utf8))
+    for file in 0..<50 {
+      write(root.appendingPathComponent("node_modules/pkg\(file % 5)/file\(file).js"), smallFile(project * 1000 + file, size: 4096))
+    }
+  }
+  created += 50 * 51
+
   // Nested project files for the remainder
   let remaining = max(0, items - created)
   for i in 0..<remaining {
@@ -184,6 +195,33 @@ func runScanner(_ name: String, home: URL) async -> ScanResult {
   let bytes: Int64
   let cancelled: Bool
   switch name {
+  case "photos":
+    var rng = SplitMix64(state: 42)
+    var photos: [PhotoFingerprint] = []
+    for i in 0..<100000 {
+      if i % 256 == 0, Task.isCancelled { break }
+      let hash = i % 2 == 0 ? rng.next() : (photos.last?.hash ?? 0) ^ 0b111
+      photos.append(PhotoFingerprint(url: home.appendingPathComponent("photo\(i).jpg"), bytes: 1000000,
+        hash: hash, sharpness: Double(i % 1000), pixelWidth: 3000, pixelHeight: 2000))
+    }
+    let groups = PhotoAnalysis.group(photos)
+    let scan = PhotoScanResult(photos: photos, similarGroups: groups, blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: Task.isCancelled)
+    // Include the indexes used by rapid queue decisions in the photo memory/cancellation gate.
+    for photo in photos.prefix(1000) {
+      _ = scan.group(containing: photo.id)
+      _ = scan.fileCandidates(named: photo.url.lastPathComponent)
+      _ = scan.selectedPhotos(ids: [photo.id])
+    }
+    (results, bytes, cancelled) = (groups.count, groups.reduce(0) { $0 + $1.reclaimableBytes }, Task.isCancelled)
+  case "developer":
+    let report = await DeveloperStorageScanner(homeDirectory: home).scan(projectRoots: [home.appendingPathComponent("Documents/Projects")])
+    (results, bytes, cancelled) = (report.value.count, report.value.reduce(0) { $0 + $1.bytes }, report.wasCancelled)
+  case "combined":
+    async let cleanup = runScanner("cleanup", home: home)
+    async let developer = runScanner("developer", home: home)
+    async let large = runScanner("large", home: home)
+    let all = await [cleanup, developer, large]
+    (results, bytes, cancelled) = (all.reduce(0) { $0 + $1.results }, all.reduce(0) { $0 + $1.bytes }, all.contains { $0.cancelled })
   case "cleanup":
     let report = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scanReport()
     (results, bytes, cancelled) = (
@@ -208,7 +246,7 @@ func runScanner(_ name: String, home: URL) async -> ScanResult {
       report.wasCancelled
     )
   default:
-    fail("unknown scanner \(name) — use cleanup, storage, large, duplicates")
+    fail("unknown scanner \(name) — use cleanup, storage, large, duplicates, photos, developer, combined")
   }
   let elapsed = clock.now - start
   return ScanResult(

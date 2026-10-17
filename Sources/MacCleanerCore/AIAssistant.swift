@@ -22,8 +22,8 @@ public struct AIExplainRequest: Codable, Hashable, Sendable, Identifiable {
 
   public init(kind: AIExplainKind, identifier: String, location: String) {
     self.kind = kind
-    self.identifier = String(identifier.prefix(200))
-    self.location = location
+    self.identifier = AIContextBuilder.safeIdentifier(identifier, kind: kind)
+    self.location = AIContextBuilder.safeLocation(location)
   }
 }
 
@@ -135,14 +135,21 @@ public struct AIAnswer: Codable, Sendable {
   public let model: String?
 }
 
-struct AIAskRequest: Codable, Sendable {
-  let question: String
-  let history: [AITurn]
-  let context: AIContext
+public struct AIAskRequest: Codable, Sendable {
+  public let question: String
+  public let history: [AITurn]
+  public let context: AIContext
+  public init(question: String, history: [AITurn], context: AIContext) {
+    self.question = String(question.prefix(600)); self.history = Array(history.suffix(6)); self.context = context
+  }
 }
 
 public struct AIStatus: Sendable {
   public let enabled: Bool
+  public let features: [String: Bool]
+  public let reachable: Bool
+  public init(enabled: Bool, features: [String: Bool] = [:], reachable: Bool = true) { self.enabled = enabled; self.features = features; self.reachable = reachable }
+  public func allows(_ feature: String) -> Bool { enabled && (feature == "organize" ? features[feature] == true : features[feature] != false) }
 }
 
 // MARK: - Client
@@ -165,11 +172,15 @@ extension AccountClient {
       timeout: 45)
   }
 
+  public func organize(_ request: AIOrganizationRequest, token: String) async throws -> AIOrganizationResponse {
+    try await send("POST", "/api/macmint/ai/organize", token: token, json: request, timeout: 45)
+  }
+
   /// Server kill switch (public app_config record `ai`). Off when unreachable.
   public func aiStatus() async -> AIStatus {
     struct Page: Decodable {
       struct Item: Decodable {
-        struct Value: Decodable { let enabled: Bool? }
+        struct Value: Decodable { let enabled: Bool?; let features: [String: Bool]? }
         let value: Value?
       }
       let items: [Item]
@@ -178,26 +189,25 @@ extension AccountClient {
       url: baseURL.appendingPathComponent("/api/collections/app_config/records"),
       resolvingAgainstBaseURL: false)
     components?.queryItems = [URLQueryItem(name: "filter", value: "key='ai'")]
-    guard let url = components?.url else { return AIStatus(enabled: false) }
+    guard let url = components?.url else { return AIStatus(enabled: false, reachable: false) }
     var request = URLRequest(url: url)
     request.timeoutInterval = 15
     do {
       let (data, response) = try await transport(request)
-      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return AIStatus(enabled: false) }
+      guard (response as? HTTPURLResponse)?.statusCode == 200 else { return AIStatus(enabled: false, reachable: false) }
       let page = try JSONDecoder().decode(Page.self, from: data)
-      return AIStatus(enabled: page.items.first?.value?.enabled == true)
+      return AIStatus(enabled: page.items.first?.value?.enabled == true, features: page.items.first?.value?.features ?? [:])
     } catch {
-      return AIStatus(enabled: false)
+      return AIStatus(enabled: false, reachable: false)
     }
   }
 }
 
-// MARK: - Anonymized context
+// MARK: - Category-only automatic context
 
-/// What "Ask MacMint" and the Smart Care review are allowed to see. Built only from sizes,
-/// dates, categories, app names, and home-relative folder paths; never file contents, never
-/// personal file names. Paths outside the home folder are dropped (except /Applications and
-/// /Library), the account name is replaced, and anything email-like is removed.
+/// Automatic context includes fixed category labels, allowlisted identifiers, sizes and dates.
+/// Arbitrary folder names, document packages, app labels and filenames are omitted. Typed
+/// questions and previous chat turns are transmitted separately as the user's own text.
 public struct AIContext: Codable, Hashable, Sendable {
   public struct Folder: Codable, Hashable, Sendable {
     public let path: String
@@ -246,34 +256,56 @@ public enum AIContextBuilder {
 
   static func gb(_ bytes: Int64) -> Double { (Double(bytes) / 1_073_741_824 * 10).rounded() / 10 }
 
-  /// Home-relative, account name replaced, emails removed; nil when the path must not be sent.
+  /// Categories are an allowlist, not a heuristic attempt to anonymize arbitrary names.
+  private static let categoryPaths: Set<String> = [
+    "Desktop", "Documents", "Pictures", "Movies", "Music", "Downloads", "Library",
+    "Library/Caches", "Library/Logs", "Library/Developer", "Library/Application Support",
+    "Library/Containers", "Library/Group Containers", "Library/Developer/Xcode/DerivedData",
+    "Library/Developer/CoreSimulator/Caches", ".npm/_cacache", ".gradle/caches",
+    ".cache/huggingface/hub", ".lmstudio/models", ".ollama/models",
+  ]
+  public static let knownApps: [String: String] = [
+    "com.apple.dt.Xcode": "Xcode", "com.apple.iphonesimulator": "Simulator",
+    "com.apple.Safari": "Safari", "com.google.Chrome": "Chrome", "org.mozilla.firefox": "Firefox",
+    "com.microsoft.edgemac": "Edge", "com.spotify.client": "Spotify", "com.docker.docker": "Docker",
+    "com.brave.Browser": "Brave", "company.thebrowser.Browser": "Arc", "com.vivaldi.Vivaldi": "Vivaldi",
+    "com.operasoftware.Opera": "Opera", "com.microsoft.VSCode": "Visual Studio Code",
+  ]
+  public static let knownTools: Set<String> = ["Xcode", "Simulator", "npm", "pnpm", "Yarn", "Bun", "Homebrew", "pip", "CocoaPods", "SwiftPM", "Gradle", "Maven", "Cargo", "Go", "Ollama", "LM Studio", "Hugging Face", "Docker"]
+
+  public static func safeLocation(_ location: String) -> String {
+    let allowed: Set<String> = ["Caches", "Preferences", "Application Support", "Containers", "Group Containers", "Logs", "Saved Application State", "WebKit", "HTTP Storage", "Cookies", "Application Scripts", "LaunchAgents", "LaunchDaemons", "Developer", "Startup", "Other"]
+    return allowed.contains(location) ? location : "Other"
+  }
+
+  public static func safeIdentifier(_ identifier: String, kind: AIExplainKind) -> String {
+    if kind == .developerTool { return knownTools.contains(identifier) ? identifier : "Unrecognized developer cache" }
+    return knownApps.keys.contains(identifier) ? identifier : "Unrecognized Library item"
+  }
+
   public static func sanitize(_ path: String, home: URL) -> String? {
     let homePath = home.standardizedFileURL.path
-    var relative: String
-    if path == homePath {
-      relative = "~"
-    } else if path.hasPrefix(homePath + "/") {
-      relative = "~" + path.dropFirst(homePath.count)
-    } else if path.hasPrefix("/Applications") || path.hasPrefix("/Library") {
-      relative = path
-    } else {
-      return nil
-    }
-    let account = home.lastPathComponent
-    if account.count >= 2 {
-      relative = relative.replacingOccurrences(of: account, with: "user", options: .caseInsensitive)
-    }
-    relative = relative.replacingOccurrences(
-      of: #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, with: "[email]", options: .regularExpression)
-    return String(relative.prefix(200))
+    if path == homePath { return "~" }
+    if ["/Applications", "/Library"].contains(path) { return path }
+    guard path.hasPrefix(homePath + "/") else { return nil }
+    let relative = String(path.dropFirst(homePath.count + 1))
+    return categoryPaths.contains(relative) ? "~/" + relative : nil
   }
+
+  private static let recommendationLabels: [String: String] = [
+    "caches": "Rebuildable caches and logs", "developer": "Developer build data",
+    "firmware": "Device firmware", "downloads-never-opened": "Downloads with no recorded opens",
+    "downloads-stale": "Old downloads", "removed-apps": "Possible removed-app data",
+    "screenshots": "Old screenshots", "mail": "Mail attachment copies", "review-cleanup": "Backups, reports and installers",
+    "unused-apps": "Apps with old recorded usage", "duplicates": "Exact duplicates", "trash": "Home Trash", "growth": "Storage category growth",
+  ]
 
   /// Folder names a few levels below home (personal file names are never included).
   public static func build(_ inputs: Inputs) -> AIContext {
     let home = inputs.homeDirectory
     var folders: [AIContext.Folder] = []
     if let root = inputs.storageRoot {
-      for child in root.children where child.kind == .folder || child.kind == .package {
+      for child in root.children where child.kind == .folder {
         guard let path = sanitize(child.id, home: home) else { continue }
         folders.append(.init(path: path, gb: gb(child.allocatedBytes)))
         // One level deeper inside Library, where the big caches live.
@@ -292,7 +324,8 @@ public enum AIContextBuilder {
       guard let lastUsed = app.lastUsed else { return nil }
       let months = Int(inputs.now.timeIntervalSince(lastUsed) / (30.4 * 86_400))
       guard months >= 3 else { return nil }
-      return .init(name: String(app.name.prefix(60)), monthsSinceOpened: months, gb: gb(app.bundleSize))
+      guard let id = app.bundleIdentifier, let name = knownApps[id] else { return nil }
+      return .init(name: name, monthsSinceOpened: months, gb: gb(app.bundleSize))
     }.sorted { $0.gb > $1.gb }
     let downloads = Dictionary(grouping: inputs.downloads, by: { $0.kind.rawValue })
       .mapValues { gb($0.reduce(Int64(0)) { $0 + $1.bytes }) }
@@ -300,15 +333,13 @@ public enum AIContextBuilder {
     return AIContext(
       disk: ["totalGB": gb(inputs.totalBytes), "freeGB": gb(inputs.freeBytes)],
       recommendations: inputs.recommendations.prefix(12).map {
-        .init(title: $0.title, gb: gb($0.bytes), confidence: $0.confidence.label, items: $0.count)
+        .init(title: recommendationLabels[$0.id] ?? "Storage recommendation", gb: gb($0.bytes), confidence: $0.confidence.label, items: $0.count)
       },
       biggestFolders: Array(folders.sorted { $0.gb > $1.gb }.prefix(14)),
       developerGB: developer,
       unusedApps: Array(unused.prefix(8)),
       downloadsGB: downloads,
-      startupItems: Array(
-        inputs.startupLabels.prefix(15).map { String($0.prefix(120)) }
-          .map { $0.replacingOccurrences(of: #"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#, with: "[email]", options: .regularExpression) }),
+      startupItems: Array(inputs.startupLabels.filter { knownApps[$0] != nil }.prefix(15)),
       recentGrowth: inputs.growth.prefix(5).compactMap { growth in
         sanitize(growth.path, home: home).map { .init(path: $0, gb: gb(growth.delta)) }
       })
@@ -322,9 +353,9 @@ public enum AIContextBuilder {
     AIReviewRequest(
       recommendations: recommendations.prefix(15).map {
         .init(
-          id: $0.id, title: $0.title, bytes: $0.bytes,
+          id: recommendationLabels[$0.id] != nil ? $0.id : "other", title: recommendationLabels[$0.id] ?? "Storage recommendation", bytes: $0.bytes,
           confidence: $0.confidence == .safe ? "safe" : $0.confidence == .likely ? "likely" : "review",
-          count: $0.count, detail: String($0.detail.prefix(300)))
+          count: $0.count, detail: "\($0.count) items; local confidence: \($0.confidence.label). Review locally before removal.")
       },
       disk: .init(totalBytes: totalBytes, freeBytes: freeBytes),
       growth: growth.prefix(5).compactMap { g in

@@ -34,6 +34,7 @@ public actor DuplicateFinder {
           value: [], issues: collector.issues, duration: Date().timeIntervalSince(started), wasCancelled: true
         )
       }
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(root.resolvingSymlinksInPath()) { continue }
       guard fileManager.fileExists(atPath: root.path) else {
         collector.append(
           ScanIssue(
@@ -62,8 +63,12 @@ public actor DuplicateFinder {
 
       FileSystem.walk(enumerator) { url in
         if Task.isCancelled { return .stop }
-        if shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
+        if PhotoAnalysis.isInsideLibraryPackage(url) || shouldExclude(url, excludedRoots: excludedRoots, ignoredPaths: ignoredPaths) {
           return isDirectory(url) ? .skipDescendants : .continue
+        }
+        if FileSystem.isCloudPlaceholder(url) {
+          collector.append(ScanIssue(area: "Duplicates", path: url.path, severity: .info, message: "Cloud-only file was not downloaded or hashed."))
+          return .continue
         }
         guard let meta = FileSystem.logicalFileMetadata(at: url), meta.size >= minimumSize else {
           return .continue
@@ -99,6 +104,7 @@ public actor DuplicateFinder {
         let file = links[0]
         if Task.isCancelled { break }
         do {
+          if FileSystem.isCloudPlaceholder(file.url) { continue }
           let sample = try SHA256.hexDigest(file: file.url, sampleLimit: 64 * 1024)
           bySample[sample, default: []].append(links)
         } catch is CancellationError {
@@ -119,6 +125,7 @@ public actor DuplicateFinder {
           let file = links[0]
           if Task.isCancelled { break }
           do {
+            if FileSystem.isCloudPlaceholder(file.url) { continue }
             let full = try SHA256.hexDigest(file: file.url)
             byFull[full, default: []].append(contentsOf: links)
           } catch is CancellationError {

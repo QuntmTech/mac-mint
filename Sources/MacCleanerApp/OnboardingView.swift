@@ -44,12 +44,13 @@ struct OnboardingView: View {
             finish()
           }
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .keyboardShortcut(.defaultAction)
       }
       .padding(16)
     }
-    .frame(width: 560, height: 440)
+    .frame(width: 600, height: 480)
+    .background(AppTheme.canvas)
     .onExitCommand {
       onboardingDone = true
       dismiss()
@@ -62,10 +63,10 @@ struct OnboardingView: View {
   private var welcome: some View {
     VStack(alignment: .leading, spacing: 16) {
       BrandMark(size: 54)
-      Text("Welcome to MacMint").font(.system(size: 28, weight: .bold, design: .rounded))
+      Text("Welcome to MacMint").font(.system(size: 27, weight: .semibold))
       point("checkmark.shield.fill", "Safe by design", "Only rebuildable caches are preselected. Personal files always need your review.")
-      point("arrow.uturn.backward.circle.fill", "Everything is undoable", "Items go to the Trash with a receipt — restore any of them from History.")
-      point("lock.fill", "Private", "Scans run on your Mac. File contents never leave it, and optional AI features only see anonymized summaries.")
+      point("arrow.uturn.backward.circle.fill", "Review and restore", "File removals use Trash receipts. Restore while items remain there; Photos manages its own recovery.")
+      point("lock.fill", "Private", "Scans run on your Mac. Optional AI sends category summaries and your typed questions after consent; preview the request first.")
     }
   }
 
@@ -113,7 +114,7 @@ struct OnboardingView: View {
       .onChange(of: lowSpaceAlerts) { _, enabled in
         if enabled { care.requestAuthorization() }
       }
-      Text("You can change these any time in Settings.").font(.caption).foregroundStyle(.tertiary)
+      Text("You can change these any time in Settings.").font(.caption).foregroundStyle(.secondary)
     }
     .toggleStyle(.switch)
   }

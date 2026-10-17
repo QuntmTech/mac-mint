@@ -5,7 +5,7 @@ import MacCleanerCore
 /// Review → execute → recover. Every action that moves files builds an OperationPlan, shows it
 /// in the review sheet, and runs through OperationExecutor so all checks and receipts are shared.
 extension AppViewModel {
-  struct RestoreConflict: Identifiable {
+  struct RestoreConflict: Identifiable, Sendable {
     let id = UUID()
     let entryID: UUID
     let receipt: TrashReceipt
@@ -26,7 +26,7 @@ extension AppViewModel {
   var queuedLargeFiles: [LargeFile] { largeFiles.filter { selectedLargeFileIDs.contains($0.id) } }
 
   /// Unverified preview of what "Review everything" would include.
-  var queuedItems: [PlanItem] {
+  var sourceSelections: [PlanItem] {
     queuedCleanupTargets.map { PlanItem.cleanup($0) }
       + queuedDuplicateFiles.map { PlanItem.duplicate($0.file, keeper: $0.keeper) }
       + queuedLargeFiles.map(PlanItem.largeFile)
@@ -37,36 +37,38 @@ extension AppViewModel {
       + queuedDownloads.map(PlanItem.download)
   }
 
-  var queuedCount: Int {
-    queuedCleanupTargets.count + queuedDuplicateFiles.count + queuedLargeFiles.count
-      + queuedStorageNodes.count + queuedDevItems.count + queuedPhotoFileItems.items.count
-      + queuedOrphans.count + queuedDownloads.count
+  private var queueEstimate: OperationPlan {
+    OperationPlanner.plan(title: "Queue estimate", items: sourceSelections, ignoredPaths: ignoredPaths)
   }
 
-  var queuedBytes: Int64 {
-    var seen: Set<String> = []
-    return queuedItems.filter { seen.insert($0.url.standardizedFileURL.path).inserted }
-      .reduce(0) { $0 + $1.expectedBytes }
-  }
+  var queuedItems: [PlanItem] { queueEstimate.items }
+  var queuedCount: Int { queueEstimate.items.count }
+  var queuedBytes: Int64 { queueEstimate.totalBytes }
 
   func dequeue(_ item: PlanItem) {
-    let path = item.url.standardizedFileURL.path
-    for index in cleanupTargets.indices where cleanupTargets[index].url.standardizedFileURL.path == path {
+    let covered = sourceSelections.filter { FileSystem.path($0.url, isInsideOrEqual: item.url) }
+    keepQueuedFiles(covered.map(\.url))
+    setFileSelection(item.url, selected: false)
+    let path = FileSystem.comparisonPath(item.url)
+    for index in cleanupTargets.indices where FileSystem.comparisonPath(cleanupTargets[index].url) == path {
       cleanupTargets[index].isSelected = false
     }
-    let ids = Set(
-      (duplicateGroups.flatMap(\.files) + largeFiles)
-        .filter { $0.url.standardizedFileURL.path == path }.map(\.id))
-    selectedDuplicateIDs.subtract(ids)
-    selectedLargeFileIDs.subtract(ids)
-    selectedStoragePaths.remove(path)
-    selectedDevIDs.remove(path)
-    selectedPhotoIDs.remove(path)
-    selectedOrphanIDs.remove(path)
-    selectedDownloadIDs.remove(path)
+    let ids = Set((duplicateGroups.flatMap(\.files) + largeFiles).filter {
+      FileSystem.comparisonPath($0.url) == path
+    }.map(\.id))
+    selectedDuplicateIDs.subtract(ids); selectedLargeFileIDs.subtract(ids)
+    func keepingOtherPaths(_ values: Set<String>) -> Set<String> {
+      Set(values.filter { FileSystem.comparisonPath(URL(fileURLWithPath: $0)) != path })
+    }
+    selectedStoragePaths = keepingOtherPaths(selectedStoragePaths)
+    selectedDevIDs = keepingOtherPaths(selectedDevIDs)
+    selectedPhotoIDs = keepingOtherPaths(selectedPhotoIDs)
+    selectedOrphanIDs = keepingOtherPaths(selectedOrphanIDs)
+    selectedDownloadIDs = keepingOtherPaths(selectedDownloadIDs)
   }
 
   func clearQueue() {
+    keepQueuedFiles(sourceSelections.map(\.url))
     deselectAllCleanup()
     selectedDuplicateIDs = []
     selectedLargeFileIDs = []
@@ -75,6 +77,30 @@ extension AppViewModel {
     selectedPhotoIDs = []
     selectedOrphanIDs = []
     selectedDownloadIDs = []
+  }
+
+  /// One final source of evidence for every module: keepers and conservative ownership
+  /// survive review, normalization, and direct execution from a different screen.
+  func normalizeReview(_ plan: OperationPlan) -> OperationPlan {
+    var protections: [KeeperConstraint] = []
+    for group in duplicateGroups {
+      guard let kept = group.files.first(where: { !selectedDuplicateIDs.contains($0.id) }) else { continue }
+      let keeper = KeeperSnapshot(path: kept.url.path, identity: kept.identity,
+        snapshot: FileSnapshot(size: kept.size, modified: kept.modifiedAt))
+      protections += group.files.filter { $0.id != kept.id }.map { KeeperConstraint(source: $0.url, keeper: keeper) }
+    }
+    for group in photoScan?.similarGroups ?? [] {
+      let kept = keeper(of: group)
+      guard !kept.isLibraryAsset else { continue }
+      let snapshot = KeeperSnapshot(path: kept.url.path, identity: kept.identity,
+        snapshot: FileSnapshot(size: kept.bytes, modified: kept.modified))
+      protections += group.photos.filter { !$0.isLibraryAsset && $0.id != kept.id }.map { KeeperConstraint(source: $0.url, keeper: snapshot) }
+    }
+    let evidence = cleanupTargets.map { PlanItem.cleanup($0) } + devItems.compactMap(PlanItem.developer)
+    let normalized = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered,
+      ignoredPaths: ignoredPaths, excluded: plan.excluded, protecting: protections, validationItems: evidence)
+    return OperationPlan(id: plan.id, title: normalized.title, items: normalized.items, covered: normalized.covered,
+      excluded: normalized.excluded, protecting: protections, validationItems: evidence)
   }
 
   // MARK: Building plans
@@ -186,8 +212,15 @@ extension AppViewModel {
   // MARK: Execution
 
   func execute(_ plan: OperationPlan) {
+    guard requireExclusions() else { return }
+    let plan = normalizeReview(plan)
     pendingPlan = nil
     guard !isWorking, !isScanning, !plan.isEmpty else { return }
+    guard authorizeRemoval() else {
+      deferredPlan = plan
+      Task { await Task.yield(); showingAccount = true }
+      return
+    }
     isWorking = true
     operationTitle = plan.title
     statusMessage = "Moving items to Trash…"
@@ -196,7 +229,7 @@ extension AppViewModel {
     let excluded = ignoredPaths
     let executor = OperationExecutor(
       trashService: MacTrashService(), safetyPolicy: safetyPolicy,
-      journalDirectory: AppPaths.journalDirectory,
+      journalDirectory: operationJournalDirectory,
       isAppRunning: { bundleID in
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
       })
@@ -217,11 +250,14 @@ extension AppViewModel {
   }
 
   private func finish(_ report: OperationReport) async {
-    if !report.moved.isEmpty || !report.problems.isEmpty {
-      await record(report.historyEntry())
+    var recoveryIssues: [ScanIssue] = []
+    let historySaved = await record(report.historyEntry())
+    if historySaved {
+      do { try OperationJournal.acknowledge(report.id, in: operationJournalDirectory) }
+      catch { recoveryIssues.append(ScanIssue(area: "Recovery", path: nil, message: "History is saved; the journal will be checked again next launch.")) }
     }
     applyMoved(report)
-    scanIssues = report.problems.map {
+    scanIssues = recoveryIssues + report.problems.map {
       ScanIssue(area: report.title, path: $0.item.url.path, message: $0.message ?? "Skipped")
     }
     isWorking = false
@@ -234,13 +270,11 @@ extension AppViewModel {
       : "\(ByteFormatter.string(report.bytesMoved)) moved to Trash — \(report.summary)"
     lastReport = report
 
-    let touchesSmartScan = report.moved.contains {
-      switch $0.item.kind {
-      case .cleanupTarget, .appBundle, .appLeftover: return true
-      case .duplicateCopy, .reviewedFile, .developerArtifact: return false
-      }
+    if !historySaved || report.persistenceError != nil {
+      statusMessage += " — recovery needs attention; operation evidence has been retained"
     }
-    if touchesSmartScan { runSmartScan() }
+    refreshRecommendations()
+    refreshTrashStatus()
   }
 
   /// Removes whatever actually moved from every list, and clears matching selections.
@@ -283,11 +317,24 @@ extension AppViewModel {
 
   /// Called at launch: operations that never finished are recorded so nothing goes unexplained.
   func recoverInterruptedOperations() async {
-    let reports = OperationJournal.recoverInterrupted(in: AppPaths.journalDirectory)
+    recoveryWarnings += await RestoreCoordinator.recover(in: restoreJournalDirectory, history: historyStore)
+    history = await historyStore.load()
+    recoveryWarnings += OperationJournal.unreadableJournals(in: operationJournalDirectory).map {
+      ScanIssue(area: "Recovery", path: $0.path, message: "An operation record could not be read. It has been preserved for diagnosis. Use Finder to inspect the original locations and Trash.")
+    }
+    let reports = OperationJournal.recoverInterrupted(in: operationJournalDirectory)
     guard !reports.isEmpty else { return }
-    for report in reports { await record(report.historyEntry()) }
-    statusMessage =
-      "Recovered \(reports.count) interrupted operation\(reports.count == 1 ? "" : "s") — see History"
+    var committed = 0
+    for report in reports {
+      if await record(report.historyEntry()) {
+        committed += 1
+        try? OperationJournal.acknowledge(report.id, in: operationJournalDirectory)
+      } else {
+        recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
+          message: "An operation could not be committed to History. Its journal is retained; check the original locations and Trash."))
+      }
+    }
+    statusMessage = "Reconciled \(committed) operation records; \(reports.count - committed) still need a History commit — see History"
   }
 
   // MARK: Recovery
@@ -300,56 +347,68 @@ extension AppViewModel {
   }
 
   func restore(_ receipts: [TrashReceipt], entryID: UUID) {
-    guard !receipts.isEmpty else { return }
-    var restored: [String] = []
-    var failures: [(TrashReceipt, RestoreError)] = []
-    for receipt in receipts {
-      do {
-        try RecoveryService().restore(receipt)
-        restored.append(receipt.originalPath)
-      } catch let error as RestoreError {
-        failures.append((receipt, error))
-      } catch {
-        failures.append((receipt, .failed(error.localizedDescription)))
+    guard !receipts.isEmpty, !isWorking, !isScanning else { return }
+    isWorking = true
+    operationTitle = "Restoring from Trash"
+    currentTask = Task { [weak self] in
+      guard let self else { return }
+      var restored: [String] = []
+      var conflicts: [RestoreConflict] = []
+      let recovery = RestoreCoordinator(journalDirectory: restoreJournalDirectory, history: historyStore)
+      for (index, receipt) in receipts.enumerated() {
+        if Task.isCancelled { break }
+        operationProgress = OperationProgress(completed: index, total: receipts.count,
+          currentName: URL(fileURLWithPath: receipt.originalPath).lastPathComponent, bytesMoved: 0)
+        do {
+          try await recovery.restore(receipt, entryID: entryID)
+          restored.append(receipt.originalPath)
+        } catch {
+          conflicts.append(RestoreConflict(entryID: entryID, receipt: receipt,
+            message: error.localizedDescription))
+        }
       }
+      history = await historyStore.load()
+      restoreConflicts.append(contentsOf: conflicts)
+      isWorking = false
+      operationTitle = nil
+      operationProgress = nil
+      currentTask = nil
+      statusMessage = "Restored \(restored.count) of \(receipts.count); \(conflicts.count) need attention"
+      refreshTrashStatus()
     }
-    Task {
-      if !restored.isEmpty {
-        try? await historyStore.markRestored(entryID: entryID, originalPaths: restored)
-        history = await historyStore.load()
-      }
-    }
-    if case let (receipt, error)? = failures.first {
-      restoreConflict = RestoreConflict(
-        entryID: entryID, receipt: receipt,
-        message: error.errorDescription ?? "Could not restore this item.")
-    }
-    statusMessage =
-      failures.isEmpty
-      ? "Restored \(restored.count) item\(restored.count == 1 ? "" : "s") from the Trash"
-      : "Restored \(restored.count); \(failures.count) could not be restored"
+  }
+
+  func skipRestoreConflict(_ conflict: RestoreConflict) {
+    restoreConflicts.removeAll { $0.id == conflict.id }
   }
 
   func restoreElsewhere(_ conflict: RestoreConflict) {
-    restoreConflict = nil
+    guard !isWorking, !isScanning else { return }
     let panel = NSOpenPanel()
     panel.title = "Choose where to restore “\(URL(fileURLWithPath: conflict.receipt.originalPath).lastPathComponent)”"
     panel.canChooseDirectories = true
     panel.canChooseFiles = false
     panel.canCreateDirectories = true
     panel.prompt = "Restore Here"
-    guard panel.runModal() == .OK, let folder = panel.url else { return }
-    do {
-      let destination = try RecoveryService().restore(conflict.receipt, into: folder)
-      Task {
-        try? await historyStore.markRestored(
-          entryID: conflict.entryID, originalPaths: [conflict.receipt.originalPath])
-        history = await historyStore.load()
+    panel.begin { [weak self] response in
+      guard response == .OK, let folder = panel.url else { return }
+      Task { @MainActor [weak self] in
+        guard let self, !self.isWorking, !self.isScanning else { return }
+        self.isWorking = true
+        self.operationTitle = "Restoring from Trash"
+        do {
+          let recovery = RestoreCoordinator(journalDirectory: self.restoreJournalDirectory, history: self.historyStore)
+          let destination = try await recovery.restore(conflict.receipt, entryID: conflict.entryID, into: folder)
+          self.history = await self.historyStore.load()
+          self.skipRestoreConflict(conflict)
+          self.reveal(destination)
+        } catch {
+          self.statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
+        }
+        self.isWorking = false
+        self.operationTitle = nil
+        self.refreshTrashStatus()
       }
-      statusMessage = "Restored to \(destination.path)"
-      reveal(destination)
-    } catch {
-      statusMessage = (error as? RestoreError)?.errorDescription ?? error.localizedDescription
     }
   }
 

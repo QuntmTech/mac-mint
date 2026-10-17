@@ -21,7 +21,7 @@ public struct PhotoFingerprint: Identifiable, Hashable, Sendable {
   public let identity: String?
   /// PhotoKit local identifier when this photo lives in the Photos library (url is then synthetic).
   public let assetID: String?
-  /// File modification time at scan time (nil for library assets).
+  /// File or PhotoKit asset modification time at scan time.
   public let modified: Date?
 
   public init(
@@ -128,50 +128,73 @@ public enum PhotoAnalysis {
 
   // MARK: Grouping
 
-  /// Groups photos whose hashes are within `threshold` bits (single-linkage). Exact duplicates
-  /// (same physical file) are collapsed. Groups are sorted by reclaimable bytes.
+  /// A partition index finds candidate keepers without comparing every pair. Each member is
+  /// within the threshold of its suggested keeper; weak chains do not merge unrelated shots.
+  /// Quality is ordered first, so an attached member never displaces its group's anchor.
   public static func group(_ photos: [PhotoFingerprint], threshold: Int = 6) -> [SimilarPhotoGroup] {
-    var unique: [PhotoFingerprint] = []
-    var seenIdentities: Set<String> = []
-    for photo in photos {
-      if let identity = photo.identity, !seenIdentities.insert(identity).inserted { continue }
-      unique.append(photo)
+    let radius = min(64, max(0, threshold))
+    var seen: Set<String> = []
+    let unique = photos.filter { photo in
+      seen.insert(photo.identity.map { "inode:" + $0 } ?? "id:" + photo.id).inserted
+    }.sorted {
+      // Quantize sharpness to make the comparison transitive, then prefer resolution.
+      let l = Int((log2(max(1, $0.sharpness)) / log2(1.2)).rounded())
+      let r = Int((log2(max(1, $1.sharpness)) / log2(1.2)).rounded())
+      if l != r { return l > r }
+      if $0.pixelCount != $1.pixelCount { return $0.pixelCount > $1.pixelCount }
+      return $0.id < $1.id
     }
     guard unique.count > 1 else { return [] }
-
-    var parent = Array(0..<unique.count)
-    func root(_ i: Int) -> Int {
-      var i = i
-      while parent[i] != i {
-        parent[i] = parent[parent[i]]
-        i = parent[i]
-      }
-      return i
+    if radius == 64 { return [SimilarPhotoGroup(id: unique[0].id, photos: unique, keeperIndex: 0)] }
+    // Split all 64 bits into radius+1 disjoint parts. At most `radius` changed bits
+    // cannot touch every part, so every valid candidate shares at least one exact part.
+    // Index anchors only: every member must still pass a full-distance check to its keeper.
+    let partCount = radius + 1
+    var parts: [(shift: Int, mask: UInt64)] = []
+    var shift = 0
+    for part in 0..<partCount {
+      let width = 64 / partCount + (part < 64 % partCount ? 1 : 0)
+      parts.append((shift, width == 64 ? UInt64.max : (UInt64(1) << width) - 1))
+      shift += width
     }
-    for i in 0..<unique.count {
-      if i % 256 == 0, Task.isCancelled { return [] }
-      for j in (i + 1)..<unique.count where distance(unique[i].hash, unique[j].hash) <= threshold {
-        let (a, b) = (root(i), root(j))
-        if a != b { parent[b] = a }
-      }
-    }
-
-    var clusters: [Int: [PhotoFingerprint]] = [:]
-    for (index, photo) in unique.enumerated() { clusters[root(index), default: []].append(photo) }
-    return clusters.values.filter { $0.count > 1 }.map { members in
-      let sorted = members.sorted { ($0.captured ?? .distantPast, $0.id) < ($1.captured ?? .distantPast, $1.id) }
-      let keeper = sorted.indices.max { lhs, rhs in
-        let l = sorted[lhs]
-        let r = sorted[rhs]
-        // Prefer clearly sharper shots; among comparable ones, prefer more pixels.
-        if abs(l.sharpness - r.sharpness) > 0.15 * max(l.sharpness, r.sharpness) {
-          return l.sharpness < r.sharpness
+    var buckets = Array(repeating: [UInt64: [Int]](), count: partCount)
+    var exact: [UInt64: Int] = [:]
+    var visited: [Int] = []
+    var clusters: [[PhotoFingerprint]] = []
+    for (offset, photo) in unique.enumerated() {
+      if offset % 64 == 0, Task.isCancelled { return [] }
+      var match = exact[photo.hash]
+      if match == nil {
+        var bestDistance = radius + 1
+        let stamp = offset + 1
+        for (part, bits) in parts.enumerated() {
+          let key = (photo.hash >> bits.shift) & bits.mask
+          for candidate in buckets[part][key] ?? [] {
+            if visited[candidate] == stamp { continue }
+            visited[candidate] = stamp
+            let d = distance(photo.hash, clusters[candidate][0].hash)
+            if d <= radius && (d < bestDistance || (d == bestDistance && candidate < (match ?? Int.max))) {
+              match = candidate; bestDistance = d
+            }
+          }
         }
-        return l.pixelCount < r.pixelCount
-      } ?? 0
-      return SimilarPhotoGroup(id: sorted[0].id, photos: sorted, keeperIndex: keeper)
+      }
+      if let match {
+        clusters[match].append(photo)
+        exact[photo.hash] = match
+      } else {
+        let cluster = clusters.count
+        clusters.append([photo]); visited.append(0); exact[photo.hash] = cluster
+        for (part, bits) in parts.enumerated() {
+          buckets[part][(photo.hash >> bits.shift) & bits.mask, default: []].append(cluster)
+        }
+      }
     }
-    .sorted { $0.reclaimableBytes > $1.reclaimableBytes }
+    return clusters.filter { $0.count > 1 }.map { members in
+      SimilarPhotoGroup(id: members[0].id, photos: members, keeperIndex: 0)
+    }.sorted {
+      $0.reclaimableBytes == $1.reclaimableBytes ? $0.id < $1.id : $0.reclaimableBytes > $1.reclaimableBytes
+    }
   }
 
   /// Photos that are much blurrier than the folder's typical sharpness (relative, not absolute,
@@ -221,6 +244,10 @@ public enum PhotoAnalysis {
 // MARK: - Scanner (macOS image decoding)
 
 public struct PhotoScanResult: Sendable {
+  public let generation = UUID()
+  private let groupIndex: [String: Int]
+  private let photoIndex: [String: Int]
+  private let fileNameIndex: [String: [Int]]
   public let photos: [PhotoFingerprint]
   public let similarGroups: [SimilarPhotoGroup]
   public let blurry: [PhotoFingerprint]
@@ -234,6 +261,17 @@ public struct PhotoScanResult: Sendable {
     screenshots: [PhotoFingerprint], skippedLibraries: [String], issues: [ScanIssue],
     wasCancelled: Bool
   ) {
+    var index: [String: Int] = [:]
+    for (offset, group) in similarGroups.enumerated() {
+      for photo in group.photos where index[photo.id] == nil { index[photo.id] = offset }
+    }
+    self.groupIndex = index
+    self.photoIndex = Dictionary(photos.enumerated().map { ($0.element.id, $0.offset) }, uniquingKeysWith: { first, _ in first })
+    var names: [String: [Int]] = [:]
+    for (offset, photo) in photos.enumerated() where !photo.isLibraryAsset {
+      names[photo.url.lastPathComponent.lowercased(), default: []].append(offset)
+    }
+    self.fileNameIndex = names
     self.photos = photos
     self.similarGroups = similarGroups
     self.blurry = blurry
@@ -241,6 +279,20 @@ public struct PhotoScanResult: Sendable {
     self.skippedLibraries = skippedLibraries
     self.issues = issues
     self.wasCancelled = wasCancelled
+  }
+
+  /// Repeated selection and review must not scan every group for every photo.
+  public func group(containing photoID: String) -> SimilarPhotoGroup? {
+    groupIndex[photoID].map { similarGroups[$0] }
+  }
+
+  public func selectedPhotos(ids: Set<String>) -> [PhotoFingerprint] {
+    ids.compactMap { photoIndex[$0] }.sorted().map { photos[$0] }
+  }
+
+  /// Narrows alias-aware selection matching without traversing the full library per click.
+  public func fileCandidates(named name: String) -> [PhotoFingerprint] {
+    (fileNameIndex[name.lowercased()] ?? []).map { photos[$0] }
   }
 }
 
@@ -258,6 +310,7 @@ public actor PhotoScanner {
     var skippedLibraries: [String] = []
     let collector = IssueCollector()
     for root in roots {
+      if FileSystem.isIgnored(root, ignoredPaths: ignoredPaths) || PhotoAnalysis.isInsideLibraryPackage(root) { continue }
       guard
         let enumerator = fileManager.enumerator(
           at: root,
@@ -303,7 +356,7 @@ public actor PhotoScanner {
 
   static func fingerprint(_ url: URL) -> PhotoFingerprint? {
     #if canImport(ImageIO)
-      guard !PhotoAnalysis.isInsideLibraryPackage(url),
+      guard !PhotoAnalysis.isInsideLibraryPackage(url), !FileSystem.isCloudPlaceholder(url),
         let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
       else { return nil }
       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]

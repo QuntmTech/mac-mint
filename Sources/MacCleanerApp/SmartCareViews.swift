@@ -22,7 +22,7 @@ struct SmartCareList: View {
           if let ran = model.smartCareRanAt {
             Text("Checked \(ran.formatted(.relative(presentation: .named)))")
               .font(.caption)
-              .foregroundStyle(.tertiary)
+              .foregroundStyle(.secondary)
           }
         }
         AIReviewPanel()
@@ -43,8 +43,8 @@ struct RecommendationRow: View {
   private var tint: Color {
     switch recommendation.confidence {
     case .safe: return AppTheme.accentText
-    case .likely: return .blue
-    case .review: return .orange
+    case .likely: return AppTheme.info
+    case .review: return AppTheme.warning
     }
   }
 
@@ -79,7 +79,7 @@ struct RecommendationRow: View {
         Text("≈ " + ByteFormatter.string(recommendation.bytes))
           .font(.callout.monospacedDigit().weight(.semibold))
         if recommendation.count > 1 {
-          Text("\(recommendation.count) items").font(.caption2).foregroundStyle(.tertiary)
+          Text("\(recommendation.count) items").font(.caption2).foregroundStyle(.secondary)
         }
       }
 
@@ -125,7 +125,7 @@ struct SpaceHistoryCard: View {
               systemImage: change >= 0 ? "arrow.up.right" : "arrow.down.right"
             )
             .font(.caption.weight(.medium))
-            .foregroundStyle(change >= 0 ? AppTheme.accentText : Color.orange)
+            .foregroundStyle(change >= 0 ? AppTheme.accentText : AppTheme.warning)
           }
         }
         if model.spaceHistory.count >= 2 {
@@ -162,7 +162,7 @@ struct SpaceHistoryCard: View {
               Spacer()
               Text("+\(ByteFormatter.string(growth.delta))")
                 .font(.caption.monospacedDigit())
-                .foregroundStyle(.orange)
+                .foregroundStyle(AppTheme.warning)
             }
             .font(.caption)
           }
@@ -195,15 +195,10 @@ struct DownloadsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Downloads").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Large items you haven't opened in at least 3 months, with what macOS knows about them.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Downloads", subtitle: "See what you downloaded, when it changed, and what macOS knows about its use.") {
+        HStack(spacing: 8) {
         if !model.selectedDownloadIDs.isEmpty {
-          Button("Deselect") { model.selectedDownloadIDs = [] }
+          Button("Deselect") { model.keepQueuedFiles(model.queuedDownloads.map(\.url)) }
           Button {
             model.reviewDownloads()
           } label: {
@@ -215,6 +210,7 @@ struct DownloadsView: View {
         Button(model.downloadsScanned ? "Rescan" : "Scan") { model.scanDownloads() }
           .buttonStyle(.borderedProminent)
           .disabled(model.isScanning || model.isWorking)
+      }
       }
       .padding(AppTheme.pagePadding)
       Divider()
@@ -228,9 +224,9 @@ struct DownloadsView: View {
       } else if model.downloadItems.isEmpty {
         EmptyState(
           icon: model.downloadsScanned ? "checkmark.seal" : "arrow.down.circle",
-          title: model.downloadsScanned ? "Your Downloads folder is tidy" : "Find downloads you never used",
+          title: model.downloadsScanned ? "No downloads found" : "Take a look at your Downloads",
           detail:
-            "Uses Spotlight's \"last opened\" and \"date added\" records. Items with no record are judged only by when they last changed, and are never called unused.")
+            "Review downloads using their size, change dates, and available macOS usage records.")
       } else {
         HStack(spacing: 6) {
           filterChip(nil, title: "All")
@@ -239,13 +235,13 @@ struct DownloadsView: View {
           }
           Spacer()
           Button("Select Never Opened") {
-            model.selectedDownloadIDs.formUnion(visible.filter(\.usage.neverOpened).map(\.id))
+            for item in visible.filter(\.usage.neverOpened) { model.setFileSelection(item.url, selected: true) }
           }
           .disabled(!visible.contains { $0.usage.neverOpened })
         }
         .padding(.horizontal, AppTheme.pagePadding)
         .padding(.vertical, 10)
-        .background(.bar)
+        .background(AppTheme.surface)
         Divider()
         List(visible) { item in row(item) }
           .listStyle(.inset)
@@ -267,7 +263,7 @@ struct DownloadsView: View {
         isOn: Binding(
           get: { model.selectedDownloadIDs.contains(item.id) },
           set: { isOn in
-            if isOn { model.selectedDownloadIDs.insert(item.id) } else { model.selectedDownloadIDs.remove(item.id) }
+            model.setFileSelection(item.url, selected: isOn)
           })
       )
       .labelsHidden()
@@ -277,7 +273,7 @@ struct DownloadsView: View {
         HStack(spacing: 6) {
           Text(item.url.lastPathComponent).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
           if item.usage.neverOpened {
-            StatusPill(title: "Never opened", icon: "hand.thumbsup.fill", tint: .blue)
+            StatusPill(title: "Never opened", icon: "hand.thumbsup.fill", tint: AppTheme.info)
           }
         }
         Text(item.evidence).font(.caption).foregroundStyle(.secondary)

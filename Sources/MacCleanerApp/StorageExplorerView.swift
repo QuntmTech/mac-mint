@@ -3,6 +3,7 @@ import SwiftUI
 
 struct StorageExplorerView: View {
   @EnvironmentObject private var model: AppViewModel
+  @State private var showOrganizer = false
   @State private var hovered: String?
   @State private var focused: String?
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -16,10 +17,10 @@ struct StorageExplorerView: View {
         Divider()
         HSplitView {
           treemap(node)
-            .frame(minWidth: 360, maxWidth: .infinity, maxHeight: .infinity)
+            .frame(minWidth: 280, maxWidth: .infinity, maxHeight: .infinity)
             .padding(14)
           itemList(node)
-            .frame(minWidth: 340, idealWidth: 400, maxWidth: 520)
+            .frame(minWidth: 300, idealWidth: 340, maxWidth: 480)
         }
         Divider()
         coverageBar(scan)
@@ -32,40 +33,39 @@ struct StorageExplorerView: View {
             .foregroundStyle(.secondary)
           Text("Nothing is opened or downloaded — cloud-only files stay in the cloud.")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
           Button("Cancel") { model.cancelCurrentOperation() }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
         EmptyState(
           icon: "chart.pie", title: "See what's using your space",
-          detail: "Map your home folder or any drive. Click a block to dive in; select items to review them.")
+          detail: "Map your home folder or inspect a connected drive. Open a folder to explore, then review what you no longer need.",
+          actionTitle: "Map storage", action: { model.scanStorage() })
       }
     }
+    .sheet(isPresented: $showOrganizer) { OrganizerView() }
   }
 
   // MARK: Header
 
   private var header: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Storage").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text("A size map of \(model.storageRoot.path). Nothing changes until you review it.")
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-          .truncationMode(.middle)
+    PageHeader(title: "Storage", subtitle: "Explore your disk, folder by folder. Select items for a closer look.") {
+      HStack(spacing: 8) {
+      Button { showOrganizer = true } label: { Label("Organize…", systemImage: "folder.badge.gearshape") }
+      if !FileSystem.path(model.storageRoot, isInsideOrEqual: FileManager.default.homeDirectoryForCurrentUser) {
+        StatusPill(title: "Inspection only", icon: "eye", tint: .secondary)
       }
-      Spacer()
       if !model.selectedStoragePaths.isEmpty {
-        Button("Deselect") { model.selectedStoragePaths = [] }
+        Button("Deselect") { model.keepQueuedFiles(model.queuedStorageNodes.map(\.url)) }
         Button {
           model.reviewStorageSelection()
         } label: {
           Label(
-            "Review \(model.selectedStoragePaths.count) Selected (\(ByteFormatter.string(model.queuedStorageNodes.reduce(0) { $0 + $1.allocatedBytes })))",
-            systemImage: "trash")
+            "Review \(model.selectedStoragePaths.count) items",
+            systemImage: "checklist")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning)
       }
       Menu {
@@ -79,8 +79,9 @@ struct StorageExplorerView: View {
       }
       .fixedSize()
       Button(model.storageScan == nil ? "Scan" : "Rescan") { model.scanStorage() }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -90,7 +91,7 @@ struct StorageExplorerView: View {
       HStack(spacing: 4) {
         ForEach(Array(model.storageTrail.enumerated()), id: \.element.id) { index, node in
           if index > 0 {
-            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
           }
           Button {
             model.storagePath = index == 0 ? nil : node.id
@@ -108,7 +109,7 @@ struct StorageExplorerView: View {
       .padding(.horizontal, AppTheme.pagePadding)
       .padding(.vertical, 9)
     }
-    .background(.bar)
+    .background(AppTheme.surface)
   }
 
   // MARK: Treemap
@@ -165,7 +166,7 @@ struct StorageExplorerView: View {
   {
     let color = StorageStyle.color(for: node)
     let gradient = LinearGradient(
-      colors: [color.opacity(isHovered ? 1 : 0.88), color.opacity(isHovered ? 0.85 : 0.68)],
+      colors: [color, color.opacity(0.96)],
       startPoint: .topLeading, endPoint: .bottomTrailing)
     let corner: CGFloat = rect.width > 24 && rect.height > 24 ? 6 : 2
     let border: Color = isSelected ? .white : Color.black.opacity(0.08)
@@ -185,7 +186,7 @@ struct StorageExplorerView: View {
     if rect.width > 70 && rect.height > 34 {
       VStack(alignment: .leading, spacing: 1) {
         Text(node.name).font(.caption.weight(.semibold)).lineLimit(1)
-        Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2).opacity(0.85)
+        Text(ByteFormatter.string(node.allocatedBytes)).font(.caption2)
       }
       .foregroundStyle(.white)
       .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
@@ -216,7 +217,7 @@ struct StorageExplorerView: View {
     let total = max(node.allocatedBytes, 1)
     return List(node.children) { child in
       HStack(spacing: 10) {
-        if child.isActionable {
+        if model.storageRemovalAllowed(child) {
           Toggle(
             "",
             isOn: Binding(
@@ -273,7 +274,7 @@ struct StorageExplorerView: View {
     if node.kind == .folder && !node.children.isEmpty {
       Button("Open") { model.openStorageNode(node) }
     }
-    if node.isActionable {
+    if model.storageRemovalAllowed(node) {
       Button("Reveal in Finder") { model.reveal(node.url) }
       Button(model.selectedStoragePaths.contains(node.id) ? "Remove from Review" : "Add to Review") {
         model.toggleStorageSelection(node)
@@ -291,7 +292,7 @@ struct StorageExplorerView: View {
       Label("\(scan.coverage.scannedItems.formatted()) items", systemImage: "doc.on.doc")
       if !scan.coverage.inaccessiblePaths.isEmpty {
         Label("\(scan.coverage.inaccessiblePaths.count) unreadable", systemImage: "lock")
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
           .help("Grant Full Disk Access in System Settings to include protected folders.")
       }
       if scan.coverage.cloudOnlyItems > 0 {
@@ -301,11 +302,11 @@ struct StorageExplorerView: View {
         Label("\(scan.coverage.otherVolumes.count) other drive(s) skipped", systemImage: "externaldrive")
       }
       if scan.coverage.wasCancelled {
-        Label("Partial — scan was stopped", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+        Label("Partial — scan was stopped", systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
       }
       Spacer()
       Text("Sizes show space used on this disk; freed space appears after emptying the Trash.")
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .lineLimit(1)
     }
     .font(.caption)
@@ -325,18 +326,18 @@ enum StorageStyle {
   static func color(for node: StorageNode) -> Color {
     switch node.kind {
     case .folder: return AppTheme.accent
-    case .package: return Color(red: 0.25, green: 0.47, blue: 0.95)
-    case .aggregate: return Color.gray
-    case .inaccessible: return Color.red.opacity(0.7)
-    case .otherVolume: return Color.gray.opacity(0.6)
+    case .package: return Color(red: 0.17, green: 0.34, blue: 0.67)
+    case .aggregate: return Color(red: 0.36, green: 0.40, blue: 0.38)
+    case .inaccessible: return Color(red: 0.64, green: 0.23, blue: 0.23)
+    case .otherVolume: return Color(red: 0.33, green: 0.37, blue: 0.35)
     case .file:
       let ext = node.url.pathExtension.lowercased()
-      if video.contains(ext) { return Color(red: 0.55, green: 0.33, blue: 0.92) }
-      if audio.contains(ext) { return Color(red: 0.93, green: 0.33, blue: 0.56) }
-      if images.contains(ext) { return Color(red: 0.97, green: 0.55, blue: 0.18) }
-      if archives.contains(ext) { return Color(red: 0.62, green: 0.45, blue: 0.30) }
-      if models.contains(ext) { return Color(red: 0.10, green: 0.62, blue: 0.75) }
-      return Color(red: 0.42, green: 0.48, blue: 0.56)
+      if video.contains(ext) { return Color(red: 0.43, green: 0.28, blue: 0.66) }
+      if audio.contains(ext) { return Color(red: 0.64, green: 0.24, blue: 0.41) }
+      if images.contains(ext) { return Color(red: 0.59, green: 0.32, blue: 0.12) }
+      if archives.contains(ext) { return Color(red: 0.49, green: 0.35, blue: 0.24) }
+      if models.contains(ext) { return Color(red: 0.07, green: 0.42, blue: 0.49) }
+      return Color(red: 0.33, green: 0.39, blue: 0.46)
     }
   }
 

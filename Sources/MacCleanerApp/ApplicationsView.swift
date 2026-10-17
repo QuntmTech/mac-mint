@@ -1,13 +1,14 @@
 import AppKit
 import MacCleanerCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ApplicationsView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var updates: AppUpdatesStore
-  @State private var search = ""
-  @State private var sort: AppSort = .name
-  @State private var mode: Mode = .uninstall
+  @SceneStorage("apps.search") private var search = ""
+  @SceneStorage("apps.sort") private var sort: AppSort = .name
+  @SceneStorage("apps.mode") private var mode: Mode = .uninstall
 
   enum Mode: String, CaseIterable, Identifiable {
     case uninstall = "Uninstall"
@@ -58,19 +59,20 @@ struct ApplicationsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      Picker("Mode", selection: $mode) {
-        ForEach(Mode.allCases) { item in
-          if item == .updates, !updates.available.isEmpty {
-            Text("Updates (\(updates.available.count))").tag(item)
-          } else {
-            Text(item.rawValue).tag(item)
+      PageHeader(title: "Apps", subtitle: "A home for your apps and the files that belong to them.") {
+        Button { model.runSmartScan() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+          .buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isScanning || model.isWorking)
+      }.padding(AppTheme.pagePadding)
+      HStack {
+        Picker("Mode", selection: $mode) {
+          ForEach(Mode.allCases) { item in
+            Text(item == .updates && !updates.available.isEmpty ? "Updates (\(updates.available.count))" : item.rawValue).tag(item)
           }
-        }
-      }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .frame(width: 260)
-      .padding(.vertical, 10)
+        }.pickerStyle(.segmented).labelsHidden().frame(width: 240)
+        Spacer()
+        Label("Drop an app here to inspect", systemImage: "square.and.arrow.down")
+          .font(.caption).foregroundStyle(.secondary)
+      }.padding(.horizontal, AppTheme.pagePadding).padding(.bottom, 16)
       Divider()
       if mode == .updates {
         AppUpdatesView()
@@ -78,38 +80,35 @@ struct ApplicationsView: View {
         uninstaller
       }
     }
+    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      guard let provider = providers.first else { return false }
+      _ = provider.loadObject(ofClass: URL.self) { url, _ in
+        guard let url else { return }
+        Task { @MainActor in model.inspectDroppedApp(url) }
+      }
+      return true
+    }
   }
 
   private var uninstaller: some View {
     HSplitView {
       VStack(spacing: 0) {
         HStack {
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Applications").font(.title.bold())
-            Text("\(model.apps.count) installed apps").font(.caption).foregroundStyle(.secondary)
-          }
+          Text("Installed apps").font(.system(size: 13, weight: .semibold))
+          Text("\(model.apps.count)").font(.caption).foregroundStyle(.secondary)
           Spacer()
-          Button("Refresh") { model.runSmartScan() }
-            .disabled(model.isScanning || model.isWorking)
-        }
-        .padding(18)
-
-        HStack(spacing: 8) {
-          TextField("Search apps or bundle IDs", text: $search)
-            .textFieldStyle(.roundedBorder)
-          Picker("Sort", selection: $sort) {
-            ForEach(AppSort.allCases) { item in Text(item.rawValue).tag(item) }
-          }
-          .frame(width: 140)
-          .onAppear {
-            if model.applicationsSortByLastOpened {
-              sort = .lastOpened
-              model.applicationsSortByLastOpened = false
+          Menu {
+            Picker("Sort apps", selection: $sort) {
+              ForEach(AppSort.allCases) { item in Text(item.rawValue).tag(item) }
             }
-          }
-        }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 10)
+          } label: { Image(systemName: "arrow.up.arrow.down").accessibilityLabel("Sort apps") }
+            .menuStyle(.borderlessButton).fixedSize()
+            .onAppear {
+              if model.applicationsSortByLastOpened { sort = .lastOpened; model.applicationsSortByLastOpened = false }
+            }
+        }.padding(.horizontal, 18).padding(.top, 18).padding(.bottom, 12)
+        SearchField(prompt: "Search apps or bundle IDs", text: $search)
+          .padding(.horizontal, 14).padding(.bottom, 12)
 
         Divider()
 
@@ -141,7 +140,7 @@ struct ApplicationsView: View {
                 let days = Int(Date().timeIntervalSince(lastUsed) / 86_400)
                 Text(days < 1 ? "Opened today" : "Opened \(RelativeAge.describe(days: days)) ago")
                   .font(.caption2)
-                  .foregroundStyle(days >= 180 ? Color.orange : Color.secondary)
+                  .foregroundStyle(days >= 180 ? AppTheme.warning : Color.secondary)
               }
             }
             Spacer()
@@ -151,61 +150,53 @@ struct ApplicationsView: View {
         }
         .listStyle(.inset)
       }
-      .frame(minWidth: 340, idealWidth: 380)
+      .frame(minWidth: 250, idealWidth: 290, maxWidth: 360)
 
       detail
-        .frame(minWidth: 520)
+        .frame(minWidth: 380)
     }
+  }
+
+  @ViewBuilder private func appDetails(_ app: AppRecord) -> some View {
+    Text(ByteFormatter.string(app.bundleSize)).font(.caption.weight(.medium)).foregroundStyle(AppTheme.accentText)
+    if let version = app.version { Text("Version " + version).font(.caption).foregroundStyle(.secondary) }
+    if model.selectedAppIsRunning { StatusPill(title: "Running", icon: "play.circle.fill", tint: AppTheme.warning) }
   }
 
   @ViewBuilder
   private var detail: some View {
     if let app = model.selectedApp {
       VStack(alignment: .leading, spacing: 0) {
-        HStack(spacing: 15) {
+        HStack(alignment: .top, spacing: 14) {
           Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
-            .resizable()
-            .interpolation(.high)
-            .frame(width: 68, height: 68)
-          VStack(alignment: .leading, spacing: 4) {
-            Text(app.name).font(.system(size: 28, weight: .bold, design: .rounded))
-            Text(app.bundleIdentifier ?? "No bundle identifier")
-              .font(.callout)
-              .foregroundStyle(.secondary)
-              .textSelection(.enabled)
-            HStack(spacing: 8) {
-              StatusPill(
-                title: ByteFormatter.string(app.bundleSize), icon: "externaldrive",
-                tint: AppTheme.accentText)
-              if let version = app.version {
-                StatusPill(title: "Version \(version)", icon: "number")
-              }
-              if model.selectedAppIsRunning {
-                StatusPill(title: "Running", icon: "play.circle.fill", tint: .orange)
-              }
-            }
+            .resizable().interpolation(.high).frame(width: 54, height: 54)
+          VStack(alignment: .leading, spacing: 7) {
+            Text(app.name).font(.system(size: 23, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(app.bundleIdentifier ?? "No bundle identifier").font(.caption).foregroundStyle(.secondary)
+              .textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+            ViewThatFits(in: .horizontal) {
+              HStack(spacing: 8) { appDetails(app) }
+              VStack(alignment: .leading, spacing: 6) { appDetails(app) }
+            }.fixedSize(horizontal: false, vertical: true)
           }
-          Spacer()
-          Button("Reveal App") { model.reveal(app.url) }
-        }
-        .padding(AppTheme.pagePadding)
+          Spacer(minLength: 0)
+          Button { model.reveal(app.url) } label: { Image(systemName: "arrow.up.right.square") }
+            .buttonStyle(.plain).help("Reveal app in Finder").accessibilityLabel("Reveal app in Finder")
+        }.padding(22)
 
         Divider()
 
-        VStack(alignment: .leading, spacing: 12) {
-          HStack {
-            VStack(alignment: .leading, spacing: 3) {
+        ScrollView {
+        LazyVStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 10) {
+            HStack {
               Text("Related files").font(.headline)
-              Text(
-                "Exact bundle-ID matches are selected automatically. Helpers, shared containers, and name matches stay review-only."
-              )
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              Spacer()
+              Button("Keep my settings") { model.selectedLeftoverIDs = [] }
+                .controlSize(.small).help("Leave settings and related data in place")
             }
-            Spacer()
-            StatusPill(
-              title: "\(model.selectedLeftoverIDs.count) selected", icon: "checkmark.circle",
-              tint: AppTheme.accentText)
+            Text("Exact bundle-ID matches are selected. Shared data and uncertain matches stay yours to review.")
+              .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
           }
 
           if model.isScanning && model.operationTitle?.contains(app.name) == true {
@@ -219,7 +210,7 @@ struct ApplicationsView: View {
               icon: "checkmark.seal", title: "No related files found",
               detail: "No matching user-level leftovers were detected for this app.")
           } else {
-            List(model.appLeftovers) { leftover in
+            ForEach(model.appLeftovers) { leftover in
               HStack(spacing: 11) {
                 Toggle(
                   "",
@@ -240,16 +231,16 @@ struct ApplicationsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                   Text(leftover.url.lastPathComponent).fontWeight(.medium)
                   Text(leftover.reason).font(.caption).foregroundStyle(.secondary)
-                  Text(leftover.url.path).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                  Text(leftover.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 if leftover.isShared {
-                  StatusPill(title: "Shared", icon: "person.2", tint: .purple)
+                  StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
                 }
                 StatusPill(
                   title: leftover.confidence.rawValue.capitalized,
                   icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
-                  tint: leftover.confidence == .high ? .green : .orange
+                  tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
                 )
                 Text(ByteFormatter.string(leftover.size))
                   .font(.callout.monospacedDigit())
@@ -266,14 +257,14 @@ struct ApplicationsView: View {
               }
               .padding(.vertical, 4)
             }
-            .listStyle(.inset)
           }
         }
         .padding(.horizontal, AppTheme.pagePadding)
-        .padding(.top, 18)
-
-        Spacer(minLength: 0)
-
+        .padding(.vertical, 18)
+        }
+      }
+      .safeAreaInset(edge: .bottom, spacing: 0) {
+        VStack(spacing: 0) {
         Divider()
         HStack {
           VStack(alignment: .leading, spacing: 2) {
@@ -289,7 +280,7 @@ struct ApplicationsView: View {
             } label: {
               Label("Quit App First", systemImage: "power")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MintButtonStyle())
             .tint(.orange)
             .disabled(model.isWorking || model.isScanning)
           } else {
@@ -298,17 +289,19 @@ struct ApplicationsView: View {
             } label: {
               Label("Review Uninstall…", systemImage: "trash")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(MintButtonStyle())
             .disabled(model.isWorking || model.isScanning)
           }
         }
         .padding(18)
+        }.background(AppTheme.surface)
+          .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["app review": geometry.frame(in: .global)]) })
       }
     } else {
       EmptyState(
-        icon: "app.dashed", title: "Choose an application",
+        icon: "square.stack.3d.up", title: "Get to know your apps",
         detail:
-          "Select an app to inspect its bundle and related Library files before uninstalling it.")
+          "Choose an app from the list, or drop an app into this window to inspect its related files before uninstalling.")
     }
   }
 }

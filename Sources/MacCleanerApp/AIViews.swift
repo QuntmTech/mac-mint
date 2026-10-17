@@ -22,7 +22,7 @@ struct ExplainMenuItem: View {
   @EnvironmentObject private var account: AccountStore
 
   var body: some View {
-    if account.aiAvailable, let target {
+    if account.aiStatus.allows("explain"), let target {
       Button {
         model.explain(target)
       } label: {
@@ -65,11 +65,11 @@ struct ExplainSheet: View {
             Text(rule).font(.callout)
           }
         } icon: {
-          Image(systemName: "checkmark.shield.fill").foregroundStyle(.orange)
+          Image(systemName: "checkmark.shield.fill").foregroundStyle(AppTheme.warning)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(AppTheme.warning.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       }
 
       Divider()
@@ -81,8 +81,8 @@ struct ExplainSheet: View {
           detail("If moved to the Trash", explanation.whatHappens)
           detail("Confidence", explanation.confidence.capitalized)
         }
-      } else if let error = model.aiError {
-        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+      } else if let error = model.explanationError {
+        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
       } else {
         HStack(spacing: 8) {
           ProgressView().controlSize(.small)
@@ -92,9 +92,9 @@ struct ExplainSheet: View {
 
       Spacer(minLength: 0)
       AIDisclaimer()
-      Text("Only the name “\(target.request.identifier)” and its Library area were sent — never the path or file contents.")
+      Text("Sent: “\(target.request.identifier)” and its category. Unrecognized names are omitted. No path or file contents.")
         .font(.caption2)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
       HStack {
         Spacer()
@@ -116,9 +116,9 @@ struct ExplainSheet: View {
 
   private func verdictPill(_ verdict: AIExplanation.Verdict) -> some View {
     switch verdict {
-    case .safe: return StatusPill(title: "Usually safe", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
-    case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: .orange)
-    case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: .red)
+    case .safe: return StatusPill(title: "Rebuildable cache", icon: "checkmark.circle.fill", tint: AppTheme.accentText)
+    case .caution: return StatusPill(title: "Use caution", icon: "exclamationmark.triangle.fill", tint: AppTheme.warning)
+    case .keep: return StatusPill(title: "Keep", icon: "hand.raised.fill", tint: AppTheme.danger)
     case .unknown: return StatusPill(title: "Not sure", icon: "questionmark.circle", tint: .gray)
     }
   }
@@ -136,16 +136,19 @@ struct AIConsentSheet: View {
       Text("AI features are optional. When you use one, MacMint sends a small summary to its server, which asks Anthropic's Claude and returns advice.")
         .fixedSize(horizontal: false, vertical: true)
       VStack(alignment: .leading, spacing: 6) {
-        point("checkmark.circle", "Sent: item names (like com.spotify.client), sizes, categories, app names, and folder paths relative to your home folder.")
-        point("xmark.circle", "Never sent: file contents, personal file names, your account name, or email addresses.")
+        point("checkmark.circle", "Automatic context: sizes, storage categories, and recognized app or tool identifiers. Unrecognized names and personal folder paths are omitted.")
+        point("xmark.circle", "File contents are never sent. Your typed questions and recent conversation are sent as written; avoid including private information.")
         point("hand.raised", "AI only advises. It can't select, change, or remove anything, and MacMint's safety rules always win.")
+      }
+      DisclosureGroup("See the context that will be sent") {
+        ScrollView { Text(model.aiPayloadPreview).font(.system(.caption, design: .monospaced)).textSelection(.enabled) }.frame(maxHeight: 180)
       }
       Text("You can turn this off any time in Settings.").font(.caption).foregroundStyle(.secondary)
       HStack {
         Spacer()
-        Button("Not Now") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button("Not Now") { model.pendingAIAction = nil; dismiss() }.keyboardShortcut(.cancelAction)
         Button("Turn On AI") {
-          model.aiEnabled = true
+          model.acceptAIConsent()
           dismiss()
         }
         .keyboardShortcut(.defaultAction)
@@ -172,7 +175,7 @@ struct AIReviewPanel: View {
   @EnvironmentObject private var account: AccountStore
 
   var body: some View {
-    if account.aiAvailable, !model.recommendations.isEmpty {
+    if account.aiStatus.allows("review"), !model.recommendations.isEmpty {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 10) {
           if let review = model.aiReview {
@@ -196,13 +199,13 @@ struct AIReviewPanel: View {
               Label(model.aiReview == nil ? "Review with AI" : "Review Again", systemImage: "sparkles")
             }
           }
-          .disabled(model.aiReviewBusy)
+          .disabled(model.aiReviewBusy || model.isScanning || model.isWorking)
         }
         if let review = model.aiReview {
           ForEach(review.cautions, id: \.self) { caution in
             Label(caution, systemImage: "exclamationmark.triangle.fill")
               .font(.caption)
-              .foregroundStyle(.orange)
+              .foregroundStyle(AppTheme.warning)
               .fixedSize(horizontal: false, vertical: true)
           }
           ForEach(review.insights, id: \.self) { insight in
@@ -218,8 +221,8 @@ struct AIReviewPanel: View {
           }
           AIDisclaimer()
         }
-        if let error = model.aiError, !model.aiReviewBusy, model.selectedSection != .assistant {
-          Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
+        if let error = model.reviewAIError, !model.aiReviewBusy, model.selectedSection != .assistant {
+          Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppTheme.warning)
         }
       }
       .padding(12)
@@ -247,8 +250,8 @@ struct AIRecommendationNote: View {
 struct AssistantView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
-  @State private var draft = ""
   @FocusState private var focused: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   private let suggestions = [
     "What's using the most space on my Mac?",
@@ -259,23 +262,15 @@ struct AssistantView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      HStack(alignment: .firstTextBaseline) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Ask MacMint").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Questions about your Mac's storage, answered from an anonymized summary of your scans.")
-            .foregroundStyle(.secondary)
-        }
-        Spacer()
+      PageHeader(title: "Ask MacMint", subtitle: "A second opinion on your storage. AI advises; you decide.") {
         if !model.assistantTurns.isEmpty {
-          Button("New Chat") {
-            model.assistantTurns = []
-            model.aiError = nil
-          }
+          Button("New chat", systemImage: "square.and.pencil") { model.resetAIState() }
+            .buttonStyle(MintButtonStyle(prominent: false))
         }
       }
       .padding(AppTheme.pagePadding)
 
-      if !account.aiAvailable {
+      if !account.aiStatus.allows("ask") {
         EmptyState(
           icon: "sparkles", title: "AI is unavailable",
           detail: "MacMint AI is turned off right now or you're offline. Everything else works as usual.")
@@ -295,7 +290,7 @@ struct AssistantView: View {
                 .id("busy")
               }
               if let error = model.aiError {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
               }
             }
             .padding(.horizontal, AppTheme.pagePadding)
@@ -305,7 +300,7 @@ struct AssistantView: View {
           }
           .onChange(of: model.assistantTurns.count) {
             if let last = model.assistantTurns.last?.id {
-              withAnimation { proxy.scrollTo(last, anchor: .bottom) }
+              withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { proxy.scrollTo(last, anchor: .bottom) }
             }
           }
         }
@@ -317,7 +312,7 @@ struct AssistantView: View {
   private var suggestionGrid: some View {
     VStack(alignment: .leading, spacing: 10) {
       if model.recommendations.isEmpty && model.storageScan == nil {
-        Label("Run Smart Scan or open Storage first so MacMint has something to look at.", systemImage: "info.circle")
+        Label("Run Quick Scan or open Storage first so MacMint has something to look at.", systemImage: "info.circle")
           .font(.callout)
           .foregroundStyle(.secondary)
       }
@@ -348,11 +343,13 @@ struct AssistantView: View {
 
   private func bubble(_ turn: AITurn) -> some View {
     VStack(alignment: turn.role == .user ? .trailing : .leading, spacing: 8) {
+      Label(turn.role == .user ? "You" : "MacMint", systemImage: turn.role == .user ? "person.crop.circle" : "sparkles")
+        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
       Text(Self.rendered(turn.text))
         .textSelection(.enabled)
         .padding(12)
         .background(
-          turn.role == .user ? AppTheme.accent.opacity(0.14) : AppTheme.panel,
+          turn.role == .user ? AppTheme.selection : AppTheme.surface,
           in: RoundedRectangle(cornerRadius: 12, style: .continuous))
       if !turn.actions.isEmpty {
         HStack(spacing: 8) {
@@ -367,7 +364,7 @@ struct AssistantView: View {
         }
       }
       if turn.role == .assistant {
-        Text("AI-generated — may be wrong").font(.caption2).foregroundStyle(.tertiary)
+        Text("AI-generated — may be wrong").font(.caption2).foregroundStyle(.secondary)
       }
     }
     .frame(maxWidth: .infinity, alignment: turn.role == .user ? .trailing : .leading)
@@ -375,30 +372,33 @@ struct AssistantView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      TextField("Ask about your Mac's storage…", text: $draft, axis: .vertical)
-        .textFieldStyle(.roundedBorder)
+      TextField("Ask about your Mac’s storage…", text: $model.assistantDraft, axis: .vertical)
+        .textFieldStyle(.plain).font(.callout).padding(12)
+        .background(AppTheme.canvas, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(AppTheme.border))
         .lineLimit(1...4)
         .focused($focused)
-        .onSubmit { send(draft) }
+        .onSubmit { send(model.assistantDraft) }
       Button {
-        send(draft)
+        send(model.assistantDraft)
       } label: {
         Image(systemName: "arrow.up.circle.fill").font(.title2)
           .accessibilityLabel("Send")
       }
       .buttonStyle(.plain)
       .foregroundStyle(AppTheme.accentText)
-      .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy)
+      .disabled(model.assistantDraft.trimmingCharacters(in: .whitespaces).isEmpty || model.assistantBusy || model.isScanning || model.isWorking)
     }
     .padding(.horizontal, AppTheme.pagePadding)
     .padding(.vertical, 12)
-    .background(.bar)
+    .background(AppTheme.surface)
     .overlay(alignment: .top) { Divider() }
   }
 
   private func send(_ text: String) {
-    model.ask(String(text.prefix(600)), account: account)
-    if model.aiEnabled { draft = "" }
+    guard !model.assistantBusy else { return }
+    model.assistantDraft = String(text.prefix(600))
+    model.ask(model.assistantDraft, account: account)
   }
 }
 
@@ -417,23 +417,25 @@ struct AISettingsCard: View {
           Toggle("", isOn: Binding(get: { model.aiEnabled }, set: { model.aiEnabled = $0 }))
             .toggleStyle(.switch)
             .labelsHidden()
-            .disabled(!account.aiAvailable)
             .accessibilityLabel("MacMint AI")
         }
         Text(
           account.aiAvailable
-            ? "Explain unfamiliar items, get a second opinion on Smart Care, and ask questions about your storage. AI only advises — it can't select or remove anything, and MacMint's safety rules always win."
-            : "MacMint AI is currently unavailable. Everything else works as usual."
+            ? "Explain unfamiliar items, get a second opinion on Quick Scan, and ask questions about your storage. AI only advises — it can't select or remove anything, and MacMint's safety rules always win."
+            : (account.aiStatus.reachable ? "MacMint AI is turned off by the service. Local tools remain available." : "The AI service could not be reached. You can still withdraw consent here and use local tools.")
         )
         .font(.callout)
         .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
         Text(
-          "When on, MacMint sends item names, sizes, categories, app names, and home-relative folder paths to its server, which asks Anthropic's Claude. File contents, personal file names, your account name, and email addresses are never sent. Usage counts are kept for daily limits; questions and answers are not stored."
+          "Automatic context uses sizes, storage categories and recognized app/tool identifiers. Personal folder paths and unrecognized names are omitted. Your typed questions and recent conversation are sent as written to MacMint's server and Anthropic. File contents are never sent. The separate Organizer asks before each request to share the displayed file and destination-folder names. MacMint keeps usage counts for limits; its application database does not store chat transcripts."
         )
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
         .fixedSize(horizontal: false, vertical: true)
+        DisclosureGroup("Preview automatic chat context") {
+          Text(model.previewPayload(model.aiContext)).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
       }
     }
   }

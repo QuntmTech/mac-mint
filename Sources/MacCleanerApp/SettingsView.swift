@@ -7,11 +7,8 @@ struct SettingsView: View {
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 18) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text("Settings").font(.system(size: 30, weight: .bold, design: .rounded))
-          Text("Safety, exclusions, permissions, and local privacy controls.")
-            .foregroundStyle(.secondary)
-        }
+        PageHeader("Settings", subtitle: "Your workspace, your preferences. Safety and privacy stay in your control.")
+        AppearanceSettingsCard()
 
         AccountSettingsCard()
 
@@ -25,7 +22,7 @@ struct SettingsView: View {
           VStack(alignment: .leading, spacing: 12) {
             Label("Safety model", systemImage: "checkmark.shield.fill")
               .font(.headline)
-              .foregroundStyle(.green)
+              .foregroundStyle(AppTheme.accentText)
             settingRow("Deletion mode", value: "Trash-first")
             settingRow("Automatic personal-file cleanup", value: "Blocked")
             settingRow("System-owned cleanup", value: "Read-only")
@@ -44,18 +41,21 @@ struct SettingsView: View {
               Label("Scan exclusions", systemImage: "hand.raised.fill")
                 .font(.headline)
               Spacer()
-              if !model.ignoredPaths.isEmpty {
+              if !model.ignoredPaths.isEmpty || model.exclusionLoadError != nil {
                 Button("Clear all", role: .destructive) { confirmClear = true }
                   .controlSize(.small)
               }
             }
             Text(
-              "Excluded folders are skipped by cleanup, large-file, duplicate, and app-leftover scans."
+              "Excluded folders are skipped by cleanup, storage, developer, photo, large-file, duplicate, and app-leftover scans."
             )
             .font(.caption)
             .foregroundStyle(.secondary)
 
-            if model.ignoredPaths.isEmpty {
+            if let error = model.exclusionLoadError {
+              Text(error).foregroundStyle(AppTheme.warning)
+              Button("Show Exclusion Files") { model.reveal(AppPaths.supportDirectory) }
+            } else if model.ignoredPaths.isEmpty {
               Text("No exclusions saved.")
                 .foregroundStyle(.secondary)
                 .padding(.vertical, 8)
@@ -102,9 +102,9 @@ struct SettingsView: View {
             Label("Privacy", systemImage: "hand.raised.square")
               .font(.headline)
             settingRow("Telemetry", value: "None")
-            settingRow("Network calls", value: model.aiEnabled ? "Account, license & AI requests" : "Account & license checks only")
-            settingRow("File contents or personal file names uploaded", value: "Never")
-            settingRow("AI summaries", value: model.aiEnabled ? "Anonymized, only when you ask" : "Off")
+            settingRow("Network calls", value: model.aiEnabled ? "Account, releases, optional app updates & AI" : "Account, release and optional app-update checks")
+            settingRow("File contents uploaded", value: "Never")
+            settingRow("AI summaries", value: model.aiEnabled ? "Categories, only when requested" : "Off")
             settingRow("Cleanup history", value: "Local JSON")
             settingRow("Exclusions", value: "Local JSON")
           }
@@ -147,7 +147,7 @@ struct HelpersSettingsCard: View {
             if enabled != care.launchesAtLogin { care.setLaunchAtLogin(enabled) }
           }
         if let error = care.launchAtLoginError {
-          Text(error).font(.caption).foregroundStyle(.orange)
+          Text(error).font(.caption).foregroundStyle(AppTheme.warning)
         }
         Divider()
         HStack {
@@ -161,14 +161,14 @@ struct HelpersSettingsCard: View {
         }
         Toggle("Remind me to scan if a week goes by", isOn: $scanReminders)
         Text(
-          "Alerts are checked while MacMint or its menu bar item is running, at most once a day, and never between 10 pm and 8 am. Nothing is ever cleaned automatically."
+          "Alerts are checked while MacMint or its menu bar item is running, at most once a day, and never between 10 pm and 8 am. Removal always needs your confirmation."
         )
         .font(.caption)
         .foregroundStyle(.secondary)
         if care.notificationsDenied {
           Text("Notifications are turned off for MacMint in System Settings → Notifications.")
             .font(.caption)
-            .foregroundStyle(.orange)
+            .foregroundStyle(AppTheme.warning)
         }
       }
       .toggleStyle(.switch)
@@ -192,17 +192,22 @@ struct AboutSettingsCard: View {
           Text("Version \(UpdateService.currentVersion)").foregroundStyle(.secondary)
         }
         HStack {
-          switch updates.status {
+          if let error = updates.checkError {
+            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
+          } else if updates.lastChecked == nil {
+            Text("Not checked").foregroundStyle(.secondary)
+          } else { switch updates.status {
           case .current:
-            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(AppTheme.accentText)
           case .available(let release):
             Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
               .foregroundStyle(AppTheme.accentText)
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
           case .required(let release, let minimum):
             Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
-              .foregroundStyle(.orange)
+              .foregroundStyle(AppTheme.warning)
             Button("Download") { updates.openDownload(release) }.controlSize(.small)
+          }
           }
           Spacer()
           Button(checking ? "Checking…" : "Check Now") {
@@ -218,7 +223,7 @@ struct AboutSettingsCard: View {
         if let date = updates.lastChecked {
           Text("Last checked \(date.formatted(.relative(presentation: .named)))")
             .font(.caption)
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.secondary)
         }
       }
     }

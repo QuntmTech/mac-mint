@@ -49,6 +49,41 @@ final class SimilarPhotosTests: XCTestCase {
     XCTAssertEqual(PhotoAnalysis.group(photos).first?.keeper.url.lastPathComponent, "large.jpg")
   }
 
+  func testPartitionIndexMatchesExhaustiveAnchorSearchAtBoundaryRadii() {
+    var state: UInt64 = 42
+    var samples: [PhotoFingerprint] = []
+    for index in 0..<120 {
+      state = state &* 6364136223846793005 &+ 1
+      let hash = index % 3 == 0 ? state : samples.last!.hash ^ (UInt64(1) << (index % 64))
+      samples.append(photo(String(format: "%03d.jpg", index), hash: hash, sharpness: 100))
+    }
+    for threshold in [0, 1, 6, 12, 63, 64] {
+      var reference: [[PhotoFingerprint]] = []
+      for sample in samples {
+        let candidates = reference.indices.filter { PhotoAnalysis.distance(sample.hash, reference[$0][0].hash) <= threshold }
+        if let best = candidates.min(by: { lhs, rhs in
+          let l = PhotoAnalysis.distance(sample.hash, reference[lhs][0].hash)
+          let r = PhotoAnalysis.distance(sample.hash, reference[rhs][0].hash)
+          return l == r ? lhs < rhs : l < r
+        }) { reference[best].append(sample) } else { reference.append([sample]) }
+      }
+      let expected = Set(reference.filter { $0.count > 1 }.map { $0.map(\.id).sorted().joined(separator: "|") })
+      let actual = Set(PhotoAnalysis.group(samples, threshold: threshold).map { $0.photos.map(\.id).sorted().joined(separator: "|") })
+      XCTAssertEqual(actual, expected, "No candidate can be missed at radius \(threshold)")
+    }
+  }
+
+  func testWeakSimilarityChainCannotMergeDissimilarEndpoints() {
+    let photos = [photo("a.jpg", hash: 0, sharpness: 100),
+      photo("b.jpg", hash: 0b111111, sharpness: 100),
+      photo("c.jpg", hash: 0b111111111111, sharpness: 100)]
+    let groups = PhotoAnalysis.group(photos, threshold: 6)
+    XCTAssertEqual(groups.first?.photos.count, 2)
+    for group in groups {
+      XCTAssertTrue(group.photos.allSatisfy { PhotoAnalysis.distance($0.hash, group.keeper.hash) <= 6 })
+    }
+  }
+
   func testHardLinksAreNotSimilarPhotos() {
     let photos = [
       photo("one.jpg", hash: 7, sharpness: 1, identity: "1:42"),
@@ -121,5 +156,19 @@ final class PhotoPlanTests: XCTestCase {
     let plan = OperationPlanner.plan(title: "Photos", items: items)
     XCTAssertEqual(plan.items.map(\.url.lastPathComponent), ["a.jpg"])
     XCTAssertEqual(plan.excluded.map(\.url.lastPathComponent), ["b.jpg"])
+  }
+}
+
+extension SimilarPhotosTests {
+  func testScanLookupPreservesCaseInsensitiveFilenameCandidatesAndKeeperGroup() {
+    let a = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/A.JPG"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let b = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/sub/a.jpg"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let group = SimilarPhotoGroup(id: "pair", photos: [a,b], keeperIndex: 0)
+    let scan = PhotoScanResult(photos: [a,b], similarGroups: [group], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
+    XCTAssertEqual(scan.group(containing: b.id)?.keeper.id, a.id)
+    XCTAssertNil(scan.group(containing: "absent"))
+    XCTAssertEqual(scan.selectedPhotos(ids: [b.id, "absent"]).map(\.id), [b.id])
+    XCTAssertEqual(Set(scan.fileCandidates(named: "a.jpg").map(\.id)), [a.id,b.id])
+    XCTAssertTrue(scan.fileCandidates(named: "missing.jpg").isEmpty)
   }
 }

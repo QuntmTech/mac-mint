@@ -76,6 +76,7 @@ struct AppUpdatesView: View {
               .foregroundStyle(.secondary)
             }
             Spacer()
+            Text(update.statusLabel).font(.caption).foregroundStyle(update.checkState == .failed ? AppTheme.warning : Color.secondary)
             StatusPill(title: update.source.label, icon: icon(update.source), tint: .secondary)
             action(update)
           }
@@ -102,8 +103,10 @@ struct AppUpdatesView: View {
       }
       .controlSize(.small)
       .help("This app updates itself — use “Check for Updates…” in its app menu.")
+    case .unsupported:
+      EmptyView()
     case .homebrew(let token):
-      Button("Copy Command") { model.copyCommand("brew upgrade --cask \(token)") }
+      Button("Copy Command") { model.copyCommand("brew upgrade --cask \(ShellArgument.quote(token))") }
         .controlSize(.small)
     }
   }
@@ -113,6 +116,7 @@ struct AppUpdatesView: View {
     case .appStore: return "bag"
     case .sparkle: return "sparkles"
     case .homebrew: return "mug"
+    case .unsupported: return "questionmark.circle"
     }
   }
 }

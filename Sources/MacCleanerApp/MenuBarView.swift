@@ -9,6 +9,8 @@ struct MenuBarView: View {
   @EnvironmentObject private var monitor: SystemMonitor
   @Environment(\.openWindow) private var openWindow
 
+  @State private var monitoringLease = UUID()
+
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(spacing: 10) {
@@ -51,27 +53,21 @@ struct MenuBarView: View {
 
       Divider()
 
-      if account.isUnlocked {
-        Button {
-          open(.dashboard)
-          model.runSmartScan()
-        } label: {
-          Label(model.isScanning ? "Scanning…" : "Run Smart Scan", systemImage: "sparkles")
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(model.isScanning || model.isWorking)
-        HStack {
-          Button("Storage") { open(.storage) }
-          Button("Performance") { open(.performance) }
-          Button("Review (\(model.queuedCount))") { open(.review) }
-        }
-        .controlSize(.small)
-      } else {
-        Button("Sign in to MacMint") { open(nil) }
-          .buttonStyle(.borderedProminent)
+      Button {
+        open(.dashboard)
+        model.runSmartScan()
+      } label: {
+        Label(model.isScanning ? "Scanning…" : "Quick Scan", systemImage: "sparkles")
           .frame(maxWidth: .infinity)
       }
+      .buttonStyle(MintButtonStyle())
+      .disabled(model.isScanning || model.isWorking)
+      HStack {
+        Button("Storage") { open(.storage) }
+        Button("Performance") { open(.performance) }
+        Button("Review (\(model.queuedCount))") { open(.review) }
+      }
+      .controlSize(.small)
 
       HStack {
         Button("Open MacMint") { open(nil) }
@@ -83,24 +79,26 @@ struct MenuBarView: View {
     }
     .padding(16)
     .frame(width: 320)
-    .onAppear { monitor.start(interval: 3) }
-    .onDisappear { monitor.stop() }
+    .background(AppTheme.canvas)
+    .onAppear { monitor.start(lease: monitoringLease, interval: 4) }
+    .onDisappear { monitor.stop(lease: monitoringLease) }
   }
 
   private var monitorSummary: String {
     switch monitor.snapshot.pressure {
     case .critical: return "Memory is under heavy pressure"
     case .warning: return "Memory is getting tight"
-    default:
+    case .unknown: return "Readings are not available yet"
+    case .normal:
       return monitor.snapshot.diskUsedFraction > 0.9 ? "Disk is almost full" : "Everything looks healthy"
     }
   }
 
   private var pressureColor: Color {
     switch monitor.snapshot.pressure {
-    case .normal: return .green
-    case .warning: return .orange
-    case .critical: return .red
+    case .normal: return AppTheme.accentText
+    case .warning: return AppTheme.warning
+    case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
   }
@@ -124,11 +122,11 @@ struct MetricTile: View {
       Text(value).font(.system(.callout, design: .rounded).weight(.bold)).foregroundStyle(tint)
         .lineLimit(1)
         .minimumScaleFactor(0.7)
-      Text(detail).font(.caption2).foregroundStyle(.tertiary).lineLimit(1).minimumScaleFactor(0.7)
+      Text(detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(8)
-    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     .accessibilityElement(children: .combine)
   }
 }

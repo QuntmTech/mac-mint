@@ -4,7 +4,8 @@ import SwiftUI
 
 struct PhotosView: View {
   @EnvironmentObject private var model: AppViewModel
-  @State private var tab: PhotoTab = .similar
+  @State private var comparing: SimilarPhotoGroup?
+  @SceneStorage("photos.tab") private var tab: PhotoTab = .similar
 
   private var isLibrary: Bool { model.photoSource == .library }
 
@@ -16,51 +17,50 @@ struct PhotosView: View {
         progress
       } else if let scan = model.photoScan {
         Picker("", selection: $tab) {
-          ForEach(isLibrary ? [PhotoTab.similar, .blurry] : PhotoTab.allCases) { tab in
+          ForEach(isLibrary ? [PhotoTab.deck, .similar, .blurry] : PhotoTab.allCases) { tab in
             Text(label(for: tab, scan: scan)).tag(tab)
           }
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(maxWidth: 420)
+        .frame(maxWidth: 540)
         .padding(.vertical, 10)
         Divider()
         content(scan)
       } else {
         EmptyState(
-          icon: "photo.on.rectangle.angled", title: "Find similar shots, blurry photos, and old screenshots",
+          icon: "photo.on.rectangle.angled", title: "Make room for your best shots",
           detail:
-            "Check your Photos library or any folder. Nothing is selected for you, and the best shot in each set is always kept.")
+            "Check your Photos library or any folder. Nothing is selected for you. Compare each set and choose the copy to keep.",
+          actionTitle: "Scan photos", action: { model.scanPhotos() })
       }
+    }
+    .sheet(item: $comparing) { group in PhotoComparisonSheet(group: group) }
+    .onAppear { if isLibrary && tab == .screenshots { tab = .similar } }
+    .onChange(of: model.photoSource) { _, source in
+      if source == .library && tab == .screenshots { tab = .similar }
     }
   }
 
   // MARK: Header
 
   private var header: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text("Photos").font(.system(size: 30, weight: .bold, design: .rounded))
-        Text(
-          isLibrary
-            ? "Library photos are removed through Photos — they stay in Recently Deleted for 30 days."
-            : "Folder photos go to the Trash and can be restored from History."
-        )
-        .foregroundStyle(.secondary)
-      }
-      Spacer()
+    PageHeader(title: "Photos", subtitle: isLibrary
+      ? "Compare your library. Deletion syncs to iCloud and other devices; recovery is through Photos."
+      : "Compare folder photos. Reviewed removals go to Trash, with recovery in History.") {
+      HStack(spacing: 8) {
       if !model.selectedPhotoIDs.isEmpty {
-        Button("Deselect") { model.selectedPhotoIDs = [] }
+        Button("Deselect") { model.keepQueuedFiles(model.selectedPhotos.filter { !$0.isLibraryAsset }.map(\.url)); model.selectedPhotoIDs = [] }
         Button {
           model.reviewPhotos()
         } label: {
           Label(
             isLibrary
-              ? "Delete \(model.selectedPhotoIDs.count) in Photos (\(ByteFormatter.string(model.selectedPhotoBytes)))"
+              ? "Review \(model.selectedPhotoIDs.count) photos"
               : "Review \(model.selectedPhotoIDs.count) (\(ByteFormatter.string(model.selectedPhotoBytes)))",
-            systemImage: "trash")
+            systemImage: "checklist")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isWorking || model.isScanning)
       }
       Menu {
@@ -74,8 +74,9 @@ struct PhotosView: View {
       }
       .fixedSize()
       Button(model.photoScan == nil ? "Scan" : "Rescan") { model.scanPhotos() }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(MintButtonStyle())
         .disabled(model.isScanning || model.isWorking)
+    }
     }
     .padding(AppTheme.pagePadding)
   }
@@ -91,9 +92,9 @@ struct PhotosView: View {
       } else {
         ProgressView().controlSize(.large)
       }
-      Text("Everything is analysed on this Mac. Nothing is uploaded or downloaded from iCloud.")
+      Text("Analysis uses local thumbnails. Default previews stay local; a cloud preview downloads only when you request it.")
         .font(.caption)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.secondary)
       Button("Cancel") { model.cancelCurrentOperation() }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -101,6 +102,7 @@ struct PhotosView: View {
 
   private func label(for tab: PhotoTab, scan: PhotoScanResult) -> String {
     switch tab {
+    case .deck: return "Review deck"
     case .similar: return "Similar (\(scan.similarGroups.reduce(0) { $0 + $1.others.count }))"
     case .blurry: return "Blurry (\(scan.blurry.count))"
     case .screenshots: return "Screenshots (\(scan.screenshots.count))"
@@ -112,6 +114,7 @@ struct PhotosView: View {
   @ViewBuilder
   private func content(_ scan: PhotoScanResult) -> some View {
     switch tab {
+    case .deck: PhotoReviewDeck(photos: scan.photos).id(scan.generation)
     case .similar:
       if scan.similarGroups.isEmpty {
         EmptyState(icon: "checkmark.seal", title: "No similar shots", detail: "Every photo here looks distinct.")
@@ -136,13 +139,23 @@ struct PhotosView: View {
     let kept = model.keeper(of: group)
     return SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Text("\(group.photos.count) similar photos").font(.headline)
-          Text("• \(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in the others")
-            .foregroundStyle(.secondary)
-          Spacer()
-          Button("Select All but Kept") { model.selectAllButKeeper(in: group) }
-            .controlSize(.small)
+        VStack(alignment: .leading, spacing: 12) {
+          HStack {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("\(group.photos.count) similar photos").font(.headline)
+              Text(kept.isLibraryAsset ? "Size unavailable" : "\(ByteFormatter.string(group.photos.filter { $0.id != kept.id }.reduce(0) { $0 + $1.bytes })) in other copies")
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { comparing = group } label: { Label("Compare", systemImage: "rectangle.split.2x1") }
+              .buttonStyle(MintButtonStyle(prominent: false))
+          }
+          HStack {
+            Label("Suggested keeper · You can change it", systemImage: "star")
+              .font(.caption).foregroundStyle(AppTheme.accentText)
+            Spacer()
+            Button("Select other copies") { model.selectAllButKeeper(in: group) }.controlSize(.small)
+          }
         }
         ScrollView(.horizontal, showsIndicators: false) {
           HStack(spacing: 12) {
@@ -153,6 +166,7 @@ struct PhotosView: View {
         }
       }
     }
+
   }
 
   @ViewBuilder
@@ -190,7 +204,7 @@ private struct PhotoTile: View {
                 lineWidth: isKeeper || isSelected ? 3 : 1)
           }
         if isKeeper {
-          Label("Kept", systemImage: "star.fill")
+          Label("Suggested keeper", systemImage: "star.fill")
             .font(.caption2.weight(.bold))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
@@ -210,7 +224,7 @@ private struct PhotoTile: View {
         .font(.caption.weight(.medium))
         .lineLimit(1)
         .frame(width: 150, alignment: .leading)
-      Text("\(ByteFormatter.string(photo.bytes)) • \(photo.pixelWidth)×\(photo.pixelHeight)")
+      Text("\(photo.isLibraryAsset ? "Size unavailable" : ByteFormatter.string(photo.bytes)) • \(photo.pixelWidth)×\(photo.pixelHeight)")
         .font(.caption2)
         .foregroundStyle(.secondary)
     }
@@ -227,6 +241,9 @@ private struct PhotoTile: View {
     .accessibilityElement(children: .combine)
     .accessibilityLabel("\(photo.url.lastPathComponent)\(isKeeper ? ", kept" : isSelected ? ", selected" : "")")
     .accessibilityAddTraits(.isButton)
+    .accessibilityAction { if !isKeeper { model.togglePhoto(photo) } }
+    .focusable()
+    .onKeyPress(.space) { if !isKeeper { model.togglePhoto(photo) }; return .handled }
   }
 }
 
@@ -234,47 +251,50 @@ private struct PhotoTile: View {
 struct PhotoThumbnail: View {
   let photo: PhotoFingerprint
   let side: CGFloat
+  var allowCloud = false
+  var fit = false
+  @State private var finished = false
   @State private var image: NSImage?
 
-  private static let cache = NSCache<NSString, NSImage>()
+  private static let cache = PreviewImageCache(byteLimit: 32 * 1_024 * 1_024, countLimit: 64)
+  private var loadKey: String { "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#\(photo.identity ?? "unknown")#\(Int(side))#\(allowCloud)" }
 
   var body: some View {
     ZStack {
       Rectangle().fill(Color.primary.opacity(0.06))
       if let image {
-        Image(nsImage: image).resizable().scaledToFill()
+        Image(nsImage: image).resizable().aspectRatio(contentMode: fit ? .fit : .fill)
+      } else if finished {
+        Label("Preview unavailable locally", systemImage: "icloud").font(.caption).multilineTextAlignment(.center)
       } else {
         ProgressView().controlSize(.small)
       }
     }
-    .task(id: photo.id) { image = await load() }
+    .task(id: loadKey) {
+      finished = false; image = nil
+      let loaded = await load()
+      guard !Task.isCancelled else { return }
+      image = loaded; finished = true
+    }
+    .onDisappear { image = nil; finished = false }
   }
 
   private func load() async -> NSImage? {
-    let key = "\(photo.id)#\(Int(side))" as NSString
-    if let cached = Self.cache.object(forKey: key) { return cached }
+    let key = loadKey
+    if let cached = Self.cache.image(for: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
-      loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side)
+      loaded = await PhotoLibraryService.thumbnailData(assetID: assetID, side: side, allowNetwork: allowCloud)
         .flatMap(NSImage.init(data:))
     } else {
       let url = photo.url
-      let pixels = side * 2
-      let data: Data? = await Task.detached(priority: .utility) {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-          let cgImage = CGImageSourceCreateThumbnailAtIndex(
-            source, 0,
-            [
-              kCGImageSourceCreateThumbnailFromImageAlways: true,
-              kCGImageSourceCreateThumbnailWithTransform: true,
-              kCGImageSourceThumbnailMaxPixelSize: pixels,
-            ] as CFDictionary)
-        else { return nil }
-        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
-      }.value
+      let pixels = min(1_400, max(64, Int(side * 2)))
+      let work = Task.detached(priority: .utility) { await LocalPreviewDecoder.shared.decode(url, pixels: pixels) }
+      let data = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
       loaded = data.flatMap(NSImage.init(data:))
     }
-    if let loaded { Self.cache.setObject(loaded, forKey: key) }
+    guard !Task.isCancelled else { return nil }
+    if let loaded { Self.cache.insert(loaded, for: key) }
     return loaded
   }
 }

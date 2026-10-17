@@ -25,8 +25,10 @@ enum PhotoLibraryService {
   }
 
   /// Fingerprints every still image in the library (videos and Live Photo motion are ignored).
-  static func fingerprints(progress: @escaping @Sendable (Int, Int) -> Void) async -> [PhotoFingerprint] {
-    await Task.detached(priority: .userInitiated) { () -> [PhotoFingerprint] in
+  struct FingerprintReport: Sendable { let photos: [PhotoFingerprint]; let total: Int }
+
+  static func fingerprints(progress: @escaping @Sendable (Int, Int) -> Void) async -> FingerprintReport {
+    let work = Task.detached(priority: .userInitiated) { () -> FingerprintReport in
       let options = PHFetchOptions()
       options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
       options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
@@ -55,26 +57,42 @@ enum PhotoLibraryService {
         guard let image = box.value, let measured = PhotoAnalysis.measure(image) else { continue }
         results.append(
           PhotoFingerprint(
-            url: url(for: asset.localIdentifier), bytes: fileSize(of: asset),
+            // Supported PhotoKit APIs on macOS 14-26 do not expose resource byte sizes.
+            // Never use undocumented KVC or download originals just to estimate savings.
+            url: url(for: asset.localIdentifier), bytes: 0,
             hash: measured.hash, sharpness: measured.sharpness,
             pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-            captured: asset.creationDate, assetID: asset.localIdentifier))
+            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate))
       }
       progress(total, total)
-      return results
-    }.value
+      return FingerprintReport(photos: results, total: total)
+    }
+    return await withTaskCancellationHandler(operation: { await work.value }, onCancel: { work.cancel() })
   }
 
   /// Asks Photos to delete the assets. Photos shows its own confirmation; deleted items stay
   /// in Recently Deleted. Returns false when the user cancels in that dialog.
-  static func delete(assetIDs: [String]) async throws -> Bool {
-    guard PHAsset.fetchAssets(withLocalIdentifiers: assetIDs, options: nil).count > 0 else {
-      return false
+  static func delete(assetIDs: [String], protecting keeperIDs: [String] = []) async throws -> Bool {
+    let unique = Set(assetIDs)
+    let keepers = Set(keeperIDs)
+    guard !unique.isEmpty else { return false }
+    if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
+      available: availableIDs(unique.union(keepers))) {
+      throw NSError(domain: "MacMintPhotos", code: 1,
+        userInfo: [NSLocalizedDescriptionKey: problem])
     }
+    let validation = ResultBox<String>()
     do {
       try await PHPhotoLibrary.shared().performChanges {
-        PHAssetChangeRequest.deleteAssets(
-          PHAsset.fetchAssets(withLocalIdentifiers: assetIDs, options: nil))
+        if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
+          available: availableIDs(unique.union(keepers))) {
+          validation.set(problem)
+          return
+        }
+        PHAssetChangeRequest.deleteAssets(PHAsset.fetchAssets(withLocalIdentifiers: Array(unique), options: nil))
+      }
+      if let problem = validation.value {
+        throw NSError(domain: "MacMintPhotos", code: 1, userInfo: [NSLocalizedDescriptionKey: problem])
       }
       return true
     } catch let error as NSError where error.domain == "PHPhotosErrorDomain" && error.code == 3072 {
@@ -83,35 +101,99 @@ enum PhotoLibraryService {
   }
 
   /// Image data rather than NSImage so it can cross actors; build the image on the main actor.
-  static func thumbnailData(assetID: String, side: CGFloat) async -> Data? {
+  static func thumbnailData(assetID: String, side: CGFloat, allowNetwork: Bool = false) async -> Data? {
     guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
     else { return nil }
     let options = PHImageRequestOptions()
     options.deliveryMode = .highQualityFormat
-    options.isNetworkAccessAllowed = true
+    options.isNetworkAccessAllowed = allowNetwork
     options.resizeMode = .fast
     let target = CGSize(width: side * 2, height: side * 2)
-    let data: Data? = await withCheckedContinuation { continuation in
-      let once = ResultBox<Bool>()
-      PHImageManager.default().requestImage(
-        for: asset, targetSize: target, contentMode: .aspectFill, options: options
-      ) { image, _ in
-        // The handler can fire more than once; resume exactly once.
-        guard once.claim() else { return }
-        continuation.resume(returning: image?.tiffRepresentation)
+    let bridge = PhotoThumbnailRequest(cancel: { PHImageManager.default().cancelImageRequest($0) })
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        guard bridge.begin(continuation) else { return }
+        let requestID = PHImageManager.default().requestImage(
+          for: asset, targetSize: target, contentMode: .aspectFill, options: options
+        ) { image, info in
+          if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
+          bridge.finish(image?.tiffRepresentation)
+        }
+        bridge.install(requestID)
       }
-    }
-    return data
+    } onCancel: { bridge.cancel() }
   }
 
   static func showInPhotos() {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Photos.app"))
   }
 
-  private static func fileSize(of asset: PHAsset) -> Int64 {
-    PHAssetResource.assetResources(for: asset)
-      .compactMap { ($0.value(forKey: "fileSize") as? NSNumber)?.int64Value }
-      .max() ?? 0
+  private static func availableIDs(_ identifiers: Set<String>) -> Set<String> {
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: Array(identifiers), options: nil)
+    return Set((0..<assets.count).map { assets.object(at: $0).localIdentifier })
+  }
+
+}
+
+enum PhotoDeletionPolicy {
+  static func problem(selected: Set<String>, keepers: Set<String>, available: Set<String>) -> String? {
+    guard selected.isDisjoint(with: keepers) else {
+      return "The selection includes a photo you are keeping. Review the comparison before deleting."
+    }
+    guard keepers.isSubset(of: available) else {
+      return "A photo you chose to keep is no longer available. Rescan the library before deleting other copies."
+    }
+    guard selected.isSubset(of: available) else {
+      return "Some selected photos are no longer available. Rescan the library before deleting."
+    }
+    return nil
+  }
+}
+
+/// Handles cancellation before request registration, synchronous callbacks, and repeated
+/// PhotoKit callbacks. Canceling a view also cancels an explicitly requested cloud preview.
+final class PhotoThumbnailRequest: @unchecked Sendable {
+  private let lock = NSLock()
+  private let cancelRequest: @Sendable (PHImageRequestID) -> Void
+  private var continuation: CheckedContinuation<Data?, Never>?
+  private var requestID: PHImageRequestID?
+  private var finished = false
+  private var cancelled = false
+
+  init(cancel: @escaping @Sendable (PHImageRequestID) -> Void) { cancelRequest = cancel }
+
+  func begin(_ continuation: CheckedContinuation<Data?, Never>) -> Bool {
+    lock.lock()
+    if finished { lock.unlock(); continuation.resume(returning: nil); return false }
+    self.continuation = continuation
+    lock.unlock()
+    return true
+  }
+
+  func install(_ id: PHImageRequestID) {
+    lock.lock(); requestID = id; let mustCancel = cancelled; lock.unlock()
+    if mustCancel { cancelRequest(id) }
+  }
+
+  func finish(_ data: Data?) {
+    lock.lock()
+    guard !finished else { lock.unlock(); return }
+    finished = true
+    let pending = continuation
+    continuation = nil
+    lock.unlock()
+    pending?.resume(returning: data)
+  }
+
+  func cancel() {
+    lock.lock()
+    guard !finished else { lock.unlock(); return }
+    cancelled = true; finished = true
+    let id = requestID, pending = continuation
+    continuation = nil
+    lock.unlock()
+    if let id { cancelRequest(id) }
+    pending?.resume(returning: nil)
   }
 }
 

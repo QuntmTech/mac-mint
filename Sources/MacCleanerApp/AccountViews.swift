@@ -2,35 +2,14 @@ import AppKit
 import MacCleanerCore
 import SwiftUI
 
-/// Shows the main app only when the account is unlocked; otherwise the matching account step.
+/// Local inspection and recovery stay available independently of paid access.
 struct AccountGateView: View {
   @EnvironmentObject private var account: AccountStore
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
-    Group {
-      switch account.phase {
-      case .active:
-        RootView()
-      case .checking:
-        GateScaffold {
-          VStack(spacing: 14) {
-            ProgressView().controlSize(.large)
-            Text("Checking your MacMint account…").foregroundStyle(.secondary)
-          }
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 30)
-        }
-      case .signedOut:
-        GateScaffold { AuthForm() }
-      case .needsPlan:
-        GateScaffold { RedeemForm() }
-      case .deviceLimit(let message, let devices):
-        GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
-      case .failed(let message):
-        GateScaffold { FailurePanel(message: message) }
-      }
-    }
+    RootView()
+
     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: account.phase)
   }
 }
@@ -89,7 +68,7 @@ private struct GateScaffold<Content: View>: View {
       VStack(spacing: 22) {
         VStack(spacing: 10) {
           BrandMark(size: 56)
-          Text("MacMint").font(.system(size: 28, weight: .bold, design: .rounded))
+          Text("MacMint").font(.system(size: 27, weight: .semibold))
         }
         SurfaceCard { content }
           .frame(width: 420)
@@ -107,11 +86,11 @@ private struct GateMessages: View {
     VStack(spacing: 8) {
       if let error = account.errorMessage {
         Label(error, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(.orange)
+          .foregroundStyle(AppTheme.warning)
       }
       if let info = account.infoMessage {
         Label(info, systemImage: "checkmark.circle.fill")
-          .foregroundStyle(.green)
+          .foregroundStyle(AppTheme.accentText)
       }
     }
     .font(.callout)
@@ -320,6 +299,7 @@ private struct FailurePanel: View {
 /// Compact account summary used in Settings.
 struct AccountSettingsCard: View {
   @EnvironmentObject private var account: AccountStore
+  @EnvironmentObject private var model: AppViewModel
   @State private var confirmSignOut = false
 
   var body: some View {
@@ -329,22 +309,32 @@ struct AccountSettingsCard: View {
           Label("Account", systemImage: "person.crop.circle.fill").font(.headline)
           Spacer()
           if account.isOffline {
-            StatusPill(title: "Offline", icon: "wifi.slash", tint: .orange)
+            StatusPill(title: "Offline", icon: "wifi.slash", tint: AppTheme.warning)
           }
         }
         if let snapshot = account.snapshot {
           row("Email", snapshot.user.email)
-          row("Plan", planLabel(snapshot.entitlement))
+          row("Access", account.isUnlocked ? planLabel(snapshot.entitlement) : "Verification required")
           row(
             "Devices",
             "\(snapshot.devices.count) of \(max(snapshot.entitlement.maxDevices, 1)) in use")
           row("This Mac", account.deviceInfo.name)
         }
+        if account.snapshot == nil {
+          Text("You’re inspecting locally. Scan, explore, and use History without signing in. Connect your account when you’re ready to start a paid operation.")
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
         Divider()
         HStack {
-          Button("Manage Account…") { account.openAccountPage() }
-          Spacer()
-          Button("Sign Out", role: .destructive) { confirmSignOut = true }
+          if account.snapshot != nil {
+            Button("Manage Account…") { account.openAccountPage() }
+            Spacer()
+            Button("Sign Out", role: .destructive) { confirmSignOut = true }
+          } else {
+            Label("Local inspection", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Button("Connect account") { model.showingAccount = true }.buttonStyle(MintButtonStyle(prominent: false))
+          }
         }
       }
     }
@@ -352,7 +342,7 @@ struct AccountSettingsCard: View {
       Button("Cancel", role: .cancel) {}
       Button("Sign Out", role: .destructive) { Task { await account.signOut() } }
     } message: {
-      Text("This Mac will be removed from your account. Your cleanup history and exclusions stay on this Mac.")
+      Text("Sign out on this Mac. Your cleanup history and exclusions stay available here.")
     }
   }
 
@@ -371,5 +361,28 @@ struct AccountSettingsCard: View {
       return "Pro • renews/expires \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
     return "Pro • Lifetime"
+  }
+}
+
+/// Account access is a recoverable sheet, never a gate around local scans or History.
+struct AccountAccessSheet: View {
+  @EnvironmentObject private var account: AccountStore
+  @Environment(\.dismiss) private var dismiss
+  var body: some View {
+    VStack(alignment: .trailing, spacing: 0) {
+      Button("Continue inspecting locally") { dismiss() }.padding()
+      Group {
+        switch account.phase {
+        case .active: Text("MacMint Pro is active. Return to review to confirm your selection.").padding(32)
+        case .checking: ProgressView("Checking account…").padding(50)
+        case .signedOut: GateScaffold { AuthForm() }
+        case .needsPlan: GateScaffold { RedeemForm() }
+        case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
+        case .failed(let message): GateScaffold { FailurePanel(message: message) }
+        }
+      }
+    }
+    .frame(width: 560, height: 560)
+    .onChange(of: account.isUnlocked) { _, unlocked in if unlocked { dismiss() } }
   }
 }

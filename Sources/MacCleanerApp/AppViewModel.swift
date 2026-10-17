@@ -8,15 +8,15 @@ final class AppViewModel: ObservableObject {
   enum Section: String, CaseIterable, Identifiable {
     case dashboard = "Overview"
     case review = "Review"
-    case cleaner = "Cleaner"
+    case cleaner = "Cleanup"
     case storage = "Storage"
-    case developer = "Developer & AI"
+    case developer = "Developer"
     case assistant = "Ask MacMint"
     case downloads = "Downloads"
     case photos = "Photos"
     case removedApps = "Removed Apps"
     case performance = "Performance"
-    case applications = "Applications"
+    case applications = "Apps"
     case largeFiles = "Large Files"
     case duplicates = "Duplicates"
     case startup = "Startup Items"
@@ -24,6 +24,26 @@ final class AppViewModel: ObservableObject {
     case settings = "Settings"
 
     var id: String { rawValue }
+
+    static let primary: [Section] = [.dashboard, .cleaner, .storage, .applications, .photos, .developer, .history]
+    var parent: Section {
+      switch self {
+      case .performance: return .dashboard
+      case .downloads: return .cleaner
+      case .largeFiles, .duplicates: return .storage
+      case .removedApps, .startup: return .applications
+      default: return self
+      }
+    }
+    var tabs: [Section] {
+      switch parent {
+      case .dashboard: return [.dashboard, .performance]
+      case .cleaner: return [.cleaner, .downloads]
+      case .storage: return [.storage, .largeFiles, .duplicates]
+      case .applications: return [.applications, .removedApps, .startup]
+      default: return []
+      }
+    }
 
     var icon: String {
       switch self {
@@ -47,6 +67,21 @@ final class AppViewModel: ObservableObject {
     }
   }
 
+  @Published var showingAccount = false
+  @Published var showingHelp = false
+  @Published var deferredPlan: OperationPlan?
+  var authorizeRemoval: () -> Bool = { false }
+
+  func requirePaidAccess() -> Bool {
+    guard requireExclusions() else { return false }
+    guard authorizeRemoval() else {
+      statusMessage = "Sign in with an active plan to move items. Your selections are kept."
+      showingAccount = true
+      return false
+    }
+    return true
+  }
+
   @Published var selectedSection: Section = .dashboard
   @Published var cleanupTargets: [CleanupTarget] = []
   @Published var apps: [AppRecord] = []
@@ -59,7 +94,13 @@ final class AppViewModel: ObservableObject {
   @Published var selectedLeftoverIDs: Set<UUID> = []
   @Published var history: [HistoryEntry] = []
   @Published var scanIssues: [ScanIssue] = []
+  @Published var showingScanIssues = false
+  @Published var recoveryWarnings: [ScanIssue] = []
   @Published var ignoredPaths: Set<String> = []
+  @Published private(set) var exclusionsReady = false
+  @Published private(set) var exclusionLoadError: String?
+  var keptQueuePaths: Set<String> = []
+  @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
   @Published var isWorking = false
   @Published var statusMessage = "Ready"
@@ -99,14 +140,23 @@ final class AppViewModel: ObservableObject {
   @Published var aiReviewBusy = false
   @Published var aiOrderRecommendations = false
   @Published var assistantTurns: [AITurn] = []
+  @Published var assistantDraft = ""
   @Published var assistantBusy = false
+  var aiGeneration = UUID()
+  var pendingAIAction: (@MainActor () -> Void)?
+  var aiReviewTask: Task<Void, Never>?
+  var assistantTask: Task<Void, Never>?
+  var explanationTask: Task<Void, Never>?
+  @Published var explanationError: String?
+  @Published var reviewAIError: String?
+  @Published var aiPayloadPreview = ""
   @Published var aiError: String?
   @Published var aiConsentPending = false
   @Published var pendingPlan: OperationPlan?
   @Published var isPreparingPlan = false
   @Published var operationProgress: OperationProgress?
   @Published var lastReport: OperationReport?
-  @Published var restoreConflict: RestoreConflict?
+  @Published var restoreConflicts: [RestoreConflict] = []
   @Published var largeFileRoot = FileManager.default.homeDirectoryForCurrentUser
   @Published var duplicateRoot = FileManager.default.homeDirectoryForCurrentUser
   @Published var largeFileMinimum: Int64 = 100 * 1_048_576
@@ -118,26 +168,38 @@ final class AppViewModel: ObservableObject {
   private let duplicateFinder = DuplicateFinder()
   let safetyPolicy = SafetyPolicy()
   let duplicateVerifier = DuplicateRemovalVerifier()
+  let organizationStore: OrganizationStore
   let historyStore: HistoryStore
+  let supportDirectory: URL
+  var operationJournalDirectory: URL { supportDirectory.appendingPathComponent("Operations", isDirectory: true) }
+  var restoreJournalDirectory: URL { supportDirectory.appendingPathComponent("Restores", isDirectory: true) }
   private let ignoreStore: IgnoreStore
   var currentTask: Task<Void, Never>?
 
-  init() {
-    let support = AppPaths.supportDirectory
+  init(supportDirectory: URL? = nil) {
+    let support = supportDirectory ?? AppPaths.supportDirectory
+    self.supportDirectory = support
+    organizationStore = OrganizationStore(directory: support.appendingPathComponent("Organization"))
     historyStore = HistoryStore(url: support.appendingPathComponent("history.json"))
     ignoreStore = IgnoreStore(url: support.appendingPathComponent("ignored-paths.json"))
 
     Task {
-      async let loadedHistory = historyStore.load()
-      async let loadedIgnores = ignoreStore.load()
-      history = await loadedHistory
-      ignoredPaths = await loadedIgnores
+      do {
+        ignoredPaths = try await ignoreStore.loadChecked()
+        exclusionsReady = true
+      } catch {
+        exclusionLoadError = "Saved exclusions could not be read. Scanning and new removal are paused. Inspect or reset exclusions in Settings; History and Restore remain available."
+        statusMessage = exclusionLoadError!
+      }
+      do { history = try await historyStore.loadChecked() }
+      catch { recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
+        message: "History could not be read. The existing file has been preserved; check recovery records before further cleanup.")) }
       await recoverInterruptedOperations()
     }
   }
 
   var selectedCleanupBytes: Int64 {
-    cleanupTargets.filter(\.isSelected).reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Selected cleanup", items: cleanupTargets.filter(\.isSelected).map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var selectedReviewBytes: Int64 {
@@ -145,11 +207,11 @@ final class AppViewModel: ObservableObject {
   }
 
   var reclaimableBytes: Int64 {
-    cleanupTargets.filter { $0.risk == .safe }.reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Rebuildable estimate", items: cleanupTargets.filter { $0.risk == .safe }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var reviewableBytes: Int64 {
-    cleanupTargets.filter { $0.risk == .review }.reduce(0) { $0 + $1.size }
+    OperationPlanner.plan(title: "Review estimate", items: cleanupTargets.filter { $0.risk == .review }.map { PlanItem.cleanup($0) }, ignoredPaths: ignoredPaths).totalBytes
   }
 
   var volumeName: String {
@@ -184,41 +246,7 @@ final class AppViewModel: ObservableObject {
     return (max(0, total - free), max(0, free), max(0, total))
   }
 
-  func runSmartScan() {
-    guard !isScanning, !isWorking else { return }
-    beginScan(title: "Smart Scan", message: "Scanning caches, apps, and startup items…")
-
-    currentTask = Task { [weak self] in
-      guard let self else { return }
-      let summary = await smartScan.scan(ignoredPaths: ignoredPaths)
-      guard !Task.isCancelled else {
-        finishCancelledOperation()
-        return
-      }
-
-      cleanupTargets = summary.cleanupTargets.map { target in
-        var target = target
-        if let owner = target.ownerBundleID,
-          !NSRunningApplication.runningApplications(withBundleIdentifier: owner).isEmpty
-        {
-          target.isSelected = false
-        }
-        return target
-      }
-      apps = summary.apps
-      startupItems = summary.startupItems
-      scanIssues = summary.issues
-      lastScanDate = summary.scannedAt
-      lastScanDuration = summary.duration
-      if !summary.wasCancelled {
-        UserDefaults.standard.set(summary.scannedAt, forKey: CareService.Keys.lastScanDate)
-      }
-      finishScan(
-        message: summary.wasCancelled
-          ? "Scan stopped"
-          : "Scan complete — \(ByteFormatter.string(summary.reclaimableBytes)) safely reclaimable")
-    }
-  }
+  func runSmartScan() { runSmartCare() }
 
   func cancelCurrentOperation() {
     guard isScanning || isWorking else { return }
@@ -229,17 +257,33 @@ final class AppViewModel: ObservableObject {
   func toggleCleanup(_ id: UUID, selected: Bool) {
     guard let index = cleanupTargets.firstIndex(where: { $0.id == id }) else { return }
     guard cleanupTargets[index].risk != .restricted else { return }
-    cleanupTargets[index].isSelected = selected
+    setFileSelection(cleanupTargets[index].url, selected: selected)
   }
 
   func selectSafeCleanupOnly() {
     for index in cleanupTargets.indices {
-      cleanupTargets[index].isSelected = cleanupTargets[index].risk == .safe
+      setFileSelection(cleanupTargets[index].url, selected: cleanupTargets[index].risk == .safe)
     }
   }
 
   func deselectAllCleanup() {
-    for index in cleanupTargets.indices { cleanupTargets[index].isSelected = false }
+    keepQueuedFiles(cleanupTargets.map(\.url))
+  }
+
+  func inspectDroppedApp(_ url: URL) {
+    guard url.isFileURL, url.pathExtension.lowercased() == "app" else {
+      statusMessage = "Drop an installed .app bundle to inspect it"; return
+    }
+    selectedSection = .applications
+    if let app = apps.first(where: { FileSystem.comparisonPath($0.url) == FileSystem.comparisonPath(url) }) {
+      loadLeftovers(for: app)
+    } else {
+      Task {
+        guard let app = await appScanner.inspect(url) else { statusMessage = "This is not a readable application bundle"; return }
+        if !apps.contains(where: { $0.url == url }) { apps.append(app) }
+        loadLeftovers(for: app)
+      }
+    }
   }
 
   func loadLeftovers(for app: AppRecord) {
@@ -247,7 +291,7 @@ final class AppViewModel: ObservableObject {
     selectedApp = app
     appLeftovers = []
     selectedLeftoverIDs = []
-    beginScan(title: "Inspecting \(app.name)", message: "Finding related application data…")
+    guard beginScan(title: "Inspecting \(app.name)", message: "Finding related application data…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -283,7 +327,7 @@ final class AppViewModel: ObservableObject {
   /// Spotlight answers first (verified against the disk); `fullScan` walks every folder instead.
   func scanLargeFiles(fullScan: Bool = false) {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Large Files", message: "Scanning \(largeFileRoot.lastPathComponent)…")
+    guard beginScan(title: "Large Files", message: "Scanning \(largeFileRoot.lastPathComponent)…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -324,8 +368,8 @@ final class AppViewModel: ObservableObject {
 
   func scanDuplicates() {
     guard !isScanning, !isWorking else { return }
-    beginScan(
-      title: "Duplicate Finder", message: "Comparing files in \(duplicateRoot.lastPathComponent)…")
+    guard beginScan(
+      title: "Duplicate Finder", message: "Comparing files in \(duplicateRoot.lastPathComponent)…") else { return }
 
     currentTask = Task { [weak self] in
       guard let self else { return }
@@ -350,19 +394,23 @@ final class AppViewModel: ObservableObject {
   func selectDuplicateCopies(in groupID: UUID) {
     guard let group = duplicateGroups.first(where: { $0.id == groupID }), group.files.count > 1
     else { return }
-    let groupIDs = Set(group.files.map(\.id))
-    selectedDuplicateIDs.subtract(groupIDs)
-    for file in group.files.dropFirst() { selectedDuplicateIDs.insert(file.id) }
+    let chosen = Set(group.files.dropFirst().map(\.id))
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(group.files.map(\.id)).union(chosen))
+  }
+
+  func applyDuplicateSelection(_ ids: Set<UUID>) {
+    selectedDuplicateIDs = ids
+    for file in duplicateGroups.flatMap(\.files) { setFileSelection(file.url, selected: ids.contains(file.id)) }
+  }
+
+  func keepDuplicate(_ file: LargeFile, in group: DuplicateGroup) {
+    let copies = Set(group.files.filter { $0.id != file.id && (file.identity == nil || $0.identity != file.identity) }.map(\.id))
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(group.files.map(\.id)).union(copies))
   }
 
   func clearDuplicateSelection(in groupID: UUID? = nil) {
-    guard let groupID else {
-      selectedDuplicateIDs = []
-      return
-    }
-    guard let group = duplicateGroups.first(where: { $0.id == groupID }) else { return }
-    let groupIDs = Set(group.files.map(\.id))
-    selectedDuplicateIDs.subtract(groupIDs)
+    let removals = duplicateGroups.filter { groupID == nil || $0.id == groupID }.flatMap(\.files).map(\.id)
+    applyDuplicateSelection(selectedDuplicateIDs.subtracting(removals))
   }
 
   func toggleDuplicate(_ fileID: UUID, in groupID: UUID, selected: Bool) {
@@ -370,7 +418,7 @@ final class AppViewModel: ObservableObject {
       group.files.contains(where: { $0.id == fileID })
     else { return }
     if !selected {
-      selectedDuplicateIDs.remove(fileID)
+      if let file = group.files.first(where: { $0.id == fileID }) { setFileSelection(file.url, selected: false) }
       return
     }
 
@@ -379,7 +427,7 @@ final class AppViewModel: ObservableObject {
       statusMessage = "At least one copy must remain in each duplicate group"
       return
     }
-    selectedDuplicateIDs.insert(fileID)
+    if let file = group.files.first(where: { $0.id == fileID }) { setFileSelection(file.url, selected: true) }
   }
 
   func ignore(_ url: URL) {
@@ -430,6 +478,8 @@ final class AppViewModel: ObservableObject {
       do {
         try await ignoreStore.clear()
         ignoredPaths = []
+        exclusionLoadError = nil
+        exclusionsReady = true
         statusMessage = "All exclusions cleared"
       } catch {
         statusMessage = "Could not clear exclusions: \(error.localizedDescription)"
@@ -457,17 +507,30 @@ final class AppViewModel: ObservableObject {
     NSWorkspace.shared.activateFileViewerSelecting([url])
   }
 
+  func openActivityMonitor() {
+    NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
+  }
+
+  func openLoginItemsSettings() {
+    if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
+      NSWorkspace.shared.open(url)
+    }
+  }
+
   func openSystemSettings() {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
   }
 
-  func record(_ entry: HistoryEntry) async {
+  @discardableResult
+  func record(_ entry: HistoryEntry) async -> Bool {
     do {
       try await historyStore.append(entry)
+      history = await historyStore.load()
+      return true
     } catch {
       statusMessage = "Could not save history: \(error.localizedDescription)"
     }
-    history = await historyStore.load()
+    return false
   }
 
   private func runningInstances(of app: AppRecord) -> [NSRunningApplication] {
@@ -489,14 +552,26 @@ final class AppViewModel: ObservableObject {
     ]
   }
 
-  func beginScan(title: String, message: String) {
+  func requireExclusions() -> Bool {
+    guard exclusionsReady else {
+      statusMessage = exclusionLoadError ?? "Loading saved exclusions. Try again in a moment."
+      return false
+    }
+    return true
+  }
+
+  func beginScan(title: String, message: String) -> Bool {
+    guard requireExclusions() else { return false }
     isScanning = true
     operationTitle = title
+    invalidateAIReview()
     statusMessage = message
     scanIssues = []
+    return true
   }
 
   func finishScan(message: String) {
+    synchronizeQueueSelections()
     isScanning = false
     operationTitle = nil
     currentTask = nil

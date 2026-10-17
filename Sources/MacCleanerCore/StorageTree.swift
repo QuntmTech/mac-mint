@@ -101,6 +101,7 @@ public struct StorageCoverage: Hashable, Sendable {
   public var cloudOnlyItems = 0
   public var otherVolumes: [String] = []
   public var wasCancelled = false
+  public var excludedItems = 0
 
   public init() {}
 }
@@ -142,9 +143,9 @@ public actor StorageTreeScanner {
     self.maxChildren = maxChildren
   }
 
-  public func scan(_ root: URL, progress: ProgressHandler? = nil) async -> StorageScan {
+  public func scan(_ root: URL, ignoredPaths: Set<String> = [], progress: ProgressHandler? = nil) async -> StorageScan {
     let started = Date()
-    var state = ScanState(progress: progress)
+    var state = ScanState(progress: progress, ignoredPaths: ignoredPaths)
     let volume = try? root.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier
     state.rootVolume = volume.map { "\($0)" }
     let node = scanFolder(root, state: &state, isRoot: true)
@@ -158,6 +159,7 @@ public actor StorageTreeScanner {
     var seenLinks: Set<String> = []
     var rootVolume: String?
     let progress: ProgressHandler?
+    let ignoredPaths: Set<String>
 
     mutating func tick(_ path: String) {
       coverage.scannedItems += 1
@@ -166,6 +168,13 @@ public actor StorageTreeScanner {
   }
 
   private func scanFolder(_ url: URL, state: inout ScanState, isRoot: Bool = false) -> StorageNode {
+    if FileSystem.isIgnored(url, ignoredPaths: state.ignoredPaths) {
+      state.coverage.excludedItems += 1
+      return StorageNode(url: url, name: "Excluded", kind: .aggregate, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
+    }
+    if PhotoAnalysis.isInsideLibraryPackage(url) {
+      return measurePackage(url, modified: nil, state: &state)
+    }
     let entries: [URL]
     do {
       entries = try fileManager.contentsOfDirectory(
@@ -180,6 +189,10 @@ public actor StorageTreeScanner {
     var small = (allocated: Int64(0), logical: Int64(0), count: 0, cloud: 0)
     for entry in entries {
       if Task.isCancelled { break }
+      if FileSystem.isIgnored(entry, ignoredPaths: state.ignoredPaths) {
+        state.coverage.excludedItems += 1
+        continue
+      }
       state.tick(entry.path)
       guard let values = try? entry.resourceValues(forKeys: Self.keys) else {
         state.coverage.inaccessiblePaths.append(entry.path)
@@ -273,7 +286,7 @@ public actor StorageTreeScanner {
   }
 
   private func measurePackage(_ url: URL, modified: Date?, state: inout ScanState) -> StorageNode {
-    let measurement = FileSystem.measure(at: url, fileManager: fileManager)
+    let measurement = FileSystem.measure(at: url, fileManager: fileManager, ignoredPaths: state.ignoredPaths)
     if !measurement.isComplete { state.coverage.inaccessiblePaths.append(url.path) }
     return StorageNode(
       url: url, kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,

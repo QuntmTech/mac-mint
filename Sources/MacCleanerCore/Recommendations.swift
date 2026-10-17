@@ -24,7 +24,7 @@ public struct Recommendation: Identifiable, Hashable, Sendable {
 
     public var label: String {
       switch self {
-      case .safe: return "Safe"
+      case .safe: return "Rebuildable"
       case .likely: return "Likely unneeded"
       case .review: return "Worth a look"
       }
@@ -62,6 +62,7 @@ public enum RecommendationEngine {
     public var duplicateGroups: [DuplicateGroup] = []
     public var trashBytes: Int64 = 0
     public var growth: [StorageGrowth] = []
+    public var runningBundleIDs: Set<String> = []
     public var now = Date()
     /// Apps not opened for this long are suggested for review.
     public var unusedAppDays = 180
@@ -77,7 +78,12 @@ public enum RecommendationEngine {
 
     /// Each path belongs to one recommendation only (the first, highest-priority rule).
     func take(_ items: [PlanItem]) -> [PlanItem] {
-      items.filter { claimed.insert($0.url.standardizedFileURL.path).inserted }
+      items.filter { item in
+        let key = FileSystem.comparisonPath(item.url)
+        guard !claimed.contains(where: { key == $0 || key.hasPrefix($0 + "/") || $0.hasPrefix(key + "/") }) else { return false }
+        claimed.insert(key)
+        return true
+      }
     }
     func add(
       _ id: String, symbol: String, title: String, detail: String, confidence: Recommendation.Confidence,
@@ -93,7 +99,8 @@ public enum RecommendationEngine {
 
     // 1. Caches and logs that rebuild themselves.
     let rebuildCategories: Set<CleanupCategory> = [.userCaches, .userLogs, .browserCaches]
-    let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category) }
+    let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
+      && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }
     let cacheItems = take(caches.map { PlanItem.cleanup($0) })
     add(
       "caches", symbol: "shippingbox", title: "Caches and logs that rebuild themselves",
@@ -101,12 +108,12 @@ public enum RecommendationEngine {
       confidence: .safe, items: cacheItems, destination: .cleaner)
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
-    let devTrash = inputs.developer.filter(\.isSuggested).compactMap(PlanItem.developer)
-    let devCleanup = inputs.cleanupTargets
-      .filter { $0.risk == .safe && $0.category == .developerJunk }.map { PlanItem.cleanup($0) }
-    let devItems = take(devTrash + devCleanup)
+    let devTrash = inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }.compactMap(PlanItem.developer)
+    // An aggregate with no detailed activity evidence is not a positive idle-data finding.
+    // Cleaner still inventories it for explicit review; recommendations use observed items.
+    let devItems = take(devTrash)
     if !devItems.isEmpty {
-      let tools = Dictionary(grouping: inputs.developer.filter(\.isSuggested), by: \.tool)
+      let tools = Dictionary(grouping: inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }, by: \.tool)
         .map { ($0.key, $0.value.reduce(Int64(0)) { $0 + $1.bytes }) }
         .sorted { $0.1 > $1.1 }.prefix(3)
         .map { "\($0.0) \(ByteFormatter.string($0.1))" }
@@ -128,8 +135,8 @@ public enum RecommendationEngine {
     let neverOpened = inputs.downloads.filter { $0.usage.neverOpened }
     let neverItems = take(neverOpened.map(PlanItem.download))
     add(
-      "downloads-never-opened", symbol: "arrow.down.circle", title: "Downloads you never opened",
-      detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago and never opened since.",
+      "downloads-never-opened", symbol: "arrow.down.circle", title: "Downloads with no recorded opens",
+      detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago, with no recorded opens.",
       confidence: .likely, items: neverItems, destination: .downloads)
 
     // 5. Leftovers from deleted apps (only the stronger matches).
@@ -184,7 +191,7 @@ public enum RecommendationEngine {
     if !unused.isEmpty {
       let names = unused.prefix(3).map(\.name).joined(separator: ", ")
       add(
-        "unused-apps", symbol: "app.badge.clock", title: "Apps you haven't opened in \(RelativeAge.describe(days: inputs.unusedAppDays))",
+        "unused-apps", symbol: "app.badge.clock", title: "Apps with no recorded opens in \(RelativeAge.describe(days: inputs.unusedAppDays))",
         detail: names + (unused.count > 3 ? " and \(unused.count - 3) more" : "") + ".",
         confidence: .review, items: [], destination: .applications,
         bytes: unused.reduce(0) { $0 + $1.bundleSize }, count: unused.count)

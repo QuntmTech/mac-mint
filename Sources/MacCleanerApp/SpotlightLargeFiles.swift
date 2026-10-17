@@ -67,6 +67,7 @@ enum SpotlightLargeFiles {
       guard seen.insert(url.standardizedFileURL.path).inserted,
         FileSystem.path(url, isInsideOrEqual: root),
         !FileSystem.isIgnored(url, ignoredPaths: ignoredPaths),
+        !PhotoAnalysis.isInsideLibraryPackage(url.resolvingSymlinksInPath()),
         !excludedRoots.contains(where: { FileSystem.path(url, isInsideOrEqual: $0) }),
         !url.standardizedFileURL.pathComponents.contains(where: { $0.hasPrefix(".") }),
         let meta = FileSystem.fileMetadata(at: url), meta.size >= minimumSize

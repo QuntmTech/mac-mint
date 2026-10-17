@@ -75,7 +75,7 @@ final class CareService: ObservableObject {
       if now.timeIntervalSince(lastScan) > week, now.timeIntervalSince(lastReminder) > week {
         notify(
           id: "scan-reminder", title: "Time for a quick tidy-up",
-          body: "It's been a week since your last Smart Scan. Nothing is removed without your review.")
+          body: "It's been a week since your last Quick Scan. Nothing is removed without your review.")
         defaults.set(now, forKey: Keys.lastScanReminder)
       }
     }

@@ -1,0 +1,63 @@
+name: Backend and website checks
+on:
+  push:
+  pull_request:
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Backend unit checks
+        run: node --test backend/tests/*.test.cjs
+      - name: Install pinned PocketBase test runtime
+        run: |
+          mkdir -p .build/pocketbase-bin
+          curl --fail --location https://github.com/pocketbase/pocketbase/releases/download/v0.40.5/pocketbase_0.40.5_linux_amd64.zip -o .build/pocketbase.zip
+          echo '1dbea1b01eb3dfe64953513859d01e759c96650c4e3264fa4eecd54b769382e4  .build/pocketbase.zip' | sha256sum --check
+          unzip .build/pocketbase.zip pocketbase -d .build/pocketbase-bin
+          chmod +x .build/pocketbase-bin/pocketbase
+      - name: Transaction, migration and webhook integration checks
+        run: python3 backend/tests/integration.py
+      - name: Authenticated AI and SMTP recovery integration checks
+        run: python3 backend/tests/service_integration.py
+  website:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build && npm run lint
+        working-directory: web
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npx playwright test
+        working-directory: web
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: website-browser-traces-${{ github.run_id }}-${{ github.event_name }}
+          path: web/test-results
+          retention-days: 7
+  homepage-demo:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ChatGPT sites the homepage V1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ChatGPT sites the homepage V1/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck && npm test
+      - run: npm run build

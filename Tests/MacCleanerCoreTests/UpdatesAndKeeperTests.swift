@@ -63,7 +63,7 @@ final class AppUpdateCheckerTests: XCTestCase {
     XCTAssertEqual(byName["Notes Pro"]?.availableVersion, "2.1")
     XCTAssertEqual(byName["Notes Pro"]?.source, .appStore(pageURL: URL(string: "https://apps.apple.com/app/id1")))
     XCTAssertEqual(byName["Tool"]?.source, .homebrew(token: "tool"), "Homebrew wins over the app's own feed")
-    XCTAssertNil(byName["Plain"], "apps with no update source are not listed")
+    XCTAssertEqual(byName["Plain"]?.checkState, .unsupported, "Unsupported sources are distinct from up to date")
     XCTAssertEqual(updates.first?.hasUpdate, true, "apps with updates sort first")
   }
 

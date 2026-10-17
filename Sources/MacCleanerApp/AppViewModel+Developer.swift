@@ -20,13 +20,13 @@ extension AppViewModel {
 
   func scanDeveloper() {
     guard !isScanning, !isWorking else { return }
-    beginScan(title: "Developer & AI", message: "Inventorying Xcode, package caches, and AI models…")
+    guard beginScan(title: "Developer & AI", message: "Inventorying Xcode, package caches, and AI models…") else { return }
     let roots = devProjectRoots
     let scanner = DeveloperStorageScanner()
 
     currentTask = Task { [weak self] in
       guard let self else { return }
-      let report = await scanner.scan(projectRoots: roots)
+      let report = await scanner.scan(projectRoots: roots, ignoredPaths: ignoredPaths)
       guard !Task.isCancelled else {
         finishCancelledOperation()
         return
