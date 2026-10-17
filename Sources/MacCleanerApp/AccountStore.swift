@@ -54,6 +54,10 @@ final class AccountStore: ObservableObject {
     case failed(String)
   }
 
+  /// Foreground checks run at most this often while access is valid. Retry, the periodic
+  /// recheck and any check while access is not valid run immediately.
+  static let minimumRefreshInterval: TimeInterval = 15 * 60
+
   static let purchaseURL = URL(string: "https://macmint.co/#pricing")!
   static let accountURL = URL(string: "https://macmint.co/account")!
   static let signUpURL = URL(string: "https://macmint.co/signup")!
@@ -84,6 +88,7 @@ final class AccountStore: ObservableObject {
   /// Latest time this Mac has seen; blocks winding the clock back to stretch offline access.
   private var highWater: Date?
   private var sessionGeneration = UUID()
+  private var lastVerification: Date?
   private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
   private var deviceReleaseTask: Task<Void, Never>?
@@ -138,9 +143,14 @@ final class AccountStore: ObservableObject {
   }
 
   /// Foregrounding also enforces expiry and remote deactivation after a sleeping Mac wakes.
-  func refreshAccess() async {
+  /// Called on every app activation, so it is throttled while access is valid.
+  func refreshAccess(force: Bool = false) async {
     noteClock()
     guard token != nil, !isBusy else { return }
+    if !force, isUnlocked, let last = lastVerification {
+      let elapsed = now().timeIntervalSince(last)
+      if elapsed >= 0, elapsed < Self.minimumRefreshInterval { return }
+    }
     await verify(refreshToken: false, quiet: true)
   }
 
@@ -349,6 +359,7 @@ final class AccountStore: ObservableObject {
       return
     }
     noteClock()
+    lastVerification = now()
     do {
       var active = current
       if refreshToken {
@@ -437,6 +448,7 @@ final class AccountStore: ObservableObject {
 
   private func signOutLocally(message: String?) {
     sessionGeneration = UUID()
+    lastVerification = nil
     isBusy = false
     recheckTask?.cancel()
     recheckTask = nil

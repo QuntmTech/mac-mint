@@ -320,10 +320,11 @@ final class AccountLifecycleTests: XCTestCase {
   func testAnAssertionThatFailsVerificationIsRejectedOnline() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
-    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
     await fixture.forgeAssertions(true)
     let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
-      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier)
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
     await store.signIn(email: "fixture@example.invalid", password: "fixture")
     XCTAssertFalse(store.isUnlocked)
     if case .failed = store.phase {} else { XCTFail("A bad signature must not unlock: \(store.phase)") }
@@ -331,20 +332,28 @@ final class AccountLifecycleTests: XCTestCase {
     await store.retry()
     XCTAssertTrue(store.isUnlocked)
     await fixture.forgeAssertions(true)
+    clock.advance(AccountStore.minimumRefreshInterval + 1)
+    let before = await fixture.verifications
     await store.refreshAccess()
+    let after = await fixture.verifications
+    XCTAssertEqual(after, before + 1)
     XCTAssertTrue(store.isUnlocked, "A quiet check keeps verified access; only definitive answers remove it")
   }
 
   func testTransientFailuresDuringQuietChecksKeepPaidAccess() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
-    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
     let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
-      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier)
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
     await store.signIn(email: "fixture@example.invalid", password: "fixture")
-    for status in [429, 408, 404, 403, 503] {
+    for (index, status) in [429, 408, 404, 403, 503].enumerated() {
       await fixture.failVerification(status: status)
+      clock.advance(AccountStore.minimumRefreshInterval + 1)
       await store.refreshAccess()
+      let checks = await fixture.verifications
+      XCTAssertEqual(checks, index + 1, "\(status) must actually reach the server")
       XCTAssertTrue(store.isUnlocked, "\(status)")
       XCTAssertEqual(store.phase, .active(offline: false), "\(status)")
     }
@@ -354,11 +363,44 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertTrue(store.isUnlocked)
     await fixture.failVerification(status: nil)
     await fixture.cancelNextVerification()
-    await store.refreshAccess()
+    await store.refreshAccess(force: true)
     XCTAssertEqual(store.phase, .active(offline: true), "Cancellation changes nothing")
     await fixture.failVerification(status: 401)
-    await store.refreshAccess()
+    await store.refreshAccess(force: true)
     XCTAssertEqual(store.phase, .signedOut, "An expired session still signs out")
+  }
+
+  func testForegroundChecksAreThrottledOnlyWhileAccessIsValid() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    func checks() async -> Int { await fixture.verifications }
+    await store.refreshAccess()
+    var count = await checks()
+    XCTAssertEqual(count, 1)
+    await store.refreshAccess()
+    clock.advance(AccountStore.minimumRefreshInterval - 60)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 1, "App activations within the interval reuse the last check")
+    clock.advance(120)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 2)
+    await store.refreshAccess(force: true)
+    count = await checks()
+    XCTAssertEqual(count, 3)
+    await fixture.deactivateThisMac()
+    clock.advance(AccountStore.minimumRefreshInterval + 1)
+    await store.refreshAccess()
+    XCTAssertFalse(store.isUnlocked)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 5, "Without valid access every activation checks again")
   }
 
   func testRepeatedSubmitDoesNotLaunchOverlappingAuthentication() async throws {
