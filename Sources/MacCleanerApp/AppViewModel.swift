@@ -74,7 +74,7 @@ final class AppViewModel: ObservableObject {
   var authorizeRemoval: () -> Bool = { false }
 
   func requirePaidAccess() -> Bool {
-    guard requireExclusions() else { return false }
+    guard requireExclusions(), requireRecoveryReady() else { return false }
     guard authorizeRemoval() else {
       statusMessage = "Sign in with an active plan to move items. Your selections are kept."
       showingAccount = true
@@ -100,6 +100,9 @@ final class AppViewModel: ObservableObject {
   @Published var ignoredPaths: Set<String> = []
   @Published private(set) var exclusionsReady = false
   @Published private(set) var exclusionLoadError: String?
+  /// Launch reconciliation (Trash, Restore and Organizer records) has finished.
+  @Published private(set) var recoveryReady = false
+  @Published private(set) var historyReadable = false
   var keptQueuePaths: Set<String> = []
   @Published var scanCompletedAreas: [String] = []
   @Published var isScanning = false
@@ -197,10 +200,16 @@ final class AppViewModel: ObservableObject {
         exclusionLoadError = "Saved exclusions could not be read. Scanning and new removal are paused. Inspect or reset exclusions in Settings; History and Restore remain available."
         statusMessage = exclusionLoadError!
       }
-      do { history = try await historyStore.loadChecked() }
-      catch { recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
-        message: "History could not be read. The existing file has been preserved; check recovery records before further cleanup.")) }
+      do {
+        history = try await historyStore.loadChecked()
+        historyReadable = true
+      } catch {
+        recoveryWarnings.append(ScanIssue(area: "Recovery", path: nil,
+          message: "History could not be read, so moving new items to Trash is paused to protect restore receipts. The existing file has been preserved; reset History in the History screen to continue (a backup is kept)."))
+      }
       await recoverInterruptedOperations()
+      await reconcileInterruptedOrganization()
+      recoveryReady = true
     }
   }
 
@@ -318,9 +327,17 @@ final class AppViewModel: ObservableObject {
 
   func requestQuitSelectedApp() {
     guard let app = selectedApp else { return }
-    let running = runningInstances(of: app)
-    guard !running.isEmpty else {
+    let instances = runningInstances(of: app)
+    guard !instances.isEmpty else {
       statusMessage = "\(app.name) is already closed"
+      return
+    }
+    // Same protections as Performance: never MacMint itself or core system apps.
+    let running = instances.filter {
+      !$0.isTerminated && ProcessControlPolicy.allows(pid: $0.processIdentifier, bundleID: $0.bundleIdentifier)
+    }
+    guard !running.isEmpty else {
+      statusMessage = "\(app.name) can't be quit from MacMint. Quit it yourself, then uninstall."
       return
     }
     let requested = running.reduce(false) { $1.terminate() || $0 }
@@ -556,6 +573,41 @@ final class AppViewModel: ObservableObject {
       home.appendingPathComponent("Library"),
       home.appendingPathComponent(".Trash"),
     ]
+  }
+
+  /// New removals wait for launch reconciliation so they can't race recovery of the last session.
+  func requireRecoveryReady() -> Bool {
+    guard recoveryReady else {
+      statusMessage = "Checking recovery records from the last session. Try again in a moment."
+      return false
+    }
+    return true
+  }
+
+  /// Trash receipts are committed to History; without a readable History they would be lost.
+  func requireReadableHistory() -> Bool {
+    guard historyReadable else {
+      statusMessage = "History can't be read, so moving items to Trash is paused. Reset History in the History screen to continue; a backup is kept."
+      return false
+    }
+    return true
+  }
+
+  func resetDamagedHistory() {
+    Task {
+      do {
+        let backup = try await historyStore.resetPreservingDamaged()
+        history = try await historyStore.loadChecked()
+        historyReadable = true
+        // Recovery warnings are recomputed; journals retained while History was unreadable commit now.
+        recoveryWarnings.removeAll { $0.area == "Recovery" }
+        await recoverInterruptedOperations()
+        statusMessage = backup.map { "History was reset. The damaged file was kept as \($0.lastPathComponent)." }
+          ?? "History is readable; nothing was reset."
+      } catch {
+        statusMessage = "History could not be reset: \(error.localizedDescription)"
+      }
+    }
   }
 
   func requireExclusions() -> Bool {

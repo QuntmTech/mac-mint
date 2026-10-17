@@ -68,6 +68,25 @@ final class Phase0RegressionTests: XCTestCase {
     XCTAssertEqual(report.value.first?.isSuggested, true)
   }
 
+  func testExcludedSiblingAppStillProtectsItsData() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let apps = home.appendingPathComponent("Applications")
+    let pro = apps.appendingPathComponent("Widget Pro.app")
+    try fm.createDirectory(at: pro.appendingPathComponent("Contents"), withIntermediateDirectories: true)
+    try PropertyListSerialization.data(
+      fromPropertyList: ["CFBundleIdentifier": "com.example.widget.pro"], format: .xml, options: 0
+    ).write(to: pro.appendingPathComponent("Contents/Info.plist"))
+    let ownPrefs = try makeFile(home, "Library/Preferences/com.example.widget.plist")
+    _ = try makeFile(home, "Library/Caches/com.example.widget.pro/data.bin")
+
+    // The caller only knows the visible (non-excluded) apps, so the excluded sibling is absent.
+    let report = await AppScanner(homeDirectory: home, applicationRoots: [apps]).leftoversReport(
+      for: widgetApp(home), otherBundleIDs: [], ignoredPaths: [pro.standardizedFileURL.path])
+
+    XCTAssertEqual(Set(report.value.map { $0.url.standardizedFileURL.path }), [ownPrefs.standardizedFileURL.path])
+  }
+
   func testHelperDataIsMediumConfidenceAndNotPreselected() async throws {
     let home = makeTempDirectory()
     defer { try? fm.removeItem(at: home) }

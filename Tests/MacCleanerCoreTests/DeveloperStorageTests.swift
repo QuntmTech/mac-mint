@@ -63,6 +63,20 @@ final class DeveloperStorageTests: XCTestCase {
     XCTAssertNil(PlanItem.developer(item), "managed models never become Trash plan items")
   }
 
+  func testHostileOllamaManifestSizesDoNotCrashTheScan() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let manifest = """
+      {"layers":[{"size":9223372036854775807},{"size":9223372036854775807},{"size":-5}]}
+      """
+    try write(
+      home, ".ollama/models/manifests/registry.ollama.ai/library/huge/latest", Data(manifest.utf8))
+
+    let scanned = await scanner(home).scan().value
+    let item = try XCTUnwrap(scanned.first { $0.tool == "Ollama" })
+    XCTAssertEqual(item.bytes, Int64.max, "sizes saturate instead of trapping; negative sizes are ignored")
+  }
+
   func testHuggingFaceReposAreWholeRepositoryItems() async throws {
     let home = makeTempDirectory()
     defer { try? fm.removeItem(at: home) }

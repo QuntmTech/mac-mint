@@ -16,10 +16,11 @@ final class OrganizationCoordinatorTests: XCTestCase {
     let support = home.appendingPathComponent("Support")
     let model = AppViewModel(supportDirectory: support)
     for _ in 0..<200 {
-      if model.exclusionsReady { break }
+      if model.exclusionsReady, model.recoveryReady { break }
       try await Task.sleep(for: .milliseconds(10))
     }
     XCTAssertTrue(model.exclusionsReady)
+    XCTAssertTrue(model.recoveryReady)
     let inventory = try await model.organizationStore.inspect(root)
     let proposals = await model.organizationStore.localSuggestions(inventory)
     model.authorizeRemoval = { false }

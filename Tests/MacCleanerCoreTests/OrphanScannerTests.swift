@@ -56,6 +56,30 @@ final class OrphanScannerTests: XCTestCase {
     XCTAssertTrue(items.isEmpty)
   }
 
+  func testExcludingAnInstalledAppNeverOrphansItsData() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let apps = home.appendingPathComponent("Apps")
+    try makeApp(apps, "Foo.app", id: "com.foo.app")
+    try write(home, "Library/Containers/com.foo.app/data")
+    let app = apps.appendingPathComponent("Foo.app")
+
+    for excluded in [app, apps, app.appendingPathComponent("Contents")] {
+      let items = await scanner(home, apps: [apps])
+        .scan(ignoredPaths: [excluded.standardizedFileURL.path]).value
+      XCTAssertFalse(
+        items.contains { $0.bundleID == "com.foo.app" },
+        "excluding \(excluded.lastPathComponent) protects the app; it is not evidence of removal")
+    }
+  }
+
+  func testUnknownModificationDateIsLowConfidence() {
+    XCTAssertEqual(OrphanScanner.confidence(modified: nil, recentWindow: 86_400, sameVendor: false), .low)
+    XCTAssertEqual(
+      OrphanScanner.confidence(modified: Date().addingTimeInterval(-400 * 86_400), recentWindow: 86_400, sameVendor: false),
+      .medium)
+  }
+
   func testGroupContainerIdentifiers() {
     XCTAssertEqual(OrphanScanner.bundleID(fromName: "ABCDE12345.com.vendor.shared", inGroupContainers: true), "com.vendor.shared")
     XCTAssertEqual(OrphanScanner.bundleID(fromName: "group.com.vendor.app", inGroupContainers: true), "com.vendor.app")
