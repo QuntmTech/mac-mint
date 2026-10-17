@@ -101,7 +101,8 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
         if token: request_headers['Authorization'] = token
         request = urllib.request.Request(origin + path, data=content, headers=request_headers)
         try:
-            with urllib.request.urlopen(request, timeout=20) as response: return response.status, json.load(response)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                raw = response.read(); return response.status, json.loads(raw) if raw else {}
         except urllib.error.HTTPError as error: return error.code, json.load(error)
     with (folder / 'server.log').open('w') as log:
         process = subprocess.Popen(base + ['serve', '--http', f'127.0.0.1:{port}'], stdout=log, stderr=log,
@@ -314,6 +315,26 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert call('/__test/release', dict(build=3, url='http://github.com/QuntmTech/mac-mint/releases/download/v0.0.3/MacMint.zip'))[1] == dict(saved=False)
             assert call('/__test/release', dict(build=4, url='https://github.com/QuntmTech/mac-mint/releases/download/v0.0.4/MacMint.zip'))[1] == dict(saved=True)
             print('PASS: published feed releases require a first-party HTTPS download URL')
+            for n in range(2):
+                assert call('/api/collections/site_events/records', dict(event='view', variant='a', visitor=f'visitor-fixture-{n:04d}'))[0] == 200
+            old_date, recent_date = '2020-01-01 00:00:00.000Z', time.strftime('%Y-%m-%d %H:%M:%S.000Z', time.gmtime(time.time() - 30 * 86400))
+            event_ids = [row[0] for row in db.execute('SELECT id FROM site_events ORDER BY id')]
+            db.execute('UPDATE site_events SET created=? WHERE id=?', (old_date, event_ids[0]))
+            failure_ids = [row[0] for row in db.execute("SELECT id FROM audit_log WHERE event='redeem_failed' ORDER BY id")]
+            assert len(failure_ids) >= 3, failure_ids
+            db.execute('UPDATE audit_log SET created=? WHERE id=?', (old_date, failure_ids[0]))
+            db.execute('UPDATE audit_log SET created=? WHERE id=?', (recent_date, failure_ids[1]))
+            db.execute("UPDATE audit_log SET created=? WHERE event='checkout_fulfilled'", (old_date,))
+            db.commit()
+            kept_evidence = db.execute("SELECT COUNT(*) FROM audit_log WHERE event != 'redeem_failed'").fetchone()[0]
+            assert call('/api/crons/macmint_retention', {}, admin)[0] == 204
+            for _ in range(100):
+                if not db.execute('SELECT COUNT(*) FROM site_events WHERE id=?', (event_ids[0],)).fetchone()[0]: break
+                time.sleep(.05)
+            assert [row[0] for row in db.execute('SELECT id FROM site_events ORDER BY id')] == event_ids[1:]
+            assert [row[0] for row in db.execute("SELECT id FROM audit_log WHERE event='redeem_failed' ORDER BY id")] == failure_ids[1:]
+            assert db.execute("SELECT COUNT(*) FROM audit_log WHERE event != 'redeem_failed'").fetchone()[0] == kept_evidence
+            print('PASS: daily retention prunes old site events and failed-redeem audit rows, keeping recent rows and payment evidence')
             db.close()
             print('PASS: real raw-body HMAC, unpaid -> paid fulfillment, 8 duplicate concurrent webhooks grant one license')
             print('PASS: migrations preserve pre-existing collection IDs and reapply cleanly')
