@@ -112,6 +112,7 @@ struct PlanReviewSheet: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var showExcluded = false
+  @State private var exclusionError: String?
 
   private var grouped: [(String, [PlanItem])] {
     plan.sources.map { source in (source, plan.items.filter { $0.source == source }) }
@@ -134,10 +135,7 @@ struct PlanReviewSheet: View {
                 PlanItemRow(item: item, onRemove: { remove(item) })
                   .contextMenu {
                     Button("Keep this item") { remove(item) }
-                    Button("Exclude from Future Scans") {
-                      model.ignore(item.url)
-                      remove(item)
-                    }
+                    Button("Exclude from Future Scans") { exclude(item) }
                     Button("Show Folder Contents in Finder") { model.reveal(item.url) }
                   }
               }
@@ -164,6 +162,14 @@ struct PlanReviewSheet: View {
     .frame(width: 720)
     .frame(minHeight: 420, maxHeight: 680)
     .scrollContentBackground(.hidden).background(AppTheme.canvas)
+  }
+
+  /// The row leaves the review only after the exclusion is saved; otherwise the error stays here.
+  private func exclude(_ item: PlanItem) {
+    Task {
+      exclusionError = await model.addExclusion(item.url)
+      if exclusionError == nil { remove(item) }
+    }
   }
 
   private func remove(_ item: PlanItem) {
@@ -199,6 +205,10 @@ struct PlanReviewSheet: View {
       }
       Text("Remove anything you want to keep. Only the items below will move.")
         .font(.callout).foregroundStyle(.secondary)
+      if let exclusionError {
+        Label(exclusionError, systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
+      }
     }.padding(24)
   }
 

@@ -436,34 +436,41 @@ final class AppViewModel: ObservableObject {
   }
 
   func ignore(_ url: URL) {
-    Task {
-      do {
-        ignoredPaths = try await ignoreStore.add(url)
-        cleanupTargets.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
-        largeFiles.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
-        selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))
-        duplicateGroups = duplicateGroups.compactMap { group in
-          let updated = DuplicateGroup(
-            id: group.id, fingerprint: group.fingerprint,
-            files: group.files.filter { !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) })
-          return updated.physicalCopyCount > 1 ? updated : nil
-        }
-        selectedDuplicateIDs.formIntersection(duplicateGroups.flatMap(\.files).map(\.id))
-        // Cleanup targets that contain the new exclusion can no longer be acted on as a whole.
-        cleanupTargets.removeAll {
-          FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
-        }
-        let blockedLeftovers = Set(
-          appLeftovers.filter {
-            FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
-              || FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
-          }.map(\.id))
-        appLeftovers.removeAll { blockedLeftovers.contains($0.id) }
-        selectedLeftoverIDs.subtract(blockedLeftovers)
-        statusMessage = "Added \(url.lastPathComponent) to exclusions"
-      } catch {
-        statusMessage = "Could not save exclusion: \(error.localizedDescription)"
+    Task { await addExclusion(url) }
+  }
+
+  /// Returns the error shown to the person, or nil once the exclusion is saved and applied.
+  @discardableResult
+  func addExclusion(_ url: URL) async -> String? {
+    do {
+      ignoredPaths = try await ignoreStore.add(url)
+      cleanupTargets.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
+      largeFiles.removeAll { FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) }
+      selectedLargeFileIDs.formIntersection(largeFiles.map(\.id))
+      duplicateGroups = duplicateGroups.compactMap { group in
+        let updated = DuplicateGroup(
+          id: group.id, fingerprint: group.fingerprint,
+          files: group.files.filter { !FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths) })
+        return updated.physicalCopyCount > 1 ? updated : nil
       }
+      selectedDuplicateIDs.formIntersection(duplicateGroups.flatMap(\.files).map(\.id))
+      // Cleanup targets that contain the new exclusion can no longer be acted on as a whole.
+      cleanupTargets.removeAll {
+        FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+      }
+      let blockedLeftovers = Set(
+        appLeftovers.filter {
+          FileSystem.isIgnored($0.url, ignoredPaths: ignoredPaths)
+            || FileSystem.containsIgnoredDescendant($0.url, ignoredPaths: ignoredPaths)
+        }.map(\.id))
+      appLeftovers.removeAll { blockedLeftovers.contains($0.id) }
+      selectedLeftoverIDs.subtract(blockedLeftovers)
+      statusMessage = "Added \(url.lastPathComponent) to exclusions"
+      return nil
+    } catch {
+      let message = "Could not save exclusion: \(error.localizedDescription)"
+      statusMessage = message
+      return message
     }
   }
 
