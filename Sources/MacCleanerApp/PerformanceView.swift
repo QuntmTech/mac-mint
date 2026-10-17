@@ -109,9 +109,12 @@ struct PerformanceView: View {
         GeometryReader { geometry in
           let frame = geometry.frame(in: .global)
           let inset = geometry.safeAreaInsets
+          // The detail frame already excludes the NavigationSplitView sidebar.
+          // SwiftUI also propagates that column as a leading safe-area inset; adding
+          // it again shifts the measured viewport into the process table. Retain the
+          // vertical exclusions for the fixed workspace and operation controls.
           Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["performance viewport":
-            CGRect(x: frame.minX + inset.leading, y: frame.minY + inset.top,
-              width: max(0, frame.width - inset.leading - inset.trailing),
+            CGRect(x: frame.minX, y: frame.minY + inset.top, width: frame.width,
               height: max(0, frame.height - inset.top - inset.bottom))])
         }
       }
@@ -333,7 +336,8 @@ struct PerformanceView: View {
         Menu {
           Button("Force Quit…", role: .destructive) { if let usage { forceQuit = true; pendingQuit = usage } }
         } label: { Image(systemName: "ellipsis").accessibilityLabel("More actions for " + app.name) }
-          .menuStyle(.borderlessButton).frame(width: 18).accessibilityLabel("More actions for " + app.name)
+          .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(AppTheme.ink)
+          .frame(width: 18).accessibilityLabel("More actions for " + app.name)
       }.frame(width: 98, alignment: .trailing)
         .disabled(!(usage?.canControl ?? false))
         .help(usage?.canControl == true ? "Quit or force quit " + app.name : "Process controls are unavailable for this app")
