@@ -46,7 +46,7 @@ Use a separate general Stripe sandbox for development, isolated from live accoun
 - `STRIPE_RESTRICTED_KEY`, or private `app_secrets.name = stripe_restricted_key`.
 - `STRIPE_WEBHOOK_SECRET`, or private `app_secrets.name = stripe_webhook_secret`.
 
-The REST adapter needs Checkout Session create/read access, including line-item retrieval, and Price read access. Verify the exact restricted-key permissions in the sandbox; a plausible prefix does not establish authorization. No publishable key or Stripe.js is needed for this hosted redirect flow. See [Stripe key handling](https://docs.stripe.com/keys) and [sandbox guidance](https://docs.stripe.com/sandboxes).
+The REST adapter needs Checkout Session create/read access, including line-item retrieval and listing sessions by payment intent, Price read access, and Charges and Disputes read access for refund and dispute handling. Verify the exact restricted-key permissions in the sandbox; a plausible prefix does not establish authorization. No publishable key or Stripe.js is needed for this hosted redirect flow. See [Stripe key handling](https://docs.stripe.com/keys) and [sandbox guidance](https://docs.stripe.com/sandboxes).
 
 The PocketBase Goja runtime cannot load the Node Stripe SDK. `macmint_payments_lib.js` therefore uses a small server-only REST client pinned to API version `2026-08-26.dahlia`. Stripe error bodies and credentials are not forwarded to clients.
 
@@ -61,6 +61,11 @@ Read-only endpoints:
 - `GET /api/macmint/checkout/config`: public purchasable offer, or `enabled: false` when prerequisites are absent. Returns no credentials.
 - `GET /api/macmint/checkout/status?request_key=<UUID>`: authenticated, owner-scoped order status. Known orders include their immutable offer terms. It makes no Stripe API calls. Only verified terminal `failed`/`expired` states permit a new attempt.
 - `GET /api/macmint/admin/commerce/readiness`: superuser-only diagnostic returning `ready` and named `reasons`. It never returns the configuration, secret values, or Stripe object IDs. A true result checks configured local prerequisites, not sandbox end-to-end evidence.
+
+Superuser recovery routes:
+
+- `POST /api/macmint/admin/checkout/reconcile` with `{ "order": "<order id>" }`: retrieves the order's Checkout Session from Stripe and applies its authoritative state through the normal fulfillment and expiry code (paid → fulfilled once; expired → expired). Use it for `checkout_attention` and for pending orders whose terminal webhook never arrived. An open session or a complete-but-unpaid asynchronous payment is reported, not changed; resend the missing Stripe event instead. An order that never recorded a session takes `"session": "cs_..."` (found by its `macmint_order` metadata in the Dashboard; the session must carry that order ID), or, only after checking Stripe and at least 25 hours after creation, `"confirm_expired_without_session": true`.
+- `POST /api/macmint/admin/licenses/revoke` with `{ "license": "<id>" }`, `{ "code": "MINT-…" }` or `{ "order": "<order id>" }`, optional `"reason"`: revokes the license and recomputes the owner's entitlement in one transaction. Idempotent.
 
 Browser returns such as `checkout=processing` are hints for the interface, never proof of payment. A missing or unrecognized order remains unconfirmed. The browser preserves retry identity on cancellation, network errors, and uncertain responses; another unresolved order must be resumed or reconciled before a new one is created.
 
@@ -79,11 +84,15 @@ checkout.session.completed
 checkout.session.async_payment_succeeded
 checkout.session.async_payment_failed
 checkout.session.expired
+charge.refunded
+charge.dispute.created
 ```
 
 The handler verifies the raw-body signature and timestamp, then retrieves the authoritative Checkout Session and line items. Payment must be paid and match the immutable order's user, mode, Price, amount, currency and quantity before an atomic license/entitlement grant. Expired/failed notifications cannot downgrade a fulfilled purchase. Concurrent/repeated successful deliveries do not extend access twice. See [Stripe fulfillment](https://docs.stripe.com/checkout/fulfillment?payment-ui=stripe-hosted).
 
-An unresolved legacy order or a lost create response outside the safe idempotency window requires operator reconciliation with Stripe. Preserve its row and request identity. Check the actual session/payment state before marking a terminal outcome; do not delete the order, grant access from the return URL, or create an uncertain replacement payment. If a terminal webhook is missing, database-only status deliberately remains pending even if trying to resume reports an expired provider session. Fix delivery and reconcile the authoritative state before permitting a replacement.
+Refunds and disputes are handled the same way: the signed event is a trigger, and the server retrieves the Charge or Dispute, maps its payment intent to the order (recorded at fulfillment; older orders are found through their Checkout Session), and in one transaction marks the order `refunded` or `disputed`, revokes its license and recomputes the entitlement from the user's remaining licenses. Replays change nothing, and a later success event cannot restore access. A partial refund only sets `attention = partial_refund` on the order for operator review. Operator-set (`manual`) entitlements are not rewritten; an `entitlement_review` audit row is written instead. Events for payments that are not MacMint checkouts are acknowledged and ignored. A won dispute does not restore access automatically; grant a replacement license if appropriate.
+
+An unresolved legacy order or a lost create response outside the safe idempotency window requires operator reconciliation with Stripe (see the reconcile route above). Preserve its row and request identity. Check the actual session/payment state before marking a terminal outcome; do not delete the order, grant access from the return URL, or create an uncertain replacement payment. If a terminal webhook is missing, database-only status deliberately remains pending even if trying to resume reports an expired provider session. Fix delivery and reconcile the authoritative state before permitting a replacement.
 
 ## Verification before opening sales
 
@@ -103,4 +112,4 @@ These tests use synthetic Stripe protocol responses and isolated databases; they
 
 In the intended isolated sandbox, prove verified account → configured offer → Stripe Checkout → paid webhook → owner status → account entitlement → explicit Mac activation. Also test declined, cancelled, expired and delayed payments; dropped create/return responses; reloads/new tabs; concurrent webhook retries; different users; a changed account email, offer or return origin; device limits; and sign-out during verification.
 
-Use a validated, notarized stable build before enabling checkout. Prove external verification/reset email delivery. Keep refund/dispute handling and any future subscription lifecycle explicit rather than treating the existing one-time purchase implementation as support for them. Automatic tax requires confirmed registrations and separate testing before enabling it. Only publish the offer and open live sales after the actual sandbox and consumer-install gates pass.
+Use a validated, notarized stable build before enabling checkout. Prove external verification/reset email delivery. In the sandbox, also prove full refund → access revoked, partial refund → flagged only, and dispute → access revoked. Keep any future subscription lifecycle explicit rather than treating the existing one-time purchase implementation as support for it. Automatic tax requires confirmed registrations and separate testing before enabling it. Only publish the offer and open live sales after the actual sandbox and consumer-install gates pass.
