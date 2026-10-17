@@ -40,6 +40,82 @@ final class PhotoReviewTests: XCTestCase {
     model.togglePhoto(copy); XCTAssertEqual(model.selectedPhotoIDs, [keeper.id])
   }
 
+  func testDeckResumesAfterNavigationAndUndoRestoresTheSharedQueue() {
+    let (model, support) = reviewModel()
+    defer { try? FileManager.default.removeItem(at: support) }
+    let keeper = photo("best.jpg"), copy = photo("copy.jpg")
+    model.photoScan = scan([keeper, copy], keeper: keeper)
+
+    XCTAssertNil(model.decidePhotoReview(removing: false))
+    XCTAssertNil(model.decidePhotoReview(removing: true))
+    XCTAssertEqual(model.photoReviewSession.cursor, 2)
+    XCTAssertEqual(model.selectedPhotoIDs, [copy.id])
+    model.selectedSection = .storage
+    model.selectedSection = .photos
+    XCTAssertEqual(model.photoReviewSession.cursor, 2, "Navigation must not restart the deck")
+    XCTAssertNil(model.undoPhotoReview())
+    XCTAssertEqual(model.photoReviewSession.cursor, 1)
+    XCTAssertTrue(model.selectedPhotoIDs.isEmpty)
+    XCTAssertEqual(model.photoReviewSession.choices.count, 1)
+  }
+
+  func testNewScanAndChangedResultsDiscardOldUndoWhileCancelledScanningPreservesPosition() {
+    let (model, support) = reviewModel()
+    defer { try? FileManager.default.removeItem(at: support) }
+    let keeper = photo("best.jpg"), copy = photo("copy.jpg")
+    model.photoScan = scan([keeper, copy], keeper: keeper)
+    _ = model.decidePhotoReview(removing: false)
+    model.isScanning = true
+    _ = model.decidePhotoReview(removing: true)
+    XCTAssertEqual(model.photoReviewSession.cursor, 1)
+    model.isScanning = false // Cancelled scans retain the last completed scan.
+    XCTAssertEqual(model.photoReviewSession.cursor, 1)
+    _ = model.decidePhotoReview(removing: true)
+
+    model.removePhotos { $0.id == copy.id }
+    XCTAssertEqual(model.photoReviewSession.cursor, 0)
+    XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+    XCTAssertNil(model.undoPhotoReview())
+    XCTAssertFalse(model.selectedPhotoIDs.contains(copy.id), "Undo cannot requeue an invalidated finding")
+
+    _ = model.decidePhotoReview(removing: false)
+    model.photoScan = scan([keeper, copy], keeper: keeper)
+    XCTAssertEqual(model.photoReviewSession.cursor, 0, "Even a rescan with the same paths starts a new review")
+    XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+  }
+
+  func testUndoCannotQueueANewKeeperAndRestartLeavesSelectionsAlone() {
+    let (model, support) = reviewModel()
+    defer { try? FileManager.default.removeItem(at: support) }
+    let keeper = photo("best.jpg"), copy = photo("copy.jpg")
+    model.photoScan = scan([copy, keeper], keeper: keeper)
+    model.togglePhoto(copy)
+    _ = model.decidePhotoReview(removing: false)
+    model.keepInstead(copy)
+    XCTAssertNotNil(model.undoPhotoReview())
+    XCTAssertTrue(model.selectedPhotoIDs.isEmpty)
+    XCTAssertEqual(model.photoReviewSession.cursor, 1)
+
+    model.togglePhoto(keeper)
+    model.restartPhotoReview()
+    XCTAssertEqual(model.photoReviewSession.cursor, 0)
+    XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+    XCTAssertEqual(model.selectedPhotoIDs, [keeper.id], "Restart changes browsing, never the removal queue")
+    XCTAssertNotNil(model.decidePhotoReview(removing: true))
+    XCTAssertEqual(model.photoReviewSession.cursor, 0)
+  }
+
+  private func reviewModel() -> (AppViewModel, URL) {
+    let support = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    return (AppViewModel(supportDirectory: support), support)
+  }
+
+  private func scan(_ photos: [PhotoFingerprint], keeper: PhotoFingerprint) -> PhotoScanResult {
+    PhotoScanResult(photos: photos,
+      similarGroups: [.init(id: "set", photos: photos, keeperIndex: photos.firstIndex { $0.id == keeper.id }!)],
+      blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
+  }
+
   private func photo(_ name: String) -> PhotoFingerprint {
     PhotoFingerprint(url: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/" + name),
       bytes: 100, hash: 1, sharpness: 100, pixelWidth: 100, pixelHeight: 100)

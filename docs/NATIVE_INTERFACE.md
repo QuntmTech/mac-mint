@@ -16,6 +16,7 @@ Keep new screens on these tokens rather than introducing fixed light backgrounds
 - `SurfaceCard`, `IconTile`, `SearchField`, `MintButtonStyle`, and `CardButtonStyle` provide consistent spacing and interaction. Cards with actions are real buttons; empty states provide relevant next actions.
 - The overview gives storage and Quick Scan priority, separates rebuildable findings from items requiring judgment, and offers focused entries to Storage, Apps, Photos, and Developer. Scan coverage remains inspectable.
 - Cleanup separates searching, filtering, selection, and final review. Apps separates its inventory from the inspector and supports the existing drop-to-inspect flow. Photo groups prioritize comparison and an explicit keeper.
+- Photo-deck position and Undo choices survive navigation for the current scan. New results reset that browsing state; Review from start leaves queued selections alone. Quick Look requests are cancelled with their views and late results do not populate the image cache.
 - Review collects selections across modules. The final sheet preserves item explanations, remove/keep/exclude/reveal actions, warnings, and the explicit Move to Trash confirmation. Recovery language remains conditional on actual receipts.
 - Sidebar destinations remember the most recent tab during navigation. Existing destination IDs and keyboard shortcuts are unchanged. Settings and Help remain at the foot of the sidebar.
 

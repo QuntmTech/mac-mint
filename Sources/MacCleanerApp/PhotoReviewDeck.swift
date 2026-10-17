@@ -3,16 +3,16 @@ import SwiftUI
 
 /// A gesture changes the review queue only. Existing folder/PhotoKit review executes removal.
 struct PhotoReviewDeck: View {
-  let photos: [PhotoFingerprint]
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @State private var cursor = 0
-  @State private var trail: [(index: Int, selected: Bool)] = []
   @State private var drag: CGFloat = 0
   @State private var comparing: SimilarPhotoGroup?
   @State private var cloudPreview = false
   @State private var message: String?
 
+  private var photos: [PhotoFingerprint] { model.allScannedPhotos }
+  private var cursor: Int { model.photoReviewSession.cursor }
+  private var busy: Bool { model.isWorking || model.isScanning || model.isPreparingPlan }
   private var current: PhotoFingerprint? { photos.indices.contains(cursor) ? photos[cursor] : nil }
   private var group: SimilarPhotoGroup? { current.flatMap { model.group(containing: $0) } }
   private var isKeeper: Bool { current.map { photo in group.map { model.keeper(of: $0).id == photo.id } ?? false } ?? false }
@@ -22,6 +22,11 @@ struct PhotoReviewDeck: View {
       HStack {
         Label("One photo at a time", systemImage: "rectangle.stack") .font(.headline)
         Spacer()
+        if cursor > 0 {
+          Button("Review from start") { model.restartPhotoReview(); cloudPreview = false; message = nil }
+            .controlSize(.small).disabled(busy)
+            .help("Restart browsing and clear Undo choices. Your queued photos stay selected.")
+        }
         Text("\(min(cursor + 1, photos.count)) of \(photos.count.formatted())")
           .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
       }
@@ -79,16 +84,16 @@ struct PhotoReviewDeck: View {
             : "Your choices are in the review queue. Inspect them before anything is removed.",
           actionTitle: model.selectedPhotoIDs.isEmpty ? nil : "Review \(model.selectedPhotoIDs.count) queued photos",
           action: { model.reviewPhotos() })
-          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
+          .disabled(busy)
       }
       if let message { Text(message).font(.caption).foregroundStyle(AppTheme.warning).accessibilityAddTraits(.updatesFrequently) }
     }
     .padding(16)
     .safeAreaInset(edge: .bottom, spacing: 0) { controls }
     .focusable()
-    .onKeyPress(.leftArrow) { decide(remove: true); return .handled }
-    .onKeyPress(.rightArrow) { decide(remove: false); return .handled }
-    .onKeyPress("z") { undo(); return .handled }
+    .onKeyPress(.leftArrow) { guard !busy else { return .ignored }; decide(remove: true); return .handled }
+    .onKeyPress(.rightArrow) { guard !busy else { return .ignored }; decide(remove: false); return .handled }
+    .onKeyPress("z") { guard !busy else { return .ignored }; undo(); return .handled }
     .sheet(item: $comparing) { PhotoComparisonSheet(group: $0) }
   }
 
@@ -96,14 +101,14 @@ struct PhotoReviewDeck: View {
     VStack(spacing: 8) {
       HStack(spacing: 10) {
         Button { undo() } label: { Label("Undo choice", systemImage: "arrow.uturn.backward") }
-          .disabled(trail.isEmpty || model.isWorking || model.isScanning)
+          .disabled(model.photoReviewSession.choices.isEmpty || busy)
           .help("Undo the last review choice · Z")
         Spacer(minLength: 0)
         Button { decide(remove: true) } label: { Label("Queue removal", systemImage: "arrow.left") }
-          .disabled(current == nil || isKeeper || model.isWorking || model.isScanning)
+          .disabled(current == nil || isKeeper || busy)
           .help(isKeeper ? "Choose another keeper in Compare first" : "Queue this photo for review · ←")
         Button { decide(remove: false) } label: { Label("Keep", systemImage: "arrow.right") }
-          .buttonStyle(MintButtonStyle()).disabled(current == nil || model.isWorking || model.isScanning)
+          .buttonStyle(MintButtonStyle()).disabled(current == nil || busy)
       }
       Text("Swipe or use ← to queue, → to keep, and Z to undo. Review and confirm before removal.")
         .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -117,19 +122,14 @@ struct PhotoReviewDeck: View {
   }
 
   private func decide(remove: Bool) {
-    guard let photo = current, !model.isWorking, !model.isScanning else { return }
-    if remove && isKeeper { message = "Choose a different keeper in Compare before queuing this photo."; return }
-    let before = model.selectedPhotoIDs.contains(photo.id)
-    if before != remove { model.togglePhoto(photo) }
-    guard model.selectedPhotoIDs.contains(photo.id) == remove else { message = model.statusMessage; return }
-    trail.append((cursor, before)); cursor += 1; cloudPreview = false; message = nil
+    let before = cursor
+    message = model.decidePhotoReview(removing: remove)
+    if cursor != before { cloudPreview = false }
   }
 
   private func undo() {
-    guard !model.isWorking, !model.isScanning, let previous = trail.last else { return }
-    let photo = photos[previous.index]
-    if model.selectedPhotoIDs.contains(photo.id) != previous.selected { model.togglePhoto(photo) }
-    guard model.selectedPhotoIDs.contains(photo.id) == previous.selected else { message = model.statusMessage; return }
-    trail.removeLast(); cursor = previous.index; cloudPreview = false; message = nil
+    let before = cursor
+    message = model.undoPhotoReview()
+    if cursor != before { cloudPreview = false }
   }
 }
