@@ -24,9 +24,12 @@ final class AppUninstallTests: XCTestCase {
     let byHost = try write(root, "Library/Preferences/ByHost/com.example.Widget.\(UUID().uuidString).plist")
     let items = await AppScanner(homeDirectory: root, applicationRoots: []).leftovers(for: app(root))
     XCTAssertEqual(items.count, 3)
-    XCTAssertEqual(items.first { $0.url == cache.deletingLastPathComponent() }?.category, .caches)
-    XCTAssertEqual(items.first { $0.url == settings }?.category, .settings)
-    XCTAssertEqual(items.first { $0.url == byHost }?.confidence, .high)
+    func matching(_ url: URL) -> AppLeftover? {
+      items.first { FileSystem.comparisonPath($0.url) == FileSystem.comparisonPath(url) }
+    }
+    XCTAssertEqual(matching(cache.deletingLastPathComponent())?.category, .caches)
+    XCTAssertEqual(matching(settings)?.category, .settings)
+    XCTAssertEqual(matching(byHost)?.confidence, .high)
     XCTAssertTrue(items.filter(\.isDisposableData).allSatisfy { $0.category == .caches })
   }
   func testExcludedDescendantAndSymlinkDoNotBecomeSelectedAppData() async throws {

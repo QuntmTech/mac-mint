@@ -65,6 +65,13 @@ final class AppTamingControllerTests: XCTestCase {
     XCTAssertFalse(AppTamingController.allowsAutomatic("com.microsoft.teams2"))
     XCTAssertTrue(AppTamingController.allowsAutomatic("com.example.editor"))
   }
+  func testUnactivatedControllerCannotRestoreAnotherInstancesIntent() throws {
+    let (controller, backend, store, root) = fixture(); defer { try? FileManager.default.removeItem(at: root) }
+    controller.slow(identity, name: "App", now: Date())
+    let other = AppTamingController(store: store, backend: backend)
+    other.restoreAll(); other.restore(identity)
+    XCTAssertEqual(backend.calls, [true]); XCTAssertEqual(try store.load().receipts.count, 1)
+  }
 }
 
 @MainActor

@@ -28,16 +28,20 @@ struct DarwinTamingBackend: TamingBackend {
     }
     guard usage.ri_proc_start_abstime == identity.started else { return .goneOrChanged }
     guard let app = NSRunningApplication(processIdentifier: identity.pid) else { return .unavailable }
-    guard !app.isTerminated,
-      app.activationPolicy == .regular, app.bundleIdentifier == identity.bundleID,
-      app.bundleURL?.resolvingSymlinksInPath().path == identity.path else { return .goneOrChanged }
+    guard !app.isTerminated else { return .goneOrChanged }
+    // A still-live birth identity with changed metadata/ownership is uncertain, not gone.
+    guard app.bundleIdentifier == identity.bundleID,
+      app.bundleURL?.resolvingSymlinksInPath().path == identity.path else { return .unavailable }
     var info = proc_bsdinfo()
     let size = MemoryLayout<proc_bsdinfo>.stride
     guard proc_pidinfo(identity.pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == Int32(size) else { return .unavailable }
-    return info.pbi_uid == geteuid() ? .current : .goneOrChanged
+    return info.pbi_uid == geteuid() ? .current : .unavailable
   }
   func setBackground(_ background: Bool, for identity: TamingIdentity) throws {
     guard status(identity) == .current else { throw CocoaError(.executableNotLoadable) }
+    if background, NSRunningApplication(processIdentifier: identity.pid)?.activationPolicy != .regular {
+      throw CocoaError(.executableNotLoadable)
+    }
     guard setpriority(PRIO_DARWIN_PROCESS, id_t(identity.pid), background ? PRIO_DARWIN_BG : 0) == 0 else {
       throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }
@@ -123,7 +127,7 @@ final class AppTamingController {
     }
   }
   func restore(_ identity: TamingIdentity, now: Date = Date(), suppress: Bool = false) {
-    guard let item = state.receipts.first(where: { $0.identity == identity }) else { return }
+    guard activated, ready, let item = state.receipts.first(where: { $0.identity == identity }) else { return }
     if suppress { suppressed.insert(identity) }
     do {
       switch backend.status(identity) {
@@ -136,6 +140,7 @@ final class AppTamingController {
     } catch { message = "Could not restore \(item.name). Its recovery record is kept; try Restore again. \(error.localizedDescription)" }
   }
   func restoreAll() {
+    guard activated, ready else { return }
     autoEnabled = false; policy.reset()
     for item in state.receipts { restore(item.identity) }
   }
