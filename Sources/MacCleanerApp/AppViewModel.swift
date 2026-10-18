@@ -184,6 +184,8 @@ final class AppViewModel: ObservableObject {
   var currentTask: Task<Void, Never>?
 
   init(supportDirectory: URL? = nil) {
+    // A read-only launch shortcut also lets the packaged resource probe measure live UI.
+    if CommandLine.arguments.contains("--performance") { selectedSection = .performance }
     let support = supportDirectory ?? AppPaths.supportDirectory
     self.supportDirectory = support
     organizationStore = OrganizationStore(directory: support.appendingPathComponent("Organization"))

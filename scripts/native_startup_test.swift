@@ -69,6 +69,7 @@ private struct NativeStartupTest {
       for inserted in [false, true] {
         try check(appURL: appURL, identifier: identifier, menuBarInserted: inserted)
       }
+      try check(appURL: appURL, identifier: identifier, menuBarInserted: false, performance: true)
       log("PASS: ordinary launches with menu bar off/on finished, created a main window, stayed below the CPU-loop limit, and quit normally.")
     } catch {
       FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
@@ -77,8 +78,8 @@ private struct NativeStartupTest {
   }
 
   @MainActor
-  private static func check(appURL: URL, identifier: String, menuBarInserted: Bool) throws {
-    let label = "menu bar \(menuBarInserted ? "on" : "off")"
+  private static func check(appURL: URL, identifier: String, menuBarInserted: Bool, performance: Bool = false) throws {
+    let label = performance ? "live Performance view" : "menu bar \(menuBarInserted ? "on" : "off")"
     let marker = UUID().uuidString
     let mailbox = LaunchMailbox()
     var ownedApp: NSRunningApplication?
@@ -96,8 +97,8 @@ private struct NativeStartupTest {
       }
     }
     let configuration = NSWorkspace.OpenConfiguration()
-    configuration.activates = false
-    configuration.hides = true
+    configuration.activates = performance
+    configuration.hides = !performance
     configuration.hidesOthers = false
     configuration.addsToRecentItems = false
     configuration.createsNewApplicationInstance = true
@@ -107,11 +108,12 @@ private struct NativeStartupTest {
     // HOME substitution, test-only app entry point, or user-data cleanup is used.
     configuration.arguments = [
       "-care.showMenuBar", menuBarInserted ? "YES" : "NO",
-      "-care.onboardingDone", "NO",
+      "-care.onboardingDone", performance ? "YES" : "NO",
       "-care.lowSpaceAlerts", "NO",
       "-care.scanReminders", "NO",
       "-MacMintNativeStartupProbeID", marker,
     ]
+    if performance { configuration.arguments.append("--performance") }
     log("Launching ordinary app: \(label)")
     // AppKit calls this completion on its own queue. An unannotated closure in
     // this MainActor method can inherit actor isolation and trap before it reaches
