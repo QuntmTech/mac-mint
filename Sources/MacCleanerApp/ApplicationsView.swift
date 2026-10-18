@@ -99,7 +99,9 @@ struct ApplicationsView: View {
   }
 
   private var uninstaller: some View {
-    HSplitView {
+    // Keep both panes in the same SwiftUI layout tree. NSSplitView's nested
+    // hosting roots on macOS 26 can misplace safe-area/footer coordinates.
+    HStack(spacing: 0) {
       VStack(spacing: 0) {
         HStack {
           Text("Installed apps").font(.system(size: 13, weight: .semibold))
@@ -160,8 +162,9 @@ struct ApplicationsView: View {
       }
       .frame(minWidth: 250, idealWidth: 290, maxWidth: 360)
 
+      Divider()
       detail
-        .frame(minWidth: 380)
+        .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 
@@ -224,7 +227,7 @@ struct ApplicationsView: View {
               detail: "No matching user-level leftovers were detected for this app.")
           } else {
             ForEach(model.appLeftovers) { leftover in
-              HStack(spacing: 11) {
+              HStack(alignment: .top, spacing: 11) {
                 Toggle(
                   "",
                   isOn: Binding(
@@ -239,37 +242,44 @@ struct ApplicationsView: View {
                   )
                 )
                 .labelsHidden()
+                .fixedSize()
+                .padding(.top, 2)
                 .accessibilityLabel("Remove \(leftover.url.lastPathComponent) with the app")
 
-                VStack(alignment: .leading, spacing: 3) {
-                  Text(leftover.url.lastPathComponent).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 5) {
+                  HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(leftover.url.lastPathComponent).fontWeight(.medium)
+                      .lineLimit(2).truncationMode(.middle).layoutPriority(1)
+                    Spacer(minLength: 0)
+                    Text(ByteFormatter.string(leftover.size))
+                      .font(.callout.monospacedDigit()).fixedSize()
+                    Menu {
+                      Button("Reveal in Finder") { model.reveal(leftover.url) }
+                      Button("Exclude from future scans") { model.ignore(leftover.url) }
+                    } label: {
+                      Image(systemName: "ellipsis.circle")
+                        .accessibilityLabel("More actions for " + leftover.url.lastPathComponent)
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                  }
                   Text(leftover.category.rawValue + " · " + leftover.category.consequence)
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                   Text(leftover.reason).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                   Text(leftover.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     .truncationMode(.middle).help(leftover.url.path)
+                  HStack(spacing: 6) {
+                    if leftover.isShared {
+                      StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
+                    }
+                    StatusPill(
+                      title: leftover.confidence.rawValue.capitalized,
+                      icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
+                      tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
+                    )
+                  }
                 }
-                Spacer()
-                if leftover.isShared {
-                  StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
-                }
-                StatusPill(
-                  title: leftover.confidence.rawValue.capitalized,
-                  icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
-                  tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
-                )
-                Text(ByteFormatter.string(leftover.size))
-                  .font(.callout.monospacedDigit())
-                  .frame(width: 86, alignment: .trailing)
-                Menu {
-                  Button("Reveal in Finder") { model.reveal(leftover.url) }
-                  Button("Exclude from future scans") { model.ignore(leftover.url) }
-                } label: {
-                  Image(systemName: "ellipsis.circle")
-                    .accessibilityLabel("More actions")
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
               }
               .padding(.vertical, 4)
             }

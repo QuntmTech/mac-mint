@@ -15,6 +15,8 @@ This checklist covers the user's complete request, including both Photos reports
 
 Apps already had an uninstall engine. This work makes it discoverable and improves its evidence rather than adding another removal path. App bundles plus explicitly selected related files go through the existing planner, final ownership/identity/exclusion checks, durable journal, Trash receipt and History acknowledgment. Related data depends on a successful app-bundle move; failed app removal cannot independently delete its data.
 
+The app list and review use a responsive SwiftUI two-pane layout with a divider. Keeping them in one layout tree avoids macOS 26 nested split-host coordinate failures. Related-file explanations and confidence labels wrap below the name/size row instead of squeezing filenames into a narrow column. The panes resize with the window rather than through a draggable split handle.
+
 The scanner checks known user Library locations. Exact identifiers can be suggested; name-based and shared matches require judgment. Another installed copy with the same identifier makes matching data shared and unselected. Symlinks and excluded descendants cannot be promoted into removable app data. Nested helper bundles must be removed with the parent app. Caches/logs are distinguished from settings, local databases, projects, saved state and shared containers. The final review marks non-disposable data for attention. System-wide privileged helpers, Keychain secrets, cloud-account data and arbitrary files outside the allowlist are not claimed to be completely removed.
 
 ## Slowdown boundaries
@@ -41,7 +43,7 @@ An unavailable deck image offers Retry/Open Photos and Skip. Queue removal is bl
 
 ## Validation evidence
 
-- Portable suite: first expanded run passed 177 tests with zero failures. Final run and native evidence will be recorded below.
+- Portable suite: 177 tests with zero failures. Current native results, rendered artifacts and packaged-app measurements are recorded in [PR #33](https://github.com/QuntmTech/mac-mint/pull/33); check its latest source SHA when reviewing delivery status.
 - Linux frontend syntax parsing passed for the changed native files. This is not semantic AppKit/SwiftUI compilation.
 - New native tests cover durable intent ordering, corrupt/unwritable storage, uncertain/failed restore, relaunch recovery, exceptions, replaced identities, bulk keeper/queue behavior, and PhotoKit degraded/timeout/cancellation paths.
 - `NativeTamingTests` compiles and launches its own uniquely identified disposable AppKit app and exercises the actual Darwin adapter. It never targets an existing user app.
