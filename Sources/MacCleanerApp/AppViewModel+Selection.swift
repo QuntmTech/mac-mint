@@ -11,27 +11,41 @@ extension AppViewModel {
   /// A bulk action walks each inventory once and publishes each selection set once.
   func setFileSelections(_ urls: [URL], selected: Bool, userChoice: Bool = true) {
     guard !urls.isEmpty else { return }
+    var canonicalPaths: [String: String] = [:]
+    func key(_ url: URL) -> String {
+      let literal = url.standardizedFileURL.path
+      if let path = canonicalPaths[literal] { return path }
+      let path = FileSystem.comparisonPath(url); canonicalPaths[literal] = path; return path
+    }
     let literals = Set(urls.map { $0.standardizedFileURL.path })
     let names = Set(urls.map { $0.lastPathComponent.lowercased() })
-    let paths = Set(urls.map(FileSystem.comparisonPath))
+    let paths = Set(urls.map(key))
     func matches(_ candidate: URL) -> Bool {
       if literals.contains(candidate.standardizedFileURL.path) { return true }
-      return names.contains(candidate.lastPathComponent.lowercased()) && paths.contains(FileSystem.comparisonPath(candidate))
+      return names.contains(candidate.lastPathComponent.lowercased()) && paths.contains(key(candidate))
+    }
+    let photoCandidates: [PhotoFingerprint]
+    if urls.count == 1, let url = urls.first {
+      // Preserve indexed single-photo swipes; bulk actions still use one inventory pass.
+      photoCandidates = photoScan?.fileCandidates(named: url.lastPathComponent).filter { matches($0.url) } ?? []
+    } else {
+      photoCandidates = (photoScan?.photos ?? []).filter { !$0.isLibraryAsset && matches($0.url) }
     }
     var blocked: Set<String> = []
     if selected {
       for group in duplicateGroups {
         let keeper = group.files.first { !selectedDuplicateIDs.contains($0.id) } ?? group.files.first
-        if let keeper, matches(keeper.url) { blocked.insert(FileSystem.comparisonPath(keeper.url)) }
+        if let keeper, matches(keeper.url) { blocked.insert(key(keeper.url)) }
       }
-      for group in photoScan?.similarGroups ?? [] {
+      let photoGroups = urls.count == 1 ? photoCandidates.compactMap { group(containing: $0) } : (photoScan?.similarGroups ?? [])
+      for group in photoGroups {
         let keeper = keeper(of: group)
-        if !keeper.isLibraryAsset, matches(keeper.url) { blocked.insert(FileSystem.comparisonPath(keeper.url)) }
+        if !keeper.isLibraryAsset, matches(keeper.url) { blocked.insert(key(keeper.url)) }
       }
       if !blocked.isEmpty { statusMessage = "Protected keepers were left unselected" }
     }
     let chosen = selected ? paths.subtracting(blocked).subtracting(userChoice ? [] : keptQueuePaths) : []
-    func chooses(_ candidate: URL) -> Bool { chosen.contains(FileSystem.comparisonPath(candidate)) }
+    func chooses(_ candidate: URL) -> Bool { chosen.contains(key(candidate)) }
     if userChoice { keptQueuePaths.formUnion(paths.subtracting(chosen)); keptQueuePaths.subtract(chosen) }
     var cleanup = cleanupTargets
     for index in cleanup.indices where matches(cleanup[index].url) {
@@ -48,7 +62,7 @@ extension AppViewModel {
     selectedLargeFileIDs = update(largeFiles.map { ($0.id, $0.url) }, selectedLargeFileIDs)
     selectedDuplicateIDs = update(duplicateGroups.flatMap(\.files).map { ($0.id, $0.url) }, selectedDuplicateIDs)
     selectedDevIDs = update(devItems.filter(\.canTrash).compactMap { item in item.url.map { (item.id, $0) } }, selectedDevIDs)
-    selectedPhotoIDs = update((photoScan?.photos ?? []).filter { !$0.isLibraryAsset }.map { ($0.id, $0.url) }, selectedPhotoIDs)
+    selectedPhotoIDs = update(photoCandidates.map { ($0.id, $0.url) }, selectedPhotoIDs)
     selectedOrphanIDs = update(orphans.map { ($0.id, $0.url) }, selectedOrphanIDs)
     selectedDownloadIDs = update(downloadItems.map { ($0.id, $0.url) }, selectedDownloadIDs)
     selectedStoragePaths = Set(selectedStoragePaths.filter {
