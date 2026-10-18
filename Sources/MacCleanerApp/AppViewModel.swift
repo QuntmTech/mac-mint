@@ -305,7 +305,7 @@ final class AppViewModel: ObservableObject {
       let others = Set(apps.compactMap(\.bundleIdentifier))
       let report = await appScanner.leftoversReport(
         for: app, otherBundleIDs: others, ignoredPaths: ignoredPaths,
-        hasOtherInstallation: apps.contains { $0.bundleIdentifier == app.bundleIdentifier
+        hasOtherInstallation: app.bundleIdentifier != nil && apps.contains { $0.bundleIdentifier == app.bundleIdentifier
           && FileSystem.comparisonPath($0.url) != FileSystem.comparisonPath(app.url) })
       guard !Task.isCancelled else {
         finishCancelledOperation()

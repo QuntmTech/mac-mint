@@ -52,9 +52,12 @@ struct ApplicationsView: View {
   }
 
   private var selectedLeftoverBytes: Int64 {
-    model.appLeftovers.filter { model.selectedLeftoverIDs.contains($0.id) }.reduce(0) {
-      $0 + $1.size
-    }
+    OperationPlanner.plan(title: "Related files", items: model.appLeftovers.filter {
+      model.selectedLeftoverIDs.contains($0.id)
+    }.map { item in
+      PlanItem(url: item.url, displayName: item.url.lastPathComponent, kind: .appLeftover,
+        expectedBytes: item.size, reason: item.reason, source: "Apps")
+    }, ignoredPaths: model.ignoredPaths).totalBytes
   }
 
   var body: some View {

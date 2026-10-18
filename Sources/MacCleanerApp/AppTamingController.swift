@@ -112,8 +112,12 @@ final class AppTamingController {
   }
   func slow(_ identity: TamingIdentity, name: String, now: Date, automatic: Bool = false, duration: TimeInterval = 900) {
     guard activated, ready, state.receipts.count < 64, !isExcepted(identity.bundleID),
-      !failed.contains(identity), backend.status(identity) == .current,
+      !failed.contains(identity),
       !state.receipts.contains(where: { $0.identity == identity }) else { return }
+    guard backend.status(identity) == .current else {
+      message = "Could not verify \(name)'s current process or permissions. Refresh before trying slowdown."
+      return
+    }
     let receipt = TamingReceipt(identity: identity, name: name, automatic: automatic,
       expires: now.addingTimeInterval(automatic ? 300 : min(3600, max(60, duration))))
     var next = state; next.receipts.append(receipt)

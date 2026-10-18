@@ -356,9 +356,21 @@ struct PhotoThumbnail: View {
     }
     .task(id: loadKey) {
       finished = false; image = nil; onAvailability?(false)
+      if fit, let assetID = photo.assetID {
+        // Show the same local resolution used by analysis before requesting a larger image.
+        let smallKey = "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#local-256"
+        var small = Self.cache.image(for: smallKey)
+        if small == nil {
+          small = await PhotoLibraryService.thumbnailData(assetID: assetID, side: 128, allowNetwork: false)
+            .flatMap(NSImage.init(data:))
+        }
+        guard !Task.isCancelled else { return }
+        if let small { Self.cache.insert(small, for: smallKey); image = small; onAvailability?(true) }
+      }
       let loaded = await load()
       guard !Task.isCancelled else { return }
-      image = loaded; finished = true; onAvailability?(loaded != nil)
+      if let loaded { image = loaded }
+      finished = true; onAvailability?(image != nil)
     }
     .onDisappear { image = nil; finished = false }
   }
