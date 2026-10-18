@@ -46,23 +46,25 @@ enum PhotoLibraryService {
       for index in 0..<total {
         if Task.isCancelled { break }
         if index % 50 == 0 { progress(index, total) }
-        let asset = assets.object(at: index)
-        let box = ResultBox<CGImage>()
-        PHImageManager.default().requestImage(
-          for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFit,
-          options: request
-        ) { image, _ in
-          box.set(image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
-        }
-        guard let image = box.value, let measured = PhotoAnalysis.measure(image) else { continue }
-        results.append(
-          PhotoFingerprint(
+        let fingerprint: PhotoFingerprint? = autoreleasepool {
+          let asset = assets.object(at: index)
+          let box = ResultBox<CGImage>()
+          PHImageManager.default().requestImage(
+            for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFit,
+            options: request
+          ) { image, _ in
+            box.set(image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+          }
+          guard let image = box.value, let measured = PhotoAnalysis.measure(image) else { return nil }
+          return PhotoFingerprint(
             // Supported PhotoKit APIs on macOS 14-26 do not expose resource byte sizes.
             // Never use undocumented KVC or download originals just to estimate savings.
             url: url(for: asset.localIdentifier), bytes: 0,
             hash: measured.hash, sharpness: measured.sharpness,
             pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate))
+            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate)
+        }
+        if let fingerprint { results.append(fingerprint) }
       }
       progress(total, total)
       return FingerprintReport(photos: results, total: total)
@@ -104,20 +106,29 @@ enum PhotoLibraryService {
   static func thumbnailData(assetID: String, side: CGFloat, allowNetwork: Bool = false) async -> Data? {
     guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetID], options: nil).firstObject
     else { return nil }
+    let pixels = min(1400, max(64, side * 2))
+    if let data = await requestThumbnail(asset, pixels: pixels, allowNetwork: allowNetwork) { return data }
+    guard !Task.isCancelled, !allowNetwork, pixels > 256 else { return nil }
+    // A local 256px analysis thumbnail can exist while a 1200px preview requires iCloud.
+    // Use that local representation instead of claiming the entire asset is unavailable.
+    return await requestThumbnail(asset, pixels: 256, allowNetwork: false)
+  }
+
+  private static func requestThumbnail(_ asset: PHAsset, pixels: CGFloat, allowNetwork: Bool) async -> Data? {
     let options = PHImageRequestOptions()
-    options.deliveryMode = .highQualityFormat
+    options.deliveryMode = .opportunistic
     options.isNetworkAccessAllowed = allowNetwork
     options.resizeMode = .fast
-    let target = CGSize(width: side * 2, height: side * 2)
+    let target = CGSize(width: pixels, height: pixels)
     let bridge = PhotoThumbnailRequest(cancel: { PHImageManager.default().cancelImageRequest($0) })
     return await withTaskCancellationHandler {
       await withCheckedContinuation { continuation in
         guard bridge.begin(continuation) else { return }
+        bridge.scheduleTimeout(seconds: allowNetwork ? 45 : 10)
         let requestID = PHImageManager.default().requestImage(
-          for: asset, targetSize: target, contentMode: .aspectFill, options: options
+          for: asset, targetSize: target, contentMode: .aspectFit, options: options
         ) { image, info in
-          if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
-          bridge.finish(image?.tiffRepresentation)
+          bridge.receive(image?.tiffRepresentation, degraded: info?[PHImageResultIsDegradedKey] as? Bool == true)
         }
         bridge.install(requestID)
       }
@@ -159,6 +170,8 @@ final class PhotoThumbnailRequest: @unchecked Sendable {
   private var requestID: PHImageRequestID?
   private var finished = false
   private var cancelled = false
+  private var fallback: Data?
+  private var timeout: DispatchWorkItem?
 
   init(cancel: @escaping @Sendable (PHImageRequestID) -> Void) { cancelRequest = cancel }
 
@@ -179,16 +192,45 @@ final class PhotoThumbnailRequest: @unchecked Sendable {
     lock.lock()
     guard !finished else { lock.unlock(); return }
     finished = true
+    let result = data ?? fallback
+    fallback = nil
+    timeout?.cancel(); timeout = nil
     let pending = continuation
     continuation = nil
     lock.unlock()
-    pending?.resume(returning: data)
+    pending?.resume(returning: result)
+  }
+
+  func receive(_ data: Data?, degraded: Bool) {
+    if !degraded { finish(data); return }
+    lock.lock(); if !finished, let data { fallback = data }; lock.unlock()
+  }
+
+  func scheduleTimeout(seconds: TimeInterval) {
+    let work = DispatchWorkItem { [weak self] in self?.expire() }
+    lock.lock()
+    guard !finished else { lock.unlock(); return }
+    timeout = work
+    lock.unlock()
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + seconds, execute: work)
+  }
+
+  func expire() {
+    lock.lock()
+    guard !finished else { lock.unlock(); return }
+    cancelled = true; finished = true
+    let id = requestID, pending = continuation, result = fallback
+    continuation = nil; fallback = nil; timeout?.cancel(); timeout = nil
+    lock.unlock()
+    if let id { cancelRequest(id) }
+    pending?.resume(returning: result)
   }
 
   func cancel() {
     lock.lock()
     guard !finished else { lock.unlock(); return }
     cancelled = true; finished = true
+    fallback = nil; timeout?.cancel(); timeout = nil
     let id = requestID, pending = continuation
     continuation = nil
     lock.unlock()

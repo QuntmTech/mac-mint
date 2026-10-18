@@ -198,10 +198,22 @@ extension AppViewModel {
 
   /// Selects every shot except the kept one — only when the user asks.
   func selectAllButKeeper(in group: SimilarPhotoGroup) {
-    let kept = keeper(of: group).id
-    for photo in group.photos where photo.id != kept {
-      if photo.isLibraryAsset { selectedPhotoIDs.insert(photo.id) } else { setFileSelection(photo.url, selected: true) }
-    }
+    setPhotoSelection(group.photos, selected: true)
+  }
+
+  func setPhotoSelection(_ photos: [PhotoFingerprint], selected: Bool) {
+    guard !isWorking, !isScanning, !isPreparingPlan, let scan = photoScan else { return }
+    let requested = Set(photos.map(\.id))
+    let keepers = Set(scan.similarGroups.map { keeper(of: $0).id })
+    let current = scan.photos.filter { requested.contains($0.id) }
+    let libraryIDs = Set(current.filter { $0.isLibraryAsset && (!selected || !keepers.contains($0.id)) }.map(\.id))
+    var next = selectedPhotoIDs
+    if selected { next.formUnion(libraryIDs) } else { next.subtract(libraryIDs) }
+    selectedPhotoIDs = next
+    setFileSelections(current.filter { !$0.isLibraryAsset }.map(\.url), selected: selected)
+    // Previous deck choices must not undo a later explicit bulk decision.
+    photoReviewSession.choices = []
+    statusMessage = selected ? "Photos selected for review; group keepers stay protected" : "Photo selection cleared"
   }
 
   // MARK: Removing

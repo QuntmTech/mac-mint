@@ -30,6 +30,66 @@ final class SystemMonitor: ObservableObject {
   @Published private(set) var snapshot = Snapshot()
   @Published private(set) var apps: [AppUsage] = []
   @Published private(set) var sampledAt: Date?
+  struct TamingDisplay: Equatable, Sendable {
+    var state = TamingState()
+    var automatic = false
+    var message: String?
+  }
+  @Published private(set) var taming = TamingDisplay()
+  private let tamingController: AppTamingController
+  private let tamingLease = UUID()
+  private var controlObservers: [NSObjectProtocol] = []
+  private var controlsActivated = false
+  init(tamingController: AppTamingController? = nil) {
+    self.tamingController = tamingController ?? AppTamingController(store: TamingStore(
+      url: AppPaths.supportDirectory.appendingPathComponent("process-slowdown.json")))
+    publishTaming()
+  }
+
+  func activateControls() {
+    guard !controlsActivated else { return }
+    controlsActivated = true
+    tamingController.activate(); publishTaming()
+    controlObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+    ) { @Sendable [weak self] _ in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.tamingController.foregroundChanged(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+        self.publishTaming()
+      }
+    })
+    controlObservers.append(NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+    ) { @Sendable [weak self] _ in MainActor.assumeIsolated { self?.restoreAllApps() } })
+    controlObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+    ) { @Sendable [weak self] _ in MainActor.assumeIsolated { self?.restoreAllApps() } })
+  }
+  func setAutomaticTaming(_ enabled: Bool) {
+    tamingController.setAutomatic(enabled); publishTaming()
+  }
+  func slowApp(_ usage: AppUsage, duration: TimeInterval) {
+    guard usage.canControl, let identity = AppTamingController.identity(usage),
+      usage.bundleID != NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return }
+    tamingController.slow(identity, name: usage.name, now: Date(), duration: duration); publishTaming()
+  }
+  func restoreApp(_ usage: AppUsage) {
+    if let item = tamingController.receipt(pid: usage.id, started: usage.started) {
+      tamingController.restore(item.identity, suppress: true); publishTaming()
+    }
+  }
+  func setNeverSlow(bundleID: String, name: String, protected: Bool) {
+    tamingController.setException(bundleID: bundleID, name: name, protected: protected); publishTaming()
+  }
+  func restoreAllApps() { tamingController.restoreAll(); publishTaming() }
+  private func publishTaming() {
+    let display = TamingDisplay(state: tamingController.state, automatic: tamingController.autoEnabled,
+      message: tamingController.message)
+    if taming != display { taming = display }
+    if tamingController.needsMonitoring { start(lease: tamingLease, interval: 8) }
+    else { stop(lease: tamingLease) }
+  }
   var topApps: [AppUsage] { Array(apps.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(8)) }
   private var timer: Timer?
   private var leases: [UUID: TimeInterval] = [:]
@@ -85,6 +145,9 @@ final class SystemMonitor: ObservableObject {
           memoryBytes: reading.memoryBytes, cpuPercent: reading.cpuPercent, started: reading.started, application: app)
       }
       sampledAt = Date()
+      tamingController.tick(apps: apps, systemCPU: snapshot.cpuUsage,
+        foreground: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, now: Date())
+      publishTaming()
     }
   }
 
