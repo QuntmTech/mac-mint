@@ -131,7 +131,10 @@ struct RootView: View {
     .sheet(isPresented: $showingOnboarding) {
       OnboardingView()
     }
-    .onChange(of: model.selectedSection) { _, section in lastTabs[section.parent] = section }
+    .onChange(of: model.selectedSection) { old, section in
+      lastTabs[section.parent] = section
+      if old == .photos || old == .duplicates || old == .applications { PreviewCaches.release() }
+    }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
       guard !SmokeTest.isRequested else { return }

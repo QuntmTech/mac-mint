@@ -8,7 +8,8 @@ This checklist covers the user's complete request, including the two follow-up P
 | 2 | Manual slowdown; intelligent automatic mode; never-slow exceptions | Timed Darwin background priority, opt-in Auto Tame, persisted exceptions, Restore/Restore All, lifecycle restoration and durable recovery intents | Policy/storage tests and injected controller faults; disposable native fixture and native UI gates pending |
 | 3 | Bulk select and deselect Photos | Current tab, group and all-result deselection; protected keepers; single inventory pass for folder selections | Cross-inventory and PhotoKit-identifier tests; native bulk-selection render pending |
 | 4 | Review deck advances but every image is blank | Local 256px fallback, degraded-image preservation, bounded request timeout/cancellation, retry, focus, Skip for unavailable previews, no blind queueing | Callback/fallback tests; real affected iCloud library remains a manual check |
-| 5 | Thorough review and push to main | Review implementation, run regression/native gates, inspect screenshots, refresh handoff and merge | In progress on the feature branch |
+| 5 | Reduce MacMint's own RAM/CPU footprint (user screenshot: ~304 MB, 5.2% CPU) | Per-image and per-entry autorelease scopes, lazy comparisons, 16 MiB combined photo/file preview budgets, release on navigation/memory pressure, explicit icon LRU | 2,000-image native scan memory gate and packaged-app footprint logging; actual user library remains a manual profile |
+| 6 | Thorough review and push to main | Review implementation, run regression/native gates, inspect screenshots, refresh handoff and merge | In progress on [PR #33](https://github.com/QuntmTech/mac-mint/pull/33) |
 
 ## Removal boundaries
 
@@ -45,3 +46,11 @@ An unavailable deck image offers Retry/Open Photos and Skip. Queue removal is bl
 - New native tests cover durable intent ordering, corrupt/unwritable storage, uncertain/failed restore, relaunch recovery, exceptions, replaced identities, bulk keeper/queue behavior, and PhotoKit degraded/timeout/cancellation paths.
 - `NativeTamingTests` compiles and launches its own uniquely identified disposable AppKit app and exercises the actual Darwin adapter. It never targets an existing user app.
 - Smoke fixtures include light/dark compact/full tamed/protected rows and Photos bulk selection. Existing minimum visible-row assertions remain enabled.
+
+## Resource-footprint follow-up
+
+The screenshot after the large library scan showed roughly 304 MB physical footprint and 5.2% sampled CPU. It does not prove a leak or establish sustained idle CPU. Changes now drain Objective-C scan temporaries per image/file entry, load long horizontal comparisons lazily, reduce photo/file pixel-cache budgets from 32+16 MiB to 8+8 MiB, and discard disposable caches after navigation or system memory pressure. Scan metadata and user selections remain intact. In-flight old-generation results cannot repopulate a cleared cache. Process icons now use the explicit 2 MiB LRU rather than advisory NSCache limits.
+
+`PhotoMemoryTests` measures incremental peak and retained physical footprint while the real folder scanner decodes 2,000 images, with 128/96 MiB regression limits above a warmed baseline. This catches accumulated decoded pixels; it is not a whole-app RAM promise or a substitute for the user's 19,282-asset PhotoKit library. The normal packaged-startup probe now logs physical footprint beside CPU, providing an actual idle-app reference. The connected Mac was verified offline through Desktop Commander during this pass, so its live heap/energy profile could not be captured.
+
+Apple documents the loop pattern in [Using Autorelease Pool Blocks](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/MemoryMgmt/Articles/mmAutoreleasePools.html) and [Analyze heap memory (WWDC24)](https://developer.apple.com/videos/play/wwdc2024/10173/).

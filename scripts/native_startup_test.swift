@@ -169,6 +169,12 @@ private struct NativeStartupTest {
     // XNU rusage CPU counters use Mach absolute ticks, not nanoseconds on ARM.
     // Compare deltas in the same timebase, as the production sampler does.
     let averageCores = Double(finalCPU - initialCPU) / Double(finalTime - initialTime)
+    var memory = rusage_info_v4()
+    let memoryResult = withUnsafeMutablePointer(to: &memory) { pointer in
+      pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+    }
+    guard memoryResult == 0 else { throw ProbeFailure(description: "Could not read memory footprint for probe PID \(pid).") }
+    log(String(format: "%@: settled physical footprint %.1f MiB", label, Double(memory.ri_phys_footprint) / 1_048_576))
     log(String(format: "%@: idle CPU %.1f%% of one core over %.1fs (limit %.0f%%)", label, averageCores * 100, wallSeconds, maximumAverageCores * 100))
     guard averageCores <= maximumAverageCores else {
       throw ProbeFailure(description: "\(label): sustained idle CPU suggests a launch/scene feedback loop.")

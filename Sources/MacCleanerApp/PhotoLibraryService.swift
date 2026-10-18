@@ -46,23 +46,25 @@ enum PhotoLibraryService {
       for index in 0..<total {
         if Task.isCancelled { break }
         if index % 50 == 0 { progress(index, total) }
-        let asset = assets.object(at: index)
-        let box = ResultBox<CGImage>()
-        PHImageManager.default().requestImage(
-          for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFit,
-          options: request
-        ) { image, _ in
-          box.set(image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
-        }
-        guard let image = box.value, let measured = PhotoAnalysis.measure(image) else { continue }
-        results.append(
-          PhotoFingerprint(
+        let fingerprint: PhotoFingerprint? = autoreleasepool {
+          let asset = assets.object(at: index)
+          let box = ResultBox<CGImage>()
+          PHImageManager.default().requestImage(
+            for: asset, targetSize: CGSize(width: 256, height: 256), contentMode: .aspectFit,
+            options: request
+          ) { image, _ in
+            box.set(image?.cgImage(forProposedRect: nil, context: nil, hints: nil))
+          }
+          guard let image = box.value, let measured = PhotoAnalysis.measure(image) else { return nil }
+          return PhotoFingerprint(
             // Supported PhotoKit APIs on macOS 14-26 do not expose resource byte sizes.
             // Never use undocumented KVC or download originals just to estimate savings.
             url: url(for: asset.localIdentifier), bytes: 0,
             hash: measured.hash, sharpness: measured.sharpness,
             pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate))
+            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate)
+        }
+        if let fingerprint { results.append(fingerprint) }
       }
       progress(total, total)
       return FingerprintReport(photos: results, total: total)

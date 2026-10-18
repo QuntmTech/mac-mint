@@ -342,7 +342,12 @@ public actor PhotoScanner {
     for (index, url) in files.enumerated() {
       if Task.isCancelled { break }
       if index % 25 == 0 { progress?(index, files.count) }
-      if let fingerprint = Self.fingerprint(url) { photos.append(fingerprint) }
+      #if canImport(ObjectiveC)
+        let fingerprint = autoreleasepool { Self.fingerprint(url) }
+      #else
+        let fingerprint = Self.fingerprint(url)
+      #endif
+      if let fingerprint { photos.append(fingerprint) }
     }
     progress?(files.count, files.count)
 

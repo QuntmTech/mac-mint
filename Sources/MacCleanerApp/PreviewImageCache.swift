@@ -11,6 +11,7 @@ final class PreviewImageCache {
   private var entries: [String: Entry] = [:]
   private var clock: UInt64 = 0
   private(set) var storedCost = 0
+  private(set) var generation: UInt64 = 0
   var count: Int { entries.count }
 
   init(byteLimit: Int, countLimit: Int) {
@@ -40,7 +41,7 @@ final class PreviewImageCache {
     entries[key] = Entry(image: image, cost: cost, lastUse: clock); storedCost += cost
   }
 
-  func removeAll() { entries.removeAll(); storedCost = 0 }
+  func removeAll() { generation &+= 1; entries.removeAll(); storedCost = 0 }
 }
 
 /// ImageIO decoding stays off the UI thread. A serial actor bounds concurrent decodes;
@@ -48,6 +49,9 @@ final class PreviewImageCache {
 actor LocalPreviewDecoder {
   static let shared = LocalPreviewDecoder()
   func decode(_ url: URL, pixels: Int) -> Data? {
+    autoreleasepool { decodeInPool(url, pixels: pixels) }
+  }
+  private func decodeInPool(_ url: URL, pixels: Int) -> Data? {
     guard !Task.isCancelled, !FileSystem.isCloudPlaceholder(url),
       let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
       let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
@@ -56,5 +60,21 @@ actor LocalPreviewDecoder {
         kCGImageSourceThumbnailMaxPixelSize: min(1_400, max(64, pixels)),
       ] as CFDictionary), !Task.isCancelled else { return nil }
     return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+  }
+}
+
+/// Preview pixels are disposable; scan findings and selections are retained separately.
+@MainActor
+enum PreviewCaches {
+  static let photos = PreviewImageCache(byteLimit: 8 * 1_024 * 1_024, countLimit: 32)
+  private static var pressureSource: DispatchSourceMemoryPressure?
+  static func startMemoryPressureHandling() {
+    guard pressureSource == nil else { return }
+    let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+    source.setEventHandler { @Sendable in MainActor.assumeIsolated { release() } }
+    source.resume(); pressureSource = source
+  }
+  static func release() {
+    photos.removeAll(); ThumbnailCache.shared.removeAll(); PerformanceIconCache.shared.removeAll()
   }
 }

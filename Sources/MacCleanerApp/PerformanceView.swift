@@ -503,13 +503,14 @@ private struct PerformanceAppIcon: View {
 /// Small icons only, capped at 64 entries / 2 MiB. No repeated filesystem work or
 /// full-resolution app artwork is retained by a live process row.
 @MainActor
-private final class PerformanceIconCache {
+final class PerformanceIconCache {
   static let shared = PerformanceIconCache()
-  private let cache = NSCache<NSString, NSImage>()
-  private init() { cache.countLimit = 64; cache.totalCostLimit = 2 * 1024 * 1024 }
+  private let cache = PreviewImageCache(byteLimit: 2 * 1024 * 1024, countLimit: 64)
+  private init() {}
+  func removeAll() { cache.removeAll() }
   func icon(for app: NSRunningApplication) -> NSImage? {
-    let key = (app.bundleURL?.path ?? app.bundleIdentifier ?? String(app.processIdentifier)) as NSString
-    if let icon = cache.object(forKey: key) { return icon }
+    let key = app.bundleURL?.path ?? app.bundleIdentifier ?? String(app.processIdentifier)
+    if let icon = cache.image(for: key) { return icon }
     guard let source = app.icon,
       let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 64, pixelsHigh: 64, bitsPerSample: 8,
         samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 256, bitsPerPixel: 32),
@@ -520,7 +521,7 @@ private final class PerformanceIconCache {
     NSGraphicsContext.restoreGraphicsState()
     let icon = NSImage(size: NSSize(width: 32, height: 32))
     icon.addRepresentation(bitmap)
-    cache.setObject(icon, forKey: key, cost: 64 * 64 * 4)
+    cache.insert(icon, for: key)
     return icon
   }
 }

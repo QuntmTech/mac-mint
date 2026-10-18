@@ -236,12 +236,12 @@ struct PhotosView: View {
           }
         }
         ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 12) {
+          LazyHStack(spacing: 12) {
             ForEach(group.photos) { photo in
               PhotoTile(photo: photo, isKeeper: photo.id == kept.id)
             }
           }
-        }
+        }.frame(height: 210)
       }
     }
 
@@ -336,7 +336,7 @@ struct PhotoThumbnail: View {
   @State private var image: NSImage?
   @State private var retry = 0
 
-  private static let cache = PreviewImageCache(byteLimit: 32 * 1_024 * 1_024, countLimit: 64)
+  private static var cache: PreviewImageCache { PreviewCaches.photos }
   private var loadKey: String { "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#\(photo.identity ?? "unknown")#\(Int(side))#\(allowCloud)#\(retry)" }
 
   var body: some View {
@@ -355,6 +355,7 @@ struct PhotoThumbnail: View {
       }
     }
     .task(id: loadKey) {
+      let cacheGeneration = Self.cache.generation
       finished = false; image = nil; onAvailability?(false)
       if fit, let assetID = photo.assetID {
         // Show the same local resolution used by analysis before requesting a larger image.
@@ -365,7 +366,10 @@ struct PhotoThumbnail: View {
             .flatMap(NSImage.init(data:))
         }
         guard !Task.isCancelled else { return }
-        if let small { Self.cache.insert(small, for: smallKey); image = small; onAvailability?(true) }
+        if let small {
+          if Self.cache.generation == cacheGeneration { Self.cache.insert(small, for: smallKey) }
+          image = small; onAvailability?(true)
+        }
       }
       let loaded = await load()
       guard !Task.isCancelled else { return }
@@ -377,6 +381,7 @@ struct PhotoThumbnail: View {
 
   private func load() async -> NSImage? {
     let key = loadKey
+    let cacheGeneration = Self.cache.generation
     if let cached = Self.cache.image(for: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
@@ -390,7 +395,7 @@ struct PhotoThumbnail: View {
       loaded = data.flatMap(NSImage.init(data:))
     }
     guard !Task.isCancelled else { return nil }
-    if let loaded { Self.cache.insert(loaded, for: key) }
+    if let loaded, Self.cache.generation == cacheGeneration { Self.cache.insert(loaded, for: key) }
     return loaded
   }
 }
