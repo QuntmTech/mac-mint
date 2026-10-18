@@ -8,7 +8,7 @@ protocol TamingBackend {
   func setBackground(_ background: Bool, for identity: TamingIdentity) throws
 }
 
-enum TamingTargetStatus { case current, goneOrChanged, unavailable }
+enum TamingTargetStatus: Equatable { case current, goneOrChanged, unavailable }
 
 /// Same-user Darwin background policy, reversible without root. Never uses nice, STOP or RAM limits.
 @MainActor

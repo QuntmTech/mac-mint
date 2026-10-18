@@ -10,6 +10,7 @@ extension AppViewModel {
 
   /// A bulk action walks each inventory once and publishes each selection set once.
   func setFileSelections(_ urls: [URL], selected: Bool, userChoice: Bool = true) {
+    guard !urls.isEmpty else { return }
     let literals = Set(urls.map { $0.standardizedFileURL.path })
     let names = Set(urls.map { $0.lastPathComponent.lowercased() })
     let paths = Set(urls.map(FileSystem.comparisonPath))
@@ -62,7 +63,7 @@ extension AppViewModel {
 
   func synchronizeQueueSelections() {
     let urls = sourceSelections.map(\.url)
-    for url in urls { setFileSelection(url, selected: true, userChoice: false) }
+    setFileSelections(urls, selected: true, userChoice: false)
   }
 
   func keepQueuedFiles(_ urls: [URL]) {
