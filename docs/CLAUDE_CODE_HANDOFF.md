@@ -1,6 +1,16 @@
 # MacMint — handoff to Claude Code for independent review
 
-**Updated 2026-10-17, America/New_York. Start with [../HANDOFF.md](../HANDOFF.md) for checkout instructions and the review brief.**
+**Updated 2026-10-18. Start with [../HANDOFF.md](../HANDOFF.md) and the [latest delivery checklist](UNINSTALL_AND_TAMING.md).**
+
+## Latest extension — 2026-10-18
+
+[PR #33](https://github.com/QuntmTech/mac-mint/pull/33) tracks all six phases: app uninstall discovery and related-data safety; reversible manual/automatic process slowdown and exceptions; bulk photo selection; the repeated blank review-deck preview; MacMint's own resource footprint; and review/validation/delivery. Its checks and artifacts identify final validation and merge status. The dated section 0 below is the previous delivery checkpoint, not a claim that `c0ade0e` is still the newest source.
+
+Read `AppTaming.swift`, `AppTamingController.swift`, the `SystemMonitor` integration and `UNINSTALL_AND_TAMING.md` before reviewing slowdown. It uses same-user Darwin background priority, not a hard CPU/RAM cap or process suspension. Restoration has durable intents, boot/PID/birth/path checks, exclusive journal ownership and uncertain-outcome preservation. Automatic mode is explicit, conservative and off at each launch; exceptions persist.
+
+Photos now supports bulk selection by tab/group and deselection of all results while protecting keepers. The deck first displays a local 256px thumbnail, then attempts a larger preview, preserves degraded results, bounds/cancels requests and refuses blind queueing. The user's repeated-blank-library report still needs acceptance on that actual iCloud account. Resource changes supersede the earlier cache figures: photo/file pixel caches are 8+8 MiB, icons use an explicit 2 MiB LRU, disposable caches clear on navigation/pressure, horizontal comparisons are lazy, and scan iterations drain autoreleased temporaries. Neither these budgets nor synthetic stress tests certify total application RAM.
+
+New evidence lives in `AppUninstallTests`, `AppTamingTests`, `AppTamingControllerTests`, `NativeTamingTests`, `PhotoMemoryTests` and expanded photo tests/smoke fixtures. The packaged startup helper also measures the live Performance view through the read-only `--performance` launch shortcut. Preserve the distinction between automated native fixture evidence and the user's 19,282-photo live workload. Existing Stripe, distribution and manual accessibility gates remain as documented below.
 
 ## 0. Current delivery status — read this before the historical checkpoints
 

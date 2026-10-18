@@ -1,15 +1,15 @@
 # App removal, resource controls and photo review — 2026-10-18
 
-This checklist covers the user's complete request, including the two follow-up Photos reports. It supersedes the earlier handoff's statement that Auto Tame is future work. Implementation and validation are separate columns; update the final evidence before merging.
+This checklist covers the user's complete request, including both Photos reports and the RAM/CPU screenshot. It supersedes the earlier handoff's statement that Auto Tame is future work. [PR #33 checks and artifacts](https://github.com/QuntmTech/mac-mint/pull/33/checks) show the final source SHA and delivery validation.
 
 | Phase | Requested behavior | Implementation | Validation |
 | --- | --- | --- | --- |
-| 1 | Uninstall apps with related caches/metadata; preserve settings when desired | Choose App/Find Apps entry points, categorized consequences, Library matching including ByHost preferences, conservative shared-data defaults, existing reviewed Trash/History pipeline | Portable scanner/executor fixtures; native compile/render pending |
-| 2 | Manual slowdown; intelligent automatic mode; never-slow exceptions | Timed Darwin background priority, opt-in Auto Tame, persisted exceptions, Restore/Restore All, lifecycle restoration and durable recovery intents | Policy/storage tests and injected controller faults; disposable native fixture and native UI gates pending |
-| 3 | Bulk select and deselect Photos | Current tab, group and all-result deselection; protected keepers; single inventory pass for folder selections | Cross-inventory and PhotoKit-identifier tests; native bulk-selection render pending |
+| 1 | Uninstall apps with related caches/metadata; preserve settings when desired | Choose App/Find Apps entry points, categorized consequences, Library matching including ByHost preferences, conservative shared-data defaults, existing reviewed Trash/History pipeline | Portable scanner/executor fixtures; native compile and related-file renders |
+| 2 | Manual slowdown; intelligent automatic mode; never-slow exceptions | Timed Darwin background priority, opt-in Auto Tame, persisted exceptions, Restore/Restore All, lifecycle restoration and durable recovery intents | Policy/storage tests, injected faults, disposable native app and native UI gates |
+| 3 | Bulk select and deselect Photos | Current tab, group and all-result deselection; protected keepers; single inventory pass for folder selections | Cross-inventory and PhotoKit-identifier tests; native bulk-selection render |
 | 4 | Review deck advances but every image is blank | Local 256px fallback, degraded-image preservation, bounded request timeout/cancellation, retry, focus, Skip for unavailable previews, no blind queueing | Callback/fallback tests; real affected iCloud library remains a manual check |
 | 5 | Reduce MacMint's own RAM/CPU footprint (user screenshot: ~304 MB, 5.2% CPU) | Per-image and per-entry autorelease scopes, lazy comparisons, 16 MiB combined photo/file preview budgets, release on navigation/memory pressure, explicit icon LRU | 2,000-image native scan memory gate and packaged-app footprint logging; actual user library remains a manual profile |
-| 6 | Thorough review and push to main | Review implementation, run regression/native gates, inspect screenshots, refresh handoff and merge | In progress on [PR #33](https://github.com/QuntmTech/mac-mint/pull/33) |
+| 6 | Thorough review and push to main | Review implementation, run regression/native gates, inspect screenshots, refresh handoff and merge | Source, checks, artifacts and merge status in [PR #33](https://github.com/QuntmTech/mac-mint/pull/33) |
 
 ## Removal boundaries
 
