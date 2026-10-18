@@ -5,6 +5,39 @@ import XCTest
 
 @MainActor
 final class PhotoReviewTests: XCTestCase {
+  func testBulkFolderSelectionProtectsKeeperAndUpdatesOtherInventories() {
+    let (model, support) = reviewModel(); defer { try? FileManager.default.removeItem(at: support) }
+    let keeper = photo("best.jpg"), copy = photo("copy.jpg"), extra = photo("extra.jpg")
+    model.photoScan = PhotoScanResult(photos: [keeper, copy, extra], similarGroups: [
+      .init(id: "set", photos: [keeper, copy], keeperIndex: 0)], blurry: [copy, extra], screenshots: [],
+      skippedLibraries: [], issues: [], wasCancelled: false)
+    let file = LargeFile(url: copy.url, size: 100, modifiedAt: nil, accessedAt: nil)
+    model.largeFiles = [file]
+    model.setPhotoSelection([keeper, copy], selected: true)
+    XCTAssertEqual(model.selectedPhotoIDs, [copy.id]); XCTAssertEqual(model.selectedLargeFileIDs, [file.id])
+    model.setPhotoSelection([extra], selected: true)
+    model.setPhotoSelection([keeper, copy], selected: false)
+    XCTAssertEqual(model.selectedPhotoIDs, [extra.id]); XCTAssertTrue(model.selectedLargeFileIDs.isEmpty)
+    model.setPhotoSelection(model.allScannedPhotos, selected: false)
+    XCTAssertTrue(model.selectedPhotoIDs.isEmpty)
+  }
+  func testBulkLibrarySelectionRespectsChangedKeeperAndInvalidatesDeckUndo() {
+    let (model, support) = reviewModel(); defer { try? FileManager.default.removeItem(at: support) }
+    func library(_ id: String) -> PhotoFingerprint {
+      .init(url: PhotoLibraryService.url(for: id), bytes: 0, hash: 1, sharpness: 1, pixelWidth: 100,
+        pixelHeight: 100, assetID: id)
+    }
+    let a = library("a"), b = library("b")
+    model.photoScan = scan([a, b], keeper: a)
+    _ = model.decidePhotoReview(removing: false)
+    model.keepInstead(b)
+    model.setPhotoSelection([a, b], selected: true)
+    XCTAssertEqual(model.selectedPhotoIDs, [a.id]); XCTAssertTrue(model.photoReviewSession.choices.isEmpty)
+    model.setPhotoSelection([a, b], selected: false)
+    XCTAssertTrue(model.selectedPhotoIDs.isEmpty)
+    model.isWorking = true; model.setPhotoSelection([a, b], selected: true)
+    XCTAssertTrue(model.selectedPhotoIDs.isEmpty)
+  }
   func testPreviewCacheEvictsLeastRecentlyUsedAndRejectsOversizedImages() {
     let cache = PreviewImageCache(byteLimit: 1_000, countLimit: 2)
     func image(_ side: Int = 10) -> NSImage {

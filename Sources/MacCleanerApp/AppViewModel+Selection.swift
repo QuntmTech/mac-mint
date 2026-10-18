@@ -5,58 +5,58 @@ extension AppViewModel {
   /// A file has one selection across inventories. Source-specific IDs remain stable, while
   /// canonical paths join discoveries from different modules (including parent aliases).
   func setFileSelection(_ url: URL, selected: Bool, userChoice: Bool = true) {
-    let path = FileSystem.comparisonPath(url)
-    let literal = url.standardizedFileURL.path
-    let name = url.lastPathComponent.lowercased()
+    setFileSelections([url], selected: selected, userChoice: userChoice)
+  }
+
+  /// A bulk action walks each inventory once and publishes each selection set once.
+  func setFileSelections(_ urls: [URL], selected: Bool, userChoice: Bool = true) {
+    let literals = Set(urls.map { $0.standardizedFileURL.path })
+    let names = Set(urls.map { $0.lastPathComponent.lowercased() })
+    let paths = Set(urls.map(FileSystem.comparisonPath))
     func matches(_ candidate: URL) -> Bool {
-      if candidate.standardizedFileURL.path == literal { return true }
-      guard candidate.lastPathComponent.lowercased() == name else { return false }
-      return FileSystem.comparisonPath(candidate) == path
+      if literals.contains(candidate.standardizedFileURL.path) { return true }
+      return names.contains(candidate.lastPathComponent.lowercased()) && paths.contains(FileSystem.comparisonPath(candidate))
     }
-    let photoCandidates = photoScan?.fileCandidates(named: url.lastPathComponent).filter { matches($0.url) } ?? []
-    var choose = selected && (userChoice || !keptQueuePaths.contains(path))
-    if choose {
-      for group in duplicateGroups where group.files.contains(where: { matches($0.url) }) {
+    var blocked: Set<String> = []
+    if selected {
+      for group in duplicateGroups {
         let keeper = group.files.first { !selectedDuplicateIDs.contains($0.id) } ?? group.files.first
-        if let keeper, matches(keeper.url) {
-          choose = false; statusMessage = "Keep another duplicate copy before selecting this one"
-        }
+        if let keeper, matches(keeper.url) { blocked.insert(FileSystem.comparisonPath(keeper.url)) }
       }
-      if photoCandidates.contains(where: { photo in
-        guard let group = group(containing: photo) else { return false }
-        return matches(keeper(of: group).url)
-      }) {
-        choose = false; statusMessage = "Keep another photo before selecting this one"
+      for group in photoScan?.similarGroups ?? [] {
+        let keeper = keeper(of: group)
+        if !keeper.isLibraryAsset, matches(keeper.url) { blocked.insert(FileSystem.comparisonPath(keeper.url)) }
       }
+      if !blocked.isEmpty { statusMessage = "Protected keepers were left unselected" }
     }
-    if userChoice {
-      if choose { keptQueuePaths.remove(path) } else { keptQueuePaths.insert(path) }
+    let chosen = selected ? paths.subtracting(blocked).subtracting(userChoice ? [] : keptQueuePaths) : []
+    func chooses(_ candidate: URL) -> Bool { chosen.contains(FileSystem.comparisonPath(candidate)) }
+    if userChoice { keptQueuePaths.formUnion(paths.subtracting(chosen)); keptQueuePaths.subtract(chosen) }
+    var cleanup = cleanupTargets
+    for index in cleanup.indices where matches(cleanup[index].url) {
+      cleanup[index].isSelected = chooses(cleanup[index].url) && cleanup[index].risk != .restricted
     }
-    for index in cleanupTargets.indices where matches(cleanupTargets[index].url) {
-      cleanupTargets[index].isSelected = choose && cleanupTargets[index].risk != .restricted
+    if cleanup != cleanupTargets { cleanupTargets = cleanup }
+    func update<ID: Hashable>(_ values: [(ID, URL)], _ current: Set<ID>) -> Set<ID> {
+      var next = current
+      for (id, url) in values where matches(url) {
+        if chooses(url) { next.insert(id) } else { next.remove(id) }
+      }
+      return next
     }
-    for file in largeFiles where matches(file.url) {
-      if choose { selectedLargeFileIDs.insert(file.id) } else { selectedLargeFileIDs.remove(file.id) }
-    }
-    for file in duplicateGroups.flatMap(\.files) where matches(file.url) {
-      if choose { selectedDuplicateIDs.insert(file.id) } else { selectedDuplicateIDs.remove(file.id) }
-    }
-    for item in devItems where item.url.map(matches) == true && item.canTrash {
-      if choose { selectedDevIDs.insert(item.id) } else { selectedDevIDs.remove(item.id) }
-    }
-    for photo in photoCandidates {
-      if choose { selectedPhotoIDs.insert(photo.id) } else { selectedPhotoIDs.remove(photo.id) }
-    }
-    for item in orphans where matches(item.url) {
-      if choose { selectedOrphanIDs.insert(item.id) } else { selectedOrphanIDs.remove(item.id) }
-    }
-    for item in downloadItems where matches(item.url) {
-      if choose { selectedDownloadIDs.insert(item.id) } else { selectedDownloadIDs.remove(item.id) }
-    }
-    if !choose {
-      selectedStoragePaths = Set(selectedStoragePaths.filter { !matches(URL(fileURLWithPath: $0)) })
-    } else if let node = storageScan?.root.node(at: url.standardizedFileURL.path), storageRemovalAllowed(node) {
-      selectedStoragePaths.insert(node.id)
+    selectedLargeFileIDs = update(largeFiles.map { ($0.id, $0.url) }, selectedLargeFileIDs)
+    selectedDuplicateIDs = update(duplicateGroups.flatMap(\.files).map { ($0.id, $0.url) }, selectedDuplicateIDs)
+    selectedDevIDs = update(devItems.filter(\.canTrash).compactMap { item in item.url.map { (item.id, $0) } }, selectedDevIDs)
+    selectedPhotoIDs = update((photoScan?.photos ?? []).filter { !$0.isLibraryAsset }.map { ($0.id, $0.url) }, selectedPhotoIDs)
+    selectedOrphanIDs = update(orphans.map { ($0.id, $0.url) }, selectedOrphanIDs)
+    selectedDownloadIDs = update(downloadItems.map { ($0.id, $0.url) }, selectedDownloadIDs)
+    selectedStoragePaths = Set(selectedStoragePaths.filter {
+      let url = URL(fileURLWithPath: $0); return !matches(url) || chooses(url)
+    })
+    if selected {
+      for url in urls where chooses(url) {
+        if let node = storageScan?.root.node(at: url.standardizedFileURL.path), storageRemovalAllowed(node) { selectedStoragePaths.insert(node.id) }
+      }
     }
   }
 
@@ -66,6 +66,6 @@ extension AppViewModel {
   }
 
   func keepQueuedFiles(_ urls: [URL]) {
-    for url in urls { setFileSelection(url, selected: false) }
+    setFileSelections(urls, selected: false)
   }
 }

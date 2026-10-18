@@ -9,6 +9,7 @@ struct PerformancePreview: Sendable {
   let sampledAt: Date?
   let logicalCPUCount: Int
   var paused = false
+  var taming: SystemMonitor.TamingDisplay? = nil
 }
 
 private struct PerformancePreviewKey: EnvironmentKey {
@@ -36,6 +37,7 @@ struct PerformanceView: View {
   @State private var sort = PerformancePresentation.Sort()
   @State private var forceQuit = false
   @State private var insights: DiskInsights?
+  @State private var showingExceptions = false
 
   private struct Reading {
     let snapshot: SystemMonitor.Snapshot
@@ -54,6 +56,7 @@ struct PerformanceView: View {
     return monitor.sampledAt
   }
   private var logicalCPUCount: Int { preview?.logicalCPUCount ?? ProcessInfo.processInfo.processorCount }
+  private var tamingDisplay: SystemMonitor.TamingDisplay { preview?.taming ?? monitor.taming }
   private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
   private var usages: [SystemMonitor.AppUsage] { preview == nil ? (pausedReading?.apps ?? monitor.apps) : [] }
   private var appRows: [PerformancePresentation.App] {
@@ -124,6 +127,7 @@ struct PerformanceView: View {
     .onChange(of: paused) { _, _ in updateMonitoring() }
     .task { if preview == nil { insights = await DiskInsightsService.load() } }
     .onDisappear { monitor.stop(lease: monitoringLease) }
+    .sheet(isPresented: $showingExceptions) { TamingExceptionsView().environmentObject(monitor) }
     .alert(
       "\(forceQuit ? "Force quit" : "Quit") \(pendingQuit?.name ?? "app")?",
       isPresented: Binding(get: { pendingQuit != nil }, set: { if !$0 { pendingQuit = nil } }),
@@ -225,17 +229,24 @@ struct PerformanceView: View {
           Text("Running apps").font(.headline)
           Text("\(displayed.count) of \(rows.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
           Spacer(minLength: 8)
-          Label(readingStatus, systemImage: paused ? "pause.circle" : "clock")
-            .font(.caption).foregroundStyle(.secondary).help(samplingDetail)
-            .accessibilityValue(samplingDetail)
+          Toggle("Auto Tame", isOn: Binding(get: { tamingDisplay.automatic }, set: { monitor.setAutomaticTaming($0) }))
+            .toggleStyle(.switch).controlSize(.small).fixedSize().disabled(preview != nil)
+            .help("Lower priority for sustained background CPU load. The foreground app and exceptions are protected.")
+          Menu {
+            Button("Restore all & turn off Auto Tame") { monitor.restoreAllApps() }
+              .disabled(monitor.taming.state.receipts.isEmpty && !monitor.taming.automatic)
+            Button("Never slow down…") { showingExceptions = true }
+          } label: { Image(systemName: "slider.horizontal.3").accessibilityLabel("Slowdown settings") }
+            .menuStyle(.borderlessButton).fixedSize().disabled(preview != nil)
           Button(action: togglePaused) {
             Label(paused ? "Resume" : "Pause", systemImage: paused ? "play.fill" : "pause.fill")
           }
           .controlSize(.small).help(paused ? "Resume live readings" : "Freeze the displayed readings")
           .accessibilityIdentifier("performance-pause")
         }
-        Text("Main app processes · helpers not included · 100% CPU = one core")
+        Text("Main processes · helpers not included · " + readingStatus)
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          .help(samplingDetail)
         HStack(spacing: 12) {
           SearchField(prompt: "Find by app, PID or bundle", text: $search)
           Menu {
@@ -261,7 +272,7 @@ struct PerformanceView: View {
             sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
             sortHeader(.cpu).frame(width: 96, alignment: .trailing)
             sortHeader(.memory).frame(width: 104, alignment: .trailing)
-            Text("Actions").font(.caption).foregroundStyle(.secondary).frame(width: 98, alignment: .trailing)
+            Text("Actions").font(.caption).foregroundStyle(.secondary).frame(width: 182, alignment: .trailing)
           }.padding(.horizontal, 10)
           LazyVStack(spacing: 0) {
             ForEach(Array(displayed.enumerated()), id: \.element.id) { index, app in
@@ -282,8 +293,12 @@ struct PerformanceView: View {
         }
         Text("App CPU: 100% = one core and values can exceed 100%. Bars show the share of this Mac's total CPU capacity or installed RAM.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        Text("MacMint slows sampling in Low Power Mode or when your Mac is hot. Pause freezes this view; an open menu bar panel may continue sampling.")
+        Text("Slowdown lowers CPU, disk and network priority, not a CPU/RAM cap. Auto Tame checks sustained background load every ~8 seconds; foreground apps and exceptions stay protected. Pause freezes readings; enabled controls continue in the background.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if let message = tamingDisplay.message {
+          Text(message).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+        }
       }
     }
   }
@@ -302,12 +317,17 @@ struct PerformanceView: View {
   }
 
   private func processRow(_ app: PerformancePresentation.App, usage: SystemMonitor.AppUsage?) -> some View {
-    HStack(spacing: 12) {
+    let receipt = tamingDisplay.state.receipts.first { $0.identity.pid == app.id.pid && $0.identity.started == app.id.started }
+    let excepted = app.bundleID.map { tamingDisplay.state.exceptions[$0.lowercased()] != nil } ?? false
+    let detail = excepted ? "Never slowed · PID \(app.id.pid)" : receipt.map {
+      "\($0.automatic ? "Auto tamed" : "Slowed") until " + $0.expires.formatted(date: .omitted, time: .shortened)
+    } ?? "PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
+    return HStack(spacing: 12) {
       HStack(spacing: 10) {
         PerformanceAppIcon(app: app, application: usage?.application)
         VStack(alignment: .leading, spacing: 3) {
           Text(app.name).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
-          Text("PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? ""))
+          Text(detail)
             .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
         Spacer(minLength: 0)
@@ -330,15 +350,33 @@ struct PerformanceView: View {
         .accessibilityElement(children: .ignore).accessibilityLabel("Memory footprint")
         .accessibilityValue(app.memoryBytes >= 0 ? ByteFormatter.string(app.memoryBytes) : "Unavailable")
       HStack(spacing: 5) {
+        if receipt != nil {
+          Button("Restore") { if let usage { monitor.restoreApp(usage) } }
+            .controlSize(.small).help("Restore normal priority for " + app.name)
+        } else {
+          Menu {
+            Button("Slow for 15 minutes") { if let usage { monitor.slowApp(usage, duration: 900) } }
+            Button("Slow for 1 hour") { if let usage { monitor.slowApp(usage, duration: 3600) } }
+          } label: { Text(excepted ? "Protected" : "Slow") }
+            .menuStyle(.borderlessButton).fixedSize().disabled(excepted)
+            .accessibilityLabel("Slow down " + app.name)
+            .help("Lower CPU, disk and network priority until expiry or until you switch to this app")
+        }
         Button { if let usage { forceQuit = false; pendingQuit = usage } } label: { Label("Quit", systemImage: "power") }
           .controlSize(.small).buttonStyle(.bordered).tint(AppTheme.ink)
           .help("Ask " + app.name + " to quit normally").accessibilityLabel("Quit " + app.name)
         Menu {
+          if let bundleID = app.bundleID {
+            Button(excepted ? "Allow slowdown" : "Never slow down this app") {
+              monitor.setNeverSlow(bundleID: bundleID, name: app.name, protected: !excepted)
+            }
+          }
+          Divider()
           Button("Force Quit…", role: .destructive) { if let usage { forceQuit = true; pendingQuit = usage } }
         } label: { Image(systemName: "ellipsis").accessibilityLabel("More actions for " + app.name) }
           .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(AppTheme.ink)
           .frame(width: 18).accessibilityLabel("More actions for " + app.name)
-      }.frame(width: 98, alignment: .trailing)
+      }.frame(width: 182, alignment: .trailing)
         .disabled(!(usage?.canControl ?? false))
         .help(usage?.canControl == true ? "Quit or force quit " + app.name : "Process controls are unavailable for this app")
     }
@@ -400,6 +438,36 @@ struct PerformanceView: View {
     case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
+  }
+}
+
+private struct TamingExceptionsView: View {
+  @EnvironmentObject private var monitor: SystemMonitor
+  @Environment(\.dismiss) private var dismiss
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("Never slow down").font(.title2.bold())
+      Text("Exceptions apply to manual slowdown and Auto Tame, including after an app relaunch. Adding an exception restores any current slowdown.")
+        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      List {
+        ForEach(monitor.taming.state.exceptions.keys.sorted(), id: \.self) { id in
+          HStack {
+            VStack(alignment: .leading) {
+              Text(monitor.taming.state.exceptions[id] ?? id).fontWeight(.medium)
+              Text(id).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Remove") { monitor.setNeverSlow(bundleID: id, name: "", protected: false) }
+          }
+        }
+        if monitor.taming.state.exceptions.isEmpty {
+          Text("No saved exceptions. Add one from an app's ••• menu.").foregroundStyle(.secondary)
+        }
+      }.frame(minHeight: 160, maxHeight: 260)
+      Text("Auto Tame is off at each MacMint launch. It waits for ≥80% of one core for 20 seconds while overall CPU is ≥65%, affects at most two background main processes, and restores after cooling or five minutes. System and common calling/audio apps are excluded automatically.")
+        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+    }.padding(24).frame(width: 540).background(AppTheme.canvas)
   }
 }
 

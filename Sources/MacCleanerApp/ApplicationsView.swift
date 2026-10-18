@@ -59,8 +59,10 @@ struct ApplicationsView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      PageHeader(title: "Apps", subtitle: "A home for your apps and the files that belong to them.") {
-        Button { model.runSmartScan() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+      PageHeader(title: "Apps", subtitle: "Uninstall apps with their caches, settings and related data. Review every change first.") {
+        Button { mode = .uninstall; model.chooseAppForUninstall() } label: { Label("Choose App…", systemImage: "plus.app") }
+          .buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isScanning || model.isWorking)
+        Button { model.scanInstalledApps() } label: { Label(model.apps.isEmpty ? "Find Apps" : "Refresh Apps", systemImage: "arrow.clockwise") }
           .buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isScanning || model.isWorking)
       }.padding(AppTheme.pagePadding)
       HStack {
@@ -81,6 +83,7 @@ struct ApplicationsView: View {
       }
     }
     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      mode = .uninstall
       guard let provider = providers.first else { return false }
       _ = provider.loadObject(ofClass: URL.self) { url, _ in
         guard let url else { return }
@@ -192,10 +195,15 @@ struct ApplicationsView: View {
             HStack {
               Text("Related files").font(.headline)
               Spacer()
-              Button("Keep my settings") { model.selectedLeftoverIDs = [] }
-                .controlSize(.small).help("Leave settings and related data in place")
+              Menu("Select") {
+                Button("Suggested matches") { model.selectedLeftoverIDs = Set(model.appLeftovers.filter(\.isSuggested).map(\.id)) }
+                Button("Keep settings & app data") { model.selectedLeftoverIDs = Set(model.appLeftovers.filter { $0.isSuggested && $0.isDisposableData }.map(\.id)) }
+                Button("App only") { model.selectedLeftoverIDs = [] }
+              }.controlSize(.small).disabled(model.isScanning || model.isWorking)
             }
             Text("Exact bundle-ID matches are selected. Shared data and uncertain matches stay yours to review.")
+              .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("App data can contain projects and local documents. System helpers, Keychain entries and data outside your Library are not automatically removed.")
               .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
           }
 
@@ -230,8 +238,11 @@ struct ApplicationsView: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                   Text(leftover.url.lastPathComponent).fontWeight(.medium)
+                  Text(leftover.category.rawValue + " · " + leftover.category.consequence)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                   Text(leftover.reason).font(.caption).foregroundStyle(.secondary)
                   Text(leftover.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .truncationMode(.middle).help(leftover.url.path)
                 }
                 Spacer()
                 if leftover.isShared {
@@ -272,6 +283,8 @@ struct ApplicationsView: View {
             Text(ByteFormatter.string(app.bundleSize + selectedLeftoverBytes))
               .font(.title3.bold())
               .monospacedDigit()
+            Text("App + \(model.selectedLeftoverIDs.count) related items · moved to Trash")
+              .font(.caption2).foregroundStyle(.secondary)
           }
           Spacer()
           if model.selectedAppIsRunning {

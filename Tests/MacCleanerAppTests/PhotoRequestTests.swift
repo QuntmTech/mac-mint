@@ -3,6 +3,33 @@ import XCTest
 @testable import MacCleanerApp
 
 final class PhotoRequestTests: XCTestCase {
+  func testLocalDegradedThumbnailSurvivesUnavailableLargerRepresentation() async {
+    let bridge = PhotoThumbnailRequest(cancel: { _ in })
+    let result: Data? = await withCheckedContinuation { continuation in
+      XCTAssertTrue(bridge.begin(continuation))
+      bridge.receive(Data([1, 2]), degraded: true)
+      bridge.receive(nil, degraded: false)
+    }
+    XCTAssertEqual(result, Data([1, 2]))
+  }
+  func testTimeoutUsesAvailableThumbnailAndCancelsRequestOnce() async {
+    let calls = CancelledRequests()
+    let bridge = PhotoThumbnailRequest(cancel: { calls.append($0) })
+    let result: Data? = await withCheckedContinuation { continuation in
+      XCTAssertTrue(bridge.begin(continuation)); bridge.install(42)
+      bridge.receive(Data([3]), degraded: true); bridge.expire(); bridge.expire(); bridge.cancel()
+      bridge.finish(Data([4]))
+    }
+    XCTAssertEqual(result, Data([3])); XCTAssertEqual(calls.values, [42])
+  }
+  func testCancellationNeverDisplaysFallbackFromOldPhoto() async {
+    let bridge = PhotoThumbnailRequest(cancel: { _ in })
+    let result: Data? = await withCheckedContinuation { continuation in
+      XCTAssertTrue(bridge.begin(continuation))
+      bridge.receive(Data([1]), degraded: true); bridge.cancel(); bridge.expire()
+    }
+    XCTAssertNil(result)
+  }
   func testPhotoDeletionRevalidatesAvailableKeepersAndTheCompleteSelection() {
     XCTAssertNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], available: ["copy", "keeper"]))
     XCTAssertTrue(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], available: ["copy"])?.contains("chose to keep") == true)
