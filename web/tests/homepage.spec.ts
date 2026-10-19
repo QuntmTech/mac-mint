@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test'
 
 test('the main homepage has the full design and working account navigation', async ({ page }) => {
+  // Several document navigations; individual UI assertions retain the default 5s limit.
+  test.setTimeout(60_000)
   const errors: string[] = []
   const failedAssets: string[] = []
   page.on('pageerror', error => errors.push(error.message))
@@ -76,4 +78,95 @@ test('the main homepage remains readable without JavaScript', async ({ browser }
   } finally {
     await context.close()
   }
+})
+
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+  test(`the guided demo completes scan, edited review and recovery at ${viewport.width}px`, async ({ page }) => {
+    // Budget the full user journey separately from each state assertion.
+    test.setTimeout(60_000)
+    await page.setViewportSize(viewport)
+    const errors: string[] = []
+    const writes: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    page.on('request', request => {
+      if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) writes.push(request.url())
+    })
+    await page.goto('/')
+    const demo = page.locator('#product-demo')
+    await expect(demo.getByText('Demo scan complete.', { exact: false })).toHaveCount(0)
+    await demo.getByRole('button', { name: 'Run Quick Scan', exact: true }).click()
+    await expect(demo.getByRole('progressbar')).toBeVisible()
+    await expect(demo.getByRole('button', { name: 'Review 6.4 GB', exact: true })).toBeVisible()
+    const browserCaches = demo.getByRole('checkbox', { name: 'Browser caches, 1.6 GB', exact: true })
+    const backup = demo.getByRole('checkbox', { name: 'Device backups, 1.2 GB', exact: true })
+    await expect(backup).not.toBeChecked()
+    await demo.getByRole('button', { name: 'Review 6.4 GB', exact: true }).click()
+    const review = demo.getByRole('region', { name: 'Your cleanup. Your final say.' })
+    await expect(review).toBeFocused()
+    await browserCaches.uncheck()
+    await expect(review).toContainText('4.8 GB selected')
+    await review.getByRole('button', { name: 'Move to demo Trash', exact: true }).click()
+    const outcome = demo.getByRole('region', { name: 'Room to change your mind.' })
+    await expect(outcome).toContainText('4.8 GB')
+    await expect(outcome).toContainText('Free space hasn’t changed yet.')
+    await outcome.getByRole('button', { name: 'Restore these files', exact: true }).click()
+    const restored = demo.getByRole('region', { name: 'Back where they started.' })
+    await expect(restored).toBeFocused()
+    await restored.getByRole('button', { name: 'Check availability', exact: true }).click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(restored.getByRole('button', { name: 'Check availability', exact: true })).toBeFocused()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    expect(errors).toEqual([])
+    expect(writes).toEqual([])
+  })
+}
+
+test('rescanning preserves Trash receipts and cancelled scans preserve choices', async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.goto('/')
+  const demo = page.locator('#product-demo')
+  await demo.getByRole('button', { name: 'Run Quick Scan', exact: true }).click()
+  await demo.getByRole('button', { name: 'Review 6.4 GB', exact: true }).click()
+  await demo.getByRole('button', { name: 'Move to demo Trash', exact: true }).click()
+  await demo.getByRole('button', { name: 'Back to results', exact: true }).click()
+  await demo.getByRole('button', { name: 'Scan again', exact: true }).click()
+  await expect(demo.getByRole('progressbar')).toHaveCount(0)
+  await expect(demo.getByRole('checkbox')).toHaveCount(1)
+  await expect(demo.getByRole('checkbox', { name: 'Device backups, 1.2 GB', exact: true })).not.toBeChecked()
+  await demo.getByRole('checkbox', { name: 'Device backups, 1.2 GB', exact: true }).check()
+  await demo.getByRole('button', { name: 'Scan again', exact: true }).click()
+  await demo.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(demo.getByRole('checkbox', { name: 'Device backups, 1.2 GB', exact: true })).toBeChecked()
+  await demo.getByRole('navigation', { name: 'Product demo modules' }).getByRole('button', { name: 'History', exact: true }).click()
+  await demo.getByRole('button', { name: 'Restore files', exact: true }).click()
+  await expect(demo.getByRole('button', { name: 'Files restored', exact: true })).toBeFocused()
+  await expect(demo).toContainText('6.4 GB moved to demo Trash')
+  await demo.getByText('4 categories · View receipt', { exact: true }).click()
+  await expect(demo.locator('.demo-history-entry li')).toHaveCount(4)
+  await demo.getByRole('navigation', { name: 'Product demo modules' }).getByRole('button', { name: 'Cleaner', exact: true }).click()
+  await expect(demo.getByRole('checkbox')).toHaveCount(5)
+})
+
+test('phone transitions reveal the next screen and Back preserves edited review choices', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/')
+  const demo = page.locator('#product-demo')
+  await page.getByRole('combobox', { name: 'Choose a product demo' }).selectOption('cleaner')
+  await demo.getByRole('checkbox', { name: 'Device backups, 1.2 GB', exact: true }).check()
+  await demo.getByRole('button', { name: 'Review 7.6 GB', exact: true }).click()
+  await expect(demo.locator('#demo-review-heading')).toBeInViewport({ ratio: 1 })
+  await expect(demo.getByRole('region')).toContainText('including 1.2 GB of review items')
+  await demo.getByRole('checkbox', { name: 'Browser caches, 1.6 GB', exact: true }).uncheck()
+  await demo.getByRole('button', { name: 'Back to results', exact: true }).click()
+  const trigger = demo.getByRole('button', { name: 'Review 6.0 GB', exact: true })
+  await expect(trigger).toBeFocused()
+  await expect(trigger).toBeInViewport({ ratio: 1 })
+  await trigger.click()
+  await demo.getByRole('button', { name: 'Move to demo Trash', exact: true }).click()
+  await expect(demo.locator('#demo-outcome-heading')).toBeInViewport({ ratio: 1 })
+  await demo.getByRole('button', { name: 'Restore these files', exact: true }).click()
+  await expect(demo.locator('#demo-outcome-heading')).toHaveText('Back where they started.')
+  await expect(demo.locator('#demo-outcome-heading')).toBeInViewport({ ratio: 1 })
 })

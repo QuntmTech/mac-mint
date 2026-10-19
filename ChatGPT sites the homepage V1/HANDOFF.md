@@ -32,8 +32,22 @@ Deploy the regenerated `site/`. `npm run build` generates HTML, CSS, JS, robots 
 
 ## Release and product truth
 
-`lib/product-config.ts` owns account, source, support and future download URLs. No installer is linked and this page has no checkout. Set `downloadUrl` only to a verified installer. The current native app requires an account and active plan; network checks handle account/license/device activation, while files and scan results stay local. Product review used native source commit `095f2e6b11bd7adc571c5d6f79ff1370f582c32f`. Demos are illustrative and do not access local files. Do not add pricing, a trial, refunds, reviews, speed claims or launch dates without confirmed product evidence.
+`lib/product-config.ts` owns account, source, support and future download URLs. No installer is linked and this page has no checkout. Set `downloadUrl` only to a verified installer. Local inspection and recovery work before sign-in; paid removal requires an active account and plan. Network checks handle account/license/device activation, while files and scan results stay local. Product review used native source commit `095f2e6b11bd7adc571c5d6f79ff1370f582c32f`. Demos are illustrative and do not access local files. Do not add pricing, a trial, refunds, reviews, speed claims or launch dates without confirmed product evidence.
 
 ## Validation / remaining work
 
 TypeScript, React interaction tests and production builds cover this package. The combined `web/` browser suite additionally verifies account routing, homepage hydration, mobile layout, availability dialogs, canonical metadata, legacy redirects and static rendering without JavaScript. Real installer/purchase, final legal copy and consumer distribution remain separate release gates.
+
+## Guided hero demo
+
+`components/macmint/product-demo.tsx` now demonstrates Scan → editable Review → demo Trash → Restore. Results appear after an explicit example scan; users can also explore individual tools directly. Rebuildable caches are selected by default, device backups are not. Rows describe consequences rather than promising absolute safety. Trash totals are distinct from free space. No browser demo reads files or calls a cleanup API.
+
+Receipts contain category IDs and a restored state. Removed examples are derived from unrestored receipts; rescanning cannot resurrect them. Restore is idempotent, returning only that receipt's categories. Cancelling, leaving Quick Scan (including controlled homepage shortcuts), and unmounting release the scan timer. Cancellation preserves selections and receipts. Reset clears this demo's session state. Nothing is persisted across page loads.
+
+Review is an inline editable region rather than a modal overlay. Keyboard focus moves into review/results and returns to the review trigger on Back. Each new review/outcome scrolls its heading into view below the sticky site header, including after long phone lists. After restoring, the explicit availability button invokes the existing homepage modal through `onAvailability`; it never opens automatically. The native-app product/config/distribution limits above still apply. No pricing, download URL, tracking, provider request or runtime dependency was added.
+
+Tests: `npm test` in this package exercises the lifecycle, totals, editable choices, recovery, cancellation, reset and explicit availability callback. `web/tests/homepage.spec.ts` covers the full journey at desktop and phone sizes, focus restoration through the availability dialog, receipt inspection, rescanning with files still in Trash, and cancellation preserving choices. These are website checks, not evidence that native cleanup or consumer installation passed.
+
+Validation for this iteration: 49 React interaction assertions, all nine homepage Playwright scenarios, TypeScript checks, web lint and the combined production build passed. The initial combined account/homepage suite also passed all 36 then-current scenarios. Desktop/phone inspection covered 22 demo states with no text-contrast findings or horizontal overflow. A reproduced phone transition placed new headings above the viewport; the added regression now checks that Review, Trash and Restore headings remain visible and Back preserves edited choices.
+
+Long document-navigation and complete-lifecycle browser cases have a 60-second total budget; individual state assertions retain the default five-second limit and retries remain disabled. Earlier runs on the loaded shared host exhausted the cumulative 30-second budget. Receipt inspection and Back/risk editing are covered separately so the main journey stays focused. No native-app verification or measured conversion lift is implied.

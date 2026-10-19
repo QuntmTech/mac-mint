@@ -1,4 +1,6 @@
-# Implementation manifest
+# Original package snapshot
+
+This manifest records the original delivered package, not the current checkout or production hashes. See `HANDOFF.md` for the current combined build, deployment and guided-demo workflow.
 
 Package: `ChatGPT sites the homepage V1`.
 

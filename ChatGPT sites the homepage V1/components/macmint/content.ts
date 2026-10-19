@@ -13,11 +13,11 @@ export const faqs = [
   ["Do I need Full Disk Access?", "It is optional. macOS may block access to some locations without it. MacMint reports access issues and continues where permitted, rather than bypassing macOS privacy controls."],
 ];
 export const cleanupRows = [
-  { id: "cache", name: "Application caches", detail: "Regenerable app data", size: 2.4, risk: "safe" },
-  { id: "browser", name: "Browser caches", detail: "Cached files, not your bookmarks", size: 1.6, risk: "safe" },
-  { id: "dev", name: "Developer caches", detail: "Build and package caches", size: 2.1, risk: "safe" },
-  { id: "logs", name: "Application logs", detail: "Historical logs", size: 0.3, risk: "safe" },
-  { id: "backups", name: "Device backups", detail: "Local backups — review first", size: 1.2, risk: "review" },
+  { id: "cache", name: "Application caches", detail: "Apps recreate this data as needed", size: 2.4, risk: "safe" },
+  { id: "browser", name: "Browser caches", detail: "Passwords and bookmarks stay put", size: 1.6, risk: "safe" },
+  { id: "dev", name: "Developer caches", detail: "May rebuild or download again", size: 2.1, risk: "safe" },
+  { id: "logs", name: "Application logs", detail: "Past activity logs; not app settings", size: 0.3, risk: "safe" },
+  { id: "backups", name: "Device backups", detail: "Keep unless you no longer need them", size: 1.2, risk: "review" },
 ];
 export const largeFiles = [
   { name: "Weekend-film.mov", type: "Video", size: 8.4, color: "peach" },
