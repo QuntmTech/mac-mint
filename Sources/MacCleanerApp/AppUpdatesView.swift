@@ -60,7 +60,7 @@ struct AppUpdatesView: View {
       } else {
         List(store.updates) { update in
           HStack(spacing: 12) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: update.appURL.path))
+            Image(nsImage: FileIcons.icon(forPath: update.appURL.path))
               .resizable().frame(width: 34, height: 34)
             VStack(alignment: .leading, spacing: 3) {
               Text(update.appName).fontWeight(.medium)

@@ -95,6 +95,65 @@ public struct StorageNode: Identifiable, Hashable, Sendable {
   }
 }
 
+extension StorageNode {
+  /// A smaller copy for when the full map isn't on screen: folders `levels` below this node
+  /// keep their totals but drop their children, except folders in `expanding` (the visible
+  /// trail and the ancestors of selections). Returns the IDs of folders whose children were
+  /// dropped, so they can be mapped again when opened.
+  public func compacted(levels: Int, expanding: Set<String>) -> (node: StorageNode, pruned: Set<String>) {
+    var pruned = Set<String>()
+    let node = compacting(depth: 0, levels: max(1, levels), expanding: expanding, pruned: &pruned)
+    return (node, pruned)
+  }
+
+  private func compacting(depth: Int, levels: Int, expanding: Set<String>, pruned: inout Set<String>) -> StorageNode {
+    guard kind == .folder, !children.isEmpty else { return self }
+    if depth >= levels && !expanding.contains(id) {
+      pruned.insert(id)
+      return with(children: [])
+    }
+    return with(children: children.map {
+      $0.compacting(depth: depth + 1, levels: levels, expanding: expanding, pruned: &pruned)
+    })
+  }
+
+  /// Every folder from `path` up to (not including) this node's parent: what must stay
+  /// expanded for the node at `path` to remain reachable.
+  public static func ancestors(of path: String, within root: String) -> Set<String> {
+    var result = Set<String>()
+    var current = (path as NSString).deletingLastPathComponent
+    while current.count >= root.count, current.hasPrefix(root) {
+      result.insert(current)
+      let parent = (current as NSString).deletingLastPathComponent
+      if parent == current { break }
+      current = parent
+    }
+    return result
+  }
+
+  /// This tree with the node at `id` replaced (for a folder mapped again on demand) and the
+  /// totals of every ancestor recomputed.
+  public func replacing(_ id: String, with replacement: StorageNode) -> StorageNode {
+    if self.id == id { return replacement }
+    let prefix = self.id == "/" ? "/" : self.id + "/"
+    guard kind == .folder, id.hasPrefix(prefix) else { return self }
+    let next = children.map { $0.replacing(id, with: replacement) }
+    return StorageNode(
+      url: url, name: name, kind: kind,
+      allocatedBytes: next.reduce(0) { $0 + $1.allocatedBytes },
+      logicalBytes: next.reduce(0) { $0 + $1.logicalBytes },
+      itemCount: next.reduce(0) { $0 + $1.itemCount },
+      cloudOnlyCount: next.reduce(0) { $0 + $1.cloudOnlyCount },
+      modified: modified, children: next, id: self.id, identity: identity)
+  }
+
+  private func with(children: [StorageNode]) -> StorageNode {
+    StorageNode(url: url, name: name, kind: kind, allocatedBytes: allocatedBytes, logicalBytes: logicalBytes,
+      itemCount: itemCount, cloudOnlyCount: cloudOnlyCount, modified: modified, children: children, id: id,
+      identity: identity)
+  }
+}
+
 public struct StorageCoverage: Hashable, Sendable {
   public var scannedItems = 0
   public var inaccessiblePaths: [String] = []

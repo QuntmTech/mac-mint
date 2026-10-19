@@ -15,7 +15,7 @@ struct FileThumbnail: View {
       if let image {
         Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
       } else {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable()
+        Image(nsImage: FileIcons.icon(forPath: url.path)).resizable()
       }
     }
     .frame(width: size, height: size)

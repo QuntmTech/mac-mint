@@ -72,6 +72,7 @@ extension AppViewModel {
         return
       }
       storageScan = scan
+      storagePrunedFolders = []
       storagePath = nil
       selectedStoragePaths = []
       if !scan.coverage.wasCancelled { recordStorageSnapshot(scan.root) }
@@ -93,9 +94,50 @@ extension AppViewModel {
     }
   }
 
+  func canOpenStorageNode(_ node: StorageNode) -> Bool {
+    node.kind == .folder && (!node.children.isEmpty || storagePrunedFolders.contains(node.id))
+  }
+
   func openStorageNode(_ node: StorageNode) {
+    if storagePrunedFolders.contains(node.id), node.children.isEmpty { remapStorageFolder(node); return }
     guard node.kind == .folder, !node.children.isEmpty else { return }
     storagePath = node.id
+  }
+
+  /// Drops the deep levels of the map while they aren't on screen. Totals, the visible trail
+  /// and selected items stay; a pruned folder is mapped again when it is opened.
+  func compactStorageMap() {
+    guard let scan = storageScan, !(isScanning && operationTitle == "Storage") else { return }
+    let root = scan.root.id
+    var expanding = Set<String>()
+    for path in selectedStoragePaths { expanding.formUnion(StorageNode.ancestors(of: path, within: root)) }
+    if let path = storagePath { expanding.insert(path); expanding.formUnion(StorageNode.ancestors(of: path, within: root)) }
+    let compact = scan.root.compacted(levels: 2, expanding: expanding)
+    guard !compact.pruned.isEmpty else { return }
+    storagePrunedFolders.formUnion(compact.pruned)
+    storageScan = StorageScan(root: compact.node, coverage: scan.coverage, duration: scan.duration)
+  }
+
+  func remapStorageFolder(_ node: StorageNode) {
+    guard !isScanning, !isWorking, requireExclusions() else { return }
+    isScanning = true
+    operationTitle = "Storage"
+    statusMessage = "Mapping \(node.name)…"
+    let id = node.id, url = node.url, name = node.name
+    let scanner = StorageTreeScanner()
+    currentTask = Task { [weak self] in
+      guard let self else { return }
+      let scan = await scanner.scan(url, ignoredPaths: ignoredPaths)
+      guard !Task.isCancelled, !scan.coverage.wasCancelled, let current = storageScan else {
+        finishCancelledOperation()
+        return
+      }
+      storageScan = StorageScan(root: current.root.replacing(id, with: scan.root), coverage: current.coverage,
+        duration: current.duration)
+      storagePrunedFolders = storagePrunedFolders.filter { $0 != id && !$0.hasPrefix(id + "/") }
+      storagePath = id
+      finishScan(message: "Mapped \(name) in \(scan.coverage.scannedItems.formatted()) items")
+    }
   }
 
   func storageRemovalAllowed(_ node: StorageNode) -> Bool {
