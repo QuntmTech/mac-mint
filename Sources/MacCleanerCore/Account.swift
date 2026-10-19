@@ -41,7 +41,7 @@ public struct Entitlement: Codable, Hashable, Sendable {
   }
 
   public var expiryDate: Date? { expiresAt.flatMap(AccountDates.parse) }
-  public var isLifetime: Bool { active && expiresAt == nil }
+  public var isLifetime: Bool { active && plan == "pro" && status == "active" && expiresAt == nil }
 }
 
 public struct RegisteredDevice: Codable, Hashable, Sendable, Identifiable {
@@ -163,7 +163,10 @@ public enum AccessPolicy {
   public static func allowsOffline(
     _ cached: CachedAccess?, now: Date = Date(), graceDays: Int = defaultOfflineGraceDays
   ) -> Bool {
-    guard let cached, cached.snapshot.entitlement.active else { return false }
+    guard let cached, cached.snapshot.entitlement.active,
+      cached.snapshot.entitlement.plan == "pro", cached.snapshot.entitlement.status == "active",
+      graceDays >= 0 else { return false }
+    if cached.snapshot.entitlement.expiresAt != nil && cached.snapshot.entitlement.expiryDate == nil { return false }
     if let expiry = cached.snapshot.entitlement.expiryDate, expiry <= now { return false }
     let age = now.timeIntervalSince(cached.verifiedAt)
     return age >= -300 && age <= Double(graceDays) * 86_400

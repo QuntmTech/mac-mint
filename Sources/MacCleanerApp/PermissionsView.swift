@@ -10,6 +10,8 @@ struct FullDiskAccessGuide: View {
         .font(.headline)
       Text("Lets MacMint inspect protected app data for broader scan coverage. Without it, you can still inspect permitted locations; unreadable areas appear in scan issues.")
         .font(.callout).foregroundStyle(.secondary)
+      Text("Install and open MacMint from Applications before granting this access.")
+        .font(.callout).fixedSize(horizontal: false, vertical: true)
       HStack {
         Button("Open Full Disk Access") { permissions.open(.fullDiskAccess) }
           .buttonStyle(MintButtonStyle(prominent: false))
@@ -31,6 +33,7 @@ struct PermissionsSettingsCard: View {
   @EnvironmentObject private var care: CareService
   @StateObject private var permissions = PermissionsService()
   @State private var showingSetup = false
+  @State private var scanAfterSetup = false
 
   var body: some View {
     SurfaceCard {
@@ -40,6 +43,7 @@ struct PermissionsSettingsCard: View {
           Spacer()
           Button("Review Setup") { showingSetup = true }
         }
+        InstallationGuide()
         FullDiskAccessGuide(permissions: permissions)
         Divider()
         VStack(alignment: .leading, spacing: 8) {
@@ -85,7 +89,12 @@ struct PermissionsSettingsCard: View {
       }
       .fixedSize(horizontal: false, vertical: true)
     }
-    .sheet(isPresented: $showingSetup) { OnboardingView() }
+    .sheet(isPresented: $showingSetup, onDismiss: {
+      guard scanAfterSetup else { return }
+      scanAfterSetup = false
+      model.selectedSection = .dashboard
+      model.runSmartCare()
+    }) { OnboardingView(onFinish: { scanAfterSetup = $0 }) }
     .task { await permissions.refresh() }
     .onChange(of: care.notificationPermission) { _, _ in Task { await permissions.refresh() } }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

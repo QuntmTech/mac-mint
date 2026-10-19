@@ -157,6 +157,13 @@ public struct SafetyPolicy: Sendable {
       return (false, "This application path is not eligible for uninstall.")
     }
     if isSymlink(url) { return (false, "Symbolic links are not uninstalled.") }
+    var parent = url.standardizedFileURL.resolvingSymlinksInPath().deletingLastPathComponent()
+    while parent.path != "/" {
+      if parent.pathExtension.lowercased() == "app" {
+        return (false, "Nested helpers belong to their containing app. Uninstall the main app instead.")
+      }
+      parent.deleteLastPathComponent()
+    }
     let root = FileSystem.path(url, isInsideOrEqual: homeDirectory.appendingPathComponent("Applications"))
       ? homeDirectory : URL(fileURLWithPath: "/Applications")
     if let problem = volumeProblem(for: url, within: root) { return (false, problem) }

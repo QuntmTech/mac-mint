@@ -51,17 +51,18 @@ struct ApplicationsView: View {
     }
   }
 
-  private var selectedLeftoverBytes: Int64 {
-    model.appLeftovers.filter { model.selectedLeftoverIDs.contains($0.id) }.reduce(0) {
-      $0 + $1.size
-    }
-  }
+  /// Planned off the main actor with the rest of the queue summary.
+  private var selectedLeftoverBytes: Int64 { model.queueSummary.selectedLeftoverBytes }
 
   var body: some View {
     VStack(spacing: 0) {
-      PageHeader(title: "Apps", subtitle: "A home for your apps and the files that belong to them.") {
-        Button { model.runSmartScan() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+      PageHeader(title: "Apps", subtitle: "Uninstall apps with their caches, settings and related data. Review every change first.") {
+        HStack(spacing: 8) {
+        Button { mode = .uninstall; model.chooseAppForUninstall() } label: { Label("Choose App…", systemImage: "plus.app") }
           .buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isScanning || model.isWorking)
+        Button { model.scanInstalledApps() } label: { Label(model.apps.isEmpty ? "Find Apps" : "Refresh Apps", systemImage: "arrow.clockwise") }
+          .buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isScanning || model.isWorking)
+        }
       }.padding(AppTheme.pagePadding)
       HStack {
         Picker("Mode", selection: $mode) {
@@ -81,6 +82,7 @@ struct ApplicationsView: View {
       }
     }
     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+      mode = .uninstall
       guard let provider = providers.first else { return false }
       _ = provider.loadObject(ofClass: URL.self) { url, _ in
         guard let url else { return }
@@ -91,7 +93,9 @@ struct ApplicationsView: View {
   }
 
   private var uninstaller: some View {
-    HSplitView {
+    // Keep both panes in the same SwiftUI layout tree. NSSplitView's nested
+    // hosting roots on macOS 26 can misplace safe-area/footer coordinates.
+    HStack(spacing: 0) {
       VStack(spacing: 0) {
         HStack {
           Text("Installed apps").font(.system(size: 13, weight: .semibold))
@@ -152,8 +156,9 @@ struct ApplicationsView: View {
       }
       .frame(minWidth: 250, idealWidth: 290, maxWidth: 360)
 
+      Divider()
       detail
-        .frame(minWidth: 380)
+        .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
     }
   }
 
@@ -192,10 +197,15 @@ struct ApplicationsView: View {
             HStack {
               Text("Related files").font(.headline)
               Spacer()
-              Button("Keep my settings") { model.selectedLeftoverIDs = [] }
-                .controlSize(.small).help("Leave settings and related data in place")
+              Menu("Select") {
+                Button("Suggested matches") { model.selectedLeftoverIDs = Set(model.appLeftovers.filter(\.isSuggested).map(\.id)) }
+                Button("Keep settings & app data") { model.selectedLeftoverIDs = Set(model.appLeftovers.filter { $0.isSuggested && $0.isDisposableData }.map(\.id)) }
+                Button("App only") { model.selectedLeftoverIDs = [] }
+              }.menuStyle(.borderlessButton).fixedSize().controlSize(.small).disabled(model.isScanning || model.isWorking)
             }
             Text("Exact bundle-ID matches are selected. Shared data and uncertain matches stay yours to review.")
+              .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("App data can contain projects and local documents. System helpers, Keychain entries and data outside your Library are not automatically removed.")
               .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
           }
 
@@ -211,7 +221,7 @@ struct ApplicationsView: View {
               detail: "No matching user-level leftovers were detected for this app.")
           } else {
             ForEach(model.appLeftovers) { leftover in
-              HStack(spacing: 11) {
+              HStack(alignment: .top, spacing: 11) {
                 Toggle(
                   "",
                   isOn: Binding(
@@ -226,34 +236,44 @@ struct ApplicationsView: View {
                   )
                 )
                 .labelsHidden()
+                .fixedSize()
+                .padding(.top, 2)
                 .accessibilityLabel("Remove \(leftover.url.lastPathComponent) with the app")
 
-                VStack(alignment: .leading, spacing: 3) {
-                  Text(leftover.url.lastPathComponent).fontWeight(.medium)
+                VStack(alignment: .leading, spacing: 5) {
+                  HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(leftover.url.lastPathComponent).fontWeight(.medium)
+                      .lineLimit(2).truncationMode(.middle).layoutPriority(1)
+                    Spacer(minLength: 0)
+                    Text(ByteFormatter.string(leftover.size))
+                      .font(.callout.monospacedDigit()).fixedSize()
+                    Menu {
+                      Button("Reveal in Finder") { model.reveal(leftover.url) }
+                      Button("Exclude from future scans") { model.ignore(leftover.url) }
+                    } label: {
+                      Image(systemName: "ellipsis.circle")
+                        .accessibilityLabel("More actions for " + leftover.url.lastPathComponent)
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                  }
+                  Text(leftover.category.rawValue + " · " + leftover.category.consequence)
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                   Text(leftover.reason).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                   Text(leftover.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .truncationMode(.middle).help(leftover.url.path)
+                  HStack(spacing: 6) {
+                    if leftover.isShared {
+                      StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
+                    }
+                    StatusPill(
+                      title: leftover.confidence.rawValue.capitalized,
+                      icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
+                      tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
+                    )
+                  }
                 }
-                Spacer()
-                if leftover.isShared {
-                  StatusPill(title: "Shared", icon: "person.2", tint: AppTheme.violet)
-                }
-                StatusPill(
-                  title: leftover.confidence.rawValue.capitalized,
-                  icon: leftover.confidence == .high ? "checkmark.shield" : "eye",
-                  tint: leftover.confidence == .high ? AppTheme.accentText : AppTheme.warning
-                )
-                Text(ByteFormatter.string(leftover.size))
-                  .font(.callout.monospacedDigit())
-                  .frame(width: 86, alignment: .trailing)
-                Menu {
-                  Button("Reveal in Finder") { model.reveal(leftover.url) }
-                  Button("Exclude from future scans") { model.ignore(leftover.url) }
-                } label: {
-                  Image(systemName: "ellipsis.circle")
-                    .accessibilityLabel("More actions")
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 28)
+                .frame(maxWidth: .infinity, alignment: .leading)
               }
               .padding(.vertical, 4)
             }
@@ -272,6 +292,8 @@ struct ApplicationsView: View {
             Text(ByteFormatter.string(app.bundleSize + selectedLeftoverBytes))
               .font(.title3.bold())
               .monospacedDigit()
+            Text("App + \(model.selectedLeftoverIDs.count) related items · moved to Trash")
+              .font(.caption2).foregroundStyle(.secondary)
           }
           Spacer()
           if model.selectedAppIsRunning {

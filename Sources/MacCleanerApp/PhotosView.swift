@@ -39,6 +39,7 @@ struct PhotosView: View {
         .labelsHidden()
         .frame(maxWidth: 540)
         .padding(.vertical, 10)
+        bulkSelectionBar(scan)
         Divider()
         content(scan)
       } else {
@@ -71,7 +72,6 @@ struct PhotosView: View {
       : "Compare folder photos. Reviewed removals go to Trash, with recovery in History.") {
       HStack(spacing: 8) {
       if !model.selectedPhotoIDs.isEmpty {
-        Button("Deselect") { model.keepQueuedFiles(model.selectedPhotos.filter { !$0.isLibraryAsset }.map(\.url)); model.selectedPhotoIDs = [] }
         Button {
           model.reviewPhotos()
         } label: {
@@ -168,6 +168,31 @@ struct PhotosView: View {
 
   // MARK: Content
 
+  private func photos(in scan: PhotoScanResult) -> [PhotoFingerprint] {
+    switch tab {
+    case .deck: return scan.photos
+    case .similar: return scan.similarGroups.flatMap(\.photos)
+    case .blurry: return scan.blurry
+    case .screenshots: return scan.screenshots
+    }
+  }
+
+  private func bulkSelectionBar(_ scan: PhotoScanResult) -> some View {
+    let current = photos(in: scan)
+    return HStack(spacing: 12) {
+      Text("\(model.selectedPhotoIDs.count) selected").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+      Spacer()
+      Button(tab == .similar ? "Select other copies" : "Select all in tab") { model.setPhotoSelection(current, selected: true) }
+        .disabled(current.isEmpty)
+      Button("Deselect tab") { model.setPhotoSelection(current, selected: false) }
+        .disabled(!current.contains { model.selectedPhotoIDs.contains($0.id) })
+      Button("Deselect all") { model.setPhotoSelection(scan.photos, selected: false) }
+        .disabled(model.selectedPhotoIDs.isEmpty)
+    }.controlSize(.small).padding(.horizontal, AppTheme.pagePadding).padding(.bottom, 10)
+      .disabled(model.isScanning || model.isWorking || model.isPreparingPlan)
+      .help("Selection only. Protected keepers stay unselected; deletion always requires Review.")
+  }
+
   @ViewBuilder
   private func content(_ scan: PhotoScanResult) -> some View {
     switch tab {
@@ -212,15 +237,17 @@ struct PhotosView: View {
               .font(.caption).foregroundStyle(AppTheme.accentText)
             Spacer()
             Button("Select other copies") { model.selectAllButKeeper(in: group) }.controlSize(.small)
+            Button("Deselect group") { model.setPhotoSelection(group.photos, selected: false) }.controlSize(.small)
+              .disabled(!group.photos.contains { model.selectedPhotoIDs.contains($0.id) })
           }
         }
         ScrollView(.horizontal, showsIndicators: false) {
-          HStack(spacing: 12) {
+          LazyHStack(spacing: 12) {
             ForEach(group.photos) { photo in
               PhotoTile(photo: photo, isKeeper: photo.id == kept.id)
             }
           }
-        }
+        }.frame(height: 210)
       }
     }
 
@@ -310,11 +337,13 @@ struct PhotoThumbnail: View {
   let side: CGFloat
   var allowCloud = false
   var fit = false
+  var onAvailability: ((Bool) -> Void)? = nil
   @State private var finished = false
   @State private var image: NSImage?
+  @State private var retry = 0
 
-  private static let cache = PreviewImageCache(byteLimit: 32 * 1_024 * 1_024, countLimit: 64)
-  private var loadKey: String { "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#\(photo.identity ?? "unknown")#\(Int(side))#\(allowCloud)" }
+  private static var cache: PreviewImageCache { PreviewCaches.photos }
+  private var loadKey: String { "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#\(photo.identity ?? "unknown")#\(Int(side))#\(allowCloud)#\(retry)" }
 
   var body: some View {
     ZStack {
@@ -322,22 +351,43 @@ struct PhotoThumbnail: View {
       if let image {
         Image(nsImage: image).resizable().aspectRatio(contentMode: fit ? .fit : .fill)
       } else if finished {
-        Label("Preview unavailable locally", systemImage: "icloud").font(.caption).multilineTextAlignment(.center)
+        VStack(spacing: 8) {
+          Label(allowCloud ? "Preview could not be loaded" : "No local preview at this size", systemImage: "photo.badge.exclamationmark")
+            .font(.caption).multilineTextAlignment(.center)
+          if fit { Button("Retry preview") { retry += 1 }.controlSize(.small) }
+        }
       } else {
         ProgressView().controlSize(.small)
       }
     }
     .task(id: loadKey) {
-      finished = false; image = nil
+      let cacheGeneration = Self.cache.generation
+      finished = false; image = nil; onAvailability?(false)
+      if fit, let assetID = photo.assetID {
+        // Show the same local resolution used by analysis before requesting a larger image.
+        let smallKey = "\(photo.id)#\(photo.modified?.timeIntervalSince1970 ?? 0)#local-256"
+        var small = Self.cache.image(for: smallKey)
+        if small == nil {
+          small = await PhotoLibraryService.thumbnailData(assetID: assetID, side: 128, allowNetwork: false)
+            .flatMap(NSImage.init(data:))
+        }
+        guard !Task.isCancelled else { return }
+        if let small {
+          if Self.cache.generation == cacheGeneration { Self.cache.insert(small, for: smallKey) }
+          image = small; onAvailability?(true)
+        }
+      }
       let loaded = await load()
       guard !Task.isCancelled else { return }
-      image = loaded; finished = true
+      if let loaded { image = loaded }
+      finished = true; onAvailability?(image != nil)
     }
     .onDisappear { image = nil; finished = false }
   }
 
   private func load() async -> NSImage? {
     let key = loadKey
+    let cacheGeneration = Self.cache.generation
     if let cached = Self.cache.image(for: key) { return cached }
     let loaded: NSImage?
     if let assetID = photo.assetID {
@@ -351,7 +401,7 @@ struct PhotoThumbnail: View {
       loaded = data.flatMap(NSImage.init(data:))
     }
     guard !Task.isCancelled else { return nil }
-    if let loaded { Self.cache.insert(loaded, for: key) }
+    if let loaded, Self.cache.generation == cacheGeneration { Self.cache.insert(loaded, for: key) }
     return loaded
   }
 }

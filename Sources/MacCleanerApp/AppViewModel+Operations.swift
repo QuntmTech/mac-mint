@@ -13,12 +13,15 @@ struct QueueSummary: Sendable, Equatable {
   var rebuildableBytes: Int64 = 0
   var reviewableBytes: Int64 = 0
   var safeRecommendationBytes: Int64 = 0
+  /// Related files selected for the app being uninstalled (not part of the cross-module queue).
+  var selectedLeftoverBytes: Int64 = 0
 
   struct Inputs: Sendable {
     let selections: [PlanItem]
     let libraryPhotoCount: Int
     let cleanupTargets: [CleanupTarget]
     let safeRecommendationItems: [PlanItem]
+    let selectedLeftovers: [PlanItem]
     let ignoredPaths: Set<String>
 
     func summary() -> QueueSummary {
@@ -33,7 +36,8 @@ struct QueueSummary: Sendable, Equatable {
         selectedCleanupBytes: estimate(cleanup(\.isSelected)),
         rebuildableBytes: estimate(cleanup { $0.risk == .safe }),
         reviewableBytes: estimate(cleanup { $0.risk == .review }),
-        safeRecommendationBytes: estimate(safeRecommendationItems))
+        safeRecommendationBytes: estimate(safeRecommendationItems),
+        selectedLeftoverBytes: estimate(selectedLeftovers))
     }
   }
 }
@@ -83,6 +87,10 @@ extension AppViewModel {
     QueueSummary.Inputs(
       selections: sourceSelections, libraryPhotoCount: selectedPhotos.filter(\.isLibraryAsset).count,
       cleanupTargets: cleanupTargets, safeRecommendationItems: RecommendationEngine.safeItems(recommendations),
+      selectedLeftovers: appLeftovers.filter { selectedLeftoverIDs.contains($0.id) }.map { item in
+        PlanItem(url: item.url, displayName: item.url.lastPathComponent, kind: .appLeftover,
+          expectedBytes: item.size, reason: item.reason, source: "Apps")
+      },
       ignoredPaths: ignoredPaths)
   }
 
@@ -215,6 +223,11 @@ extension AppViewModel {
 
   func reviewUninstall() {
     guard let app = selectedApp else { return }
+    guard app.bundleIdentifier != Bundle.main.bundleIdentifier,
+      FileSystem.comparisonPath(app.url) != FileSystem.comparisonPath(Bundle.main.bundleURL) else {
+      statusMessage = "MacMint cannot uninstall itself while running. Use Finder after quitting MacMint."
+      return
+    }
     if selectedAppIsRunning {
       statusMessage = "Quit \(app.name) before uninstalling it"
       return
@@ -227,8 +240,8 @@ extension AppViewModel {
     let leftovers = appLeftovers.filter { selectedLeftoverIDs.contains($0.id) }.map { leftover in
       PlanItem(
         url: leftover.url, displayName: leftover.url.lastPathComponent, kind: .appLeftover,
-        expectedBytes: leftover.size, reason: leftover.reason, source: source,
-        needsAttention: !leftover.isSuggested, dependsOn: bundle.id,
+        expectedBytes: leftover.size, reason: leftover.reason + " " + leftover.category.consequence, source: source,
+        needsAttention: !leftover.isSuggested || !leftover.isDisposableData, dependsOn: bundle.id,
         identity: leftover.identity, ownerBundleID: app.bundleIdentifier)
     }
     presentPlan(

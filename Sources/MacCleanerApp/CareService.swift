@@ -41,7 +41,7 @@ final class CareService: ObservableObject {
     static let lastLowSpaceAlert = "care.lastLowSpaceAlert"
     static let lastScanReminder = "care.lastScanReminder"
     static let showMenuBar = "care.showMenuBar"
-    static let onboardingDone = "care.onboardingDone"
+    static let onboardingDone = SetupProgressStore.completedKey
   }
 
   @Published private(set) var notificationPermission: NotificationPermissionState = .unavailable

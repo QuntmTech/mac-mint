@@ -2,7 +2,8 @@ routerAdd("GET", "/api/macmint/checkout/config", e => {
   const payments = require(`${__hooks}/macmint_payments_lib.js`)
   e.response.header().set("Cache-Control", "no-store")
   const cfg = payments.configuration(e.app)
-  return e.json(200, cfg ? { enabled: true, amount_minor: cfg.amount_minor, currency: cfg.currency, plan: cfg.plan, duration_days: cfg.duration_days, max_devices: cfg.max_devices } : { enabled: false })
+  const userId = e.auth && e.auth.collection().name === "users" ? e.auth.id : null
+  return e.json(200, cfg ? { enabled: true, ...payments.publicOffer(payments.offerForUser(e.app, cfg, userId)) } : { enabled: false })
 })
 
 routerAdd("POST", "/api/macmint/checkout", e => {
@@ -14,6 +15,8 @@ routerAdd("POST", "/api/macmint/checkout", e => {
   if (!payments.validRequestKey(key)) return e.json(400, { error: "bad_request", message: "Missing checkout request ID." })
   try { return e.json(200, { url: payments.checkout(e.app, e.auth, key) }) }
   catch (error) {
+    if (error.code === "account_restricted") return e.json(403, { error: "account_restricted", message: "Purchases are unavailable for this account. Contact support@macmint.co before starting a subscription." })
+    if (error.code === "plan_exists") return e.json(409, { error: "plan_exists", message: "Your account already has access or a subscription to manage. Refresh your account or open billing instead of paying again." })
     if (error.code === "checkout_in_progress") return e.json(409, { error: "checkout_in_progress", request_key: error.request_key, message: "Another checkout is open for your account. Resume that checkout instead of starting a second payment." })
     if (error.code === "checkout_attention") return e.json(409, { error: "checkout_attention", message: "Your earlier checkout attempts need to be checked before starting another payment. Contact support; do not pay again." })
     if (error.code === "checkout_complete") return e.json(409, { error: "checkout_complete", message: "This checkout is already complete or processing. Refresh your account to check access; do not pay again." })
@@ -40,6 +43,12 @@ routerAdd("GET", "/api/macmint/admin/commerce/readiness", e => {
   return e.json(200, { ready: result.ready, reasons: result.reasons })
 }, $apis.requireSuperuserAuth())
 
+routerAdd("POST", "/api/macmint/billing/portal", e => {
+  require(`${__hooks}/macmint_lib.js`).noStore(e)
+  try { return e.json(200, { url: require(`${__hooks}/macmint_billing.js`).portal(e.app, e.auth.id) }) }
+  catch (_) { return e.json(503, { error: "billing_unavailable", message: "Billing could not be opened. Retry, or contact support@macmint.co for subscription help." }) }
+}, $apis.requireAuth("users"))
+
 routerAdd("POST", "/api/macmint/stripe/webhook", e => {
   const payments = require(`${__hooks}/macmint_payments_lib.js`)
   const secret = payments.secret(e.app, "stripe_webhook_secret", "STRIPE_WEBHOOK_SECRET")
@@ -49,6 +58,12 @@ routerAdd("POST", "/api/macmint/stripe/webhook", e => {
   let event
   try { event = JSON.parse(raw) } catch (_) { return e.json(400, { error: "bad_event" }) }
   if (!event || typeof event !== "object" || Array.isArray(event) || typeof event.type !== "string") return e.json(400, { error: "bad_event" })
+  if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed",
+    "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required", "invoice.finalization_failed", "invoice.voided", "invoice.marked_uncollectible"].indexOf(event.type) >= 0) {
+    try { require(`${__hooks}/macmint_billing.js`).event(e.app, event.type, event.data && event.data.object) }
+    catch (_) { return e.json(503, { error: "billing_sync_pending" }) }
+    return e.json(200, { received: true })
+  }
   const session = event.data && event.data.object
   if (!session || !session.metadata || !session.metadata.macmint_order) return e.json(200, { received: true })
   if (["checkout.session.expired", "checkout.session.async_payment_failed"].indexOf(event.type) >= 0) {

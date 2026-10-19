@@ -33,6 +33,8 @@ struct MacCleanerDesktopApp: App {
         .background(MainWindowReader())
         .onAppear { appDelegate.model = model }
         .task {
+          PreviewCaches.startMemoryPressureHandling()
+          monitor.activateControls()
           care.start()
           updates.start()
           await account.start()

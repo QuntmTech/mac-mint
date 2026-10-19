@@ -10,6 +10,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Installer notarization failure checks
+        run: python3 -m unittest discover -s tests -p 'test_notarization.py'
       - name: Backend unit checks
         run: node --test backend/tests/*.test.cjs
       - name: Install pinned PocketBase test runtime
@@ -23,6 +25,8 @@ jobs:
         run: python3 backend/tests/integration.py
       - name: Authenticated AI and SMTP recovery integration checks
         run: python3 backend/tests/service_integration.py
+      - name: Recurring subscription and billing portal integration checks
+        run: python3 backend/tests/subscriptions_integration.py
   website:
     runs-on: ubuntu-latest
     steps:
@@ -36,6 +40,10 @@ jobs:
         working-directory: web
       - run: npm run build && npm run lint
         working-directory: web
+      - run: npm ci
+        working-directory: ChatGPT sites the homepage V1
+      - name: Assemble the main homepage and account routes
+        run: bash web/scripts/build-homepage.sh
       - run: npx playwright install --with-deps chromium
         working-directory: web
       - run: npx playwright test

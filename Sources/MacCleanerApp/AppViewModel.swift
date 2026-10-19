@@ -3,6 +3,7 @@ import Foundation
 import MacCleanerCore
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppViewModel: ObservableObject {
@@ -91,8 +92,8 @@ final class AppViewModel: ObservableObject {
   @Published var duplicateGroups: [DuplicateGroup] = [] { didSet { queueInputsChanged() } }
   @Published var selectedDuplicateIDs: Set<UUID> = [] { didSet { queueInputsChanged() } }
   @Published var selectedApp: AppRecord?
-  @Published var appLeftovers: [AppLeftover] = []
-  @Published var selectedLeftoverIDs: Set<UUID> = []
+  @Published var appLeftovers: [AppLeftover] = [] { didSet { queueInputsChanged() } }
+  @Published var selectedLeftoverIDs: Set<UUID> = [] { didSet { queueInputsChanged() } }
   @Published var history: [HistoryEntry] = []
   @Published var scanIssues: [ScanIssue] = []
   @Published var showingScanIssues = false
@@ -194,6 +195,8 @@ final class AppViewModel: ObservableObject {
   var currentTask: Task<Void, Never>?
 
   init(supportDirectory: URL? = nil) {
+    // A read-only launch shortcut also lets the packaged resource probe measure live UI.
+    if CommandLine.arguments.contains("--performance") { selectedSection = .performance }
     let support = supportDirectory ?? AppPaths.supportDirectory
     self.supportDirectory = support
     organizationStore = OrganizationStore(directory: support.appendingPathComponent("Organization"))
@@ -302,7 +305,9 @@ final class AppViewModel: ObservableObject {
       guard let self else { return }
       let others = Set(apps.compactMap(\.bundleIdentifier))
       let report = await appScanner.leftoversReport(
-        for: app, otherBundleIDs: others, ignoredPaths: ignoredPaths)
+        for: app, otherBundleIDs: others, ignoredPaths: ignoredPaths,
+        hasOtherInstallation: app.bundleIdentifier != nil && apps.contains { $0.bundleIdentifier == app.bundleIdentifier
+          && FileSystem.comparisonPath($0.url) != FileSystem.comparisonPath(app.url) })
       guard !Task.isCancelled else {
         finishCancelledOperation()
         return
@@ -313,6 +318,32 @@ final class AppViewModel: ObservableObject {
       lastScanDuration = report.duration
       finishScan(message: "Found \(report.value.count) related item(s)")
     }
+  }
+
+  func scanInstalledApps() {
+    guard !isScanning, !isWorking,
+      beginScan(title: "Installed apps", message: "Finding installed applications…") else { return }
+    currentTask = Task { [weak self] in
+      guard let self else { return }
+      let report = await appScanner.installedAppsReport(ignoredPaths: ignoredPaths)
+      guard !Task.isCancelled else { finishCancelledOperation(); return }
+      apps = report.value
+      if let selectedApp, !apps.contains(where: { $0.url == selectedApp.url }) {
+        self.selectedApp = nil; appLeftovers = []; selectedLeftoverIDs = []
+      }
+      scanIssues = report.issues; lastScanDuration = report.duration
+      finishScan(message: "Found \(apps.count) installed apps. Choose one to review its related files.")
+    }
+  }
+
+  func chooseAppForUninstall() {
+    guard !isScanning, !isWorking else { return }
+    let panel = NSOpenPanel()
+    panel.title = "Choose an app to uninstall"; panel.prompt = "Inspect App"
+    panel.canChooseDirectories = false; panel.canChooseFiles = true
+    panel.allowedContentTypes = [.applicationBundle]
+    panel.directoryURL = URL(fileURLWithPath: "/Applications")
+    if panel.runModal() == .OK, let url = panel.url { inspectDroppedApp(url) }
   }
 
   func requestQuitSelectedApp() {

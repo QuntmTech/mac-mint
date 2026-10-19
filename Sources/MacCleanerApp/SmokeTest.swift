@@ -176,11 +176,20 @@ enum SmokeTest {
       model.photoReviewSession.cursor = model.allScannedPhotos.count
       render(prefix + "-Photo-deck-complete", PhotoReviewDeck(), width: 720, height: 480)
       model.photoReviewSession = reviewSession
+      let photoSelection = model.selectedPhotoIDs
+      model.setPhotoSelection(model.allScannedPhotos, selected: true)
+      model.refreshQueueSummaryNow()
+      model.selectedSection = .photos
+      render(prefix + "-Photos-bulk-selection", RootView(), width: 980, height: 660)
+      model.selectedPhotoIDs = photoSelection
+      model.refreshQueueSummaryNow()
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
-      render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 660)
+      render(prefix + "-Onboarding", OnboardingView(initialStep: 0), width: 720, height: 660)
       render(prefix + "-Onboarding-access", OnboardingView(initialStep: 1), width: 720, height: 660)
       render(prefix + "-Onboarding-helpers", OnboardingView(initialStep: 2), width: 720, height: 660)
+      render(prefix + "-Install-from-image", InstallationGuide(bundleURL: URL(fileURLWithPath: "/Volumes/MacMint/MacMint.app"), location: .readOnlyVolume), width: 640, height: 250)
+      render(prefix + "-Install-ready", InstallationGuide(bundleURL: URL(fileURLWithPath: "/Applications/MacMint.app"), location: .installed), width: 640, height: 180)
       render(prefix + "-Access-help", PermissionHelpSheet(), width: 720, height: 660)
       render(prefix + "-Scan-issues", ScanIssueSheet(issues: [ScanIssue(area: "Downloads", message: "Access to this location was denied. Review Files & Folders settings before rescanning.")]), width: 720, height: 540)
     }
@@ -199,7 +208,7 @@ enum SmokeTest {
   }
 
   private enum PerformanceFixtureState: String, CaseIterable {
-    case populated, paused, highPressure = "high-pressure", unknownCPU = "unknown-cpu"
+    case populated, paused, highPressure = "high-pressure", unknownCPU = "unknown-cpu", tamed
   }
 
   private static func performancePreview(_ state: PerformanceFixtureState) -> PerformancePreview {
@@ -228,8 +237,17 @@ enum SmokeTest {
       PerformancePresentation.App(id: app.id, name: app.name, bundleID: app.bundleID,
         memoryBytes: app.memoryBytes, cpuPercent: index == 0 ? .nan : nil, fallbackSymbol: app.fallbackSymbol)
     } : rows
+    var taming: SystemMonitor.TamingDisplay?
+    if state == .tamed {
+      var value = TamingState()
+      value.receipts = [.init(identity: .init(pid: 401, started: 1, boot: "preview",
+        bundleID: "example.code-studio", path: "/preview"), name: "Code Studio", automatic: true,
+        expires: Date(timeIntervalSince1970: 1_792_231_500))]
+      value.exceptions = ["example.browser": "Browser"]
+      taming = .init(state: value, automatic: true, message: "Slowed Code Studio. Switch to the app or choose Restore to return its priority.")
+    }
     return PerformancePreview(snapshot: snapshot, apps: apps,
-      sampledAt: Date(timeIntervalSince1970: 1_792_231_200), logicalCPUCount: 8, paused: state == .paused)
+      sampledAt: Date(timeIntervalSince1970: 1_792_231_200), logicalCPUCount: 8, paused: state == .paused, taming: taming)
   }
 }
 

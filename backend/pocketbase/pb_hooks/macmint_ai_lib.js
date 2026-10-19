@@ -503,7 +503,7 @@ const ASK_SCHEMA = {
 
 function requirePlan(e) {
   const lib = require(`${__hooks}/macmint_lib.js`)
-  return lib.entitlementPayload(lib.ensureEntitlement(e.app, e.auth.id)).active
+  return lib.effectiveEntitlement(e.app, e.auth.id).active
 }
 
 module.exports = {

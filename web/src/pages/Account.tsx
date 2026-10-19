@@ -1,3 +1,5 @@
+import { InstallationSteps } from '../components/InstallationSteps'
+import { BillingCard } from '../components/BillingCard'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Field } from '../components/Form'
@@ -33,7 +35,8 @@ const planSummary = (entitlement: Entitlement) => {
     const expires = parseDate(entitlement.expires_at)
     return {
       label: 'MacMint Pro',
-      detail: expires ? `Active until ${expires.toLocaleDateString(undefined, { dateStyle: 'long' })}` : 'Lifetime access',
+      detail: expires ? `${entitlement.source === 'subscription_trial' ? 'Trial ends' : 'Active until'} ${expires.toLocaleDateString(undefined, { dateStyle: 'long' })}`
+        : entitlement.expires_at === null ? 'Lifetime access' : 'Refresh your account to check the access end date',
       tone: 'active' as const,
     }
   }
@@ -63,6 +66,7 @@ const PlanCard = ({ account, checkoutResult, onRefresh }: { account: AccountSnap
         )}
       </div>
       <Checkout key={account.user.id} userId={account.user.id} verified={account.user.verified} hasPlan={account.entitlement.active} returnState={checkoutResult} onRefresh={onRefresh} />
+      {account.billing?.subscription && <BillingCard key={'billing-' + account.user.id} subscription={account.billing.subscription} userId={account.user.id} onRefresh={onRefresh} />}
     </Card>
   )
 }
@@ -158,6 +162,7 @@ const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
 const DownloadCard = ({ release }: { release: Release | null }) => (
   <Card title="Download MacMint">
     {release?.download_url ? (
+      <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="font-medium">Version {release.version}</p>
@@ -174,6 +179,8 @@ const DownloadCard = ({ release }: { release: Release | null }) => (
         >
           Download for Mac
         </a>
+      </div>
+      <InstallationSteps downloadUrl={release.download_url} />
       </div>
     ) : (
       <p className="text-sm text-slate-500 dark:text-slate-400">

@@ -8,6 +8,7 @@ struct RootView: View {
   @EnvironmentObject private var updates: UpdateService
   @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @State private var showingOnboarding = false
+  @State private var scanAfterSetup = false
   @State private var hoveredSection: AppViewModel.Section?
   @State private var lastTabs: [AppViewModel.Section: AppViewModel.Section] = [:]
 
@@ -128,10 +129,18 @@ struct RootView: View {
     .sheet(isPresented: $model.showingCommandPalette) {
       CommandPalette()
     }
-    .sheet(isPresented: $showingOnboarding) {
-      OnboardingView()
+    .sheet(isPresented: $showingOnboarding, onDismiss: {
+      guard scanAfterSetup else { return }
+      scanAfterSetup = false
+      model.selectedSection = .dashboard
+      model.runSmartCare()
+    }) {
+      OnboardingView(onFinish: { scanAfterSetup = $0 })
     }
-    .onChange(of: model.selectedSection) { _, section in lastTabs[section.parent] = section }
+    .onChange(of: model.selectedSection) { old, section in
+      lastTabs[section.parent] = section
+      if old == .photos || old == .duplicates || old == .applications { PreviewCaches.release() }
+    }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
       guard !SmokeTest.isRequested else { return }

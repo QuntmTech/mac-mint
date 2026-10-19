@@ -1,10 +1,40 @@
 # MacMint — handoff to Claude Code for independent review
 
-**Updated 2026-10-17, America/New_York. Start with [../HANDOFF.md](../HANDOFF.md) for checkout instructions and the review brief.**
+**Updated 2026-10-19. Start with [../HANDOFF.md](../HANDOFF.md) and [installation and setup](INSTALLATION_AND_ONBOARDING.md).**
 
-## 0. Current delivery status — read this before the historical checkpoints
+## Latest public-readiness and recurring billing extension — 2026-10-19
 
-The latest verified application implementation is on `main` at **`c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`**. This handoff refresh changes documentation only. Fetch `origin/main` before reviewing; later documentation commits may follow that implementation SHA. The older branches, counts and “pending CI” language below describe their checkpoints, not the final delivery state.
+Start with [PUBLIC_READINESS_REVIEW.md](PUBLIC_READINESS_REVIEW.md) and [STRIPE_SETUP.md](STRIPE_SETUP.md) for this pass (paths are under `docs/` from the repository root). The owner approved **US$39.99/year with a three-day free trial**; the existing three-Mac allowance is retained. Checkout remains disabled until the intended Stripe business account, sandbox lifecycle, email delivery, deployment and signed consumer download pass acceptance.
+
+Recurring access now lives in private `billing_subscriptions`, independently of redeemed/one-time licenses. Read `macmint_billing.js`, the subscription migration and disposable subscription integration fixture. Review authoritative ownership, trial-only expiry, first-charge/renewal failures, absolute invoice periods, concurrent sync generations, terminal-state latching, portal cancellation and one-trial eligibility. `BillingCard` and `Checkout` expose these terms and owner-bound management without granting access from browser returns. Old one-time orders remain compatible. No live Stripe account setup or charge is claimed.
+
+A fresh anonymous Stripe sandbox also passed nine real API contract checks, including the first annual invoice paid with `tok_visa`. Read the sanitized `docs/validation/stripe-sandbox-2026-10-19.json` and its hashed operator probe. Test subscription canceled, unused Checkout expired, no live operations. Trial completion was accelerated manually; annual renewal/time advancement, actual Checkout form completion, real webhook transport and the intended merchant account remain separate acceptance gates. A later review fixed delayed-payment failure arriving before checkout completion, preventing replacement while the subscription is incomplete.
+
+Additional fixes reject malformed expiry as unlimited access, bind delayed AI availability/request continuations to their session, populate library screenshots from PhotoKit metadata, block overlapping photo mutation and stop whole-item inventories from traversing excluded descendants. Restricted accounts cannot open payable subscriptions, and delayed demo callbacks use elapsed time. Source review also covers planner/executor/recovery, uninstaller, organization, process controls, preview caches, onboarding/permissions and release boundaries. The review document records the scope and remaining native/provider evidence; it is not a zero-bug or complete-public-launch certification.
+
+The final Photos safeguard compares scanned and fresh modification dates for selected assets and protected keepers, before removal and again inside `performChanges`. Matching IDs cannot conceal an intervening edit. Changed/incomplete snapshots require a rescan; Photos recovery remains through Recently Deleted. `PhotoRequestTests` adds an unchanged-ID/changed-date regression; latest main native CI covers this extension.
+
+## Latest installation extension — 2026-10-19
+
+Implementation `2c6013c` adds a drag-to-Applications DMG alongside the ZIP, universal release builds, explicit accepted-notarization/stapling gates and read-only verification of the built and downloaded image plus an isolated app copy. `FirstRunSetup.swift` owns advisory location classification and persisted setup steps. `InstallationGuide.swift`, onboarding and permission settings explain the intended installed copy. Setup resumes after an access-related restart, offers optional same-account connection and hands Quick Scan back to its presenter to start after dismissal. The website account download includes DMG/ZIP-specific steps; the desktop action is named **Check My Purchase** consistently.
+
+Read the [implementation and acceptance plan](INSTALLATION_AND_ONBOARDING.md), [release procedure](RELEASING.md), [successful native run](https://github.com/QuntmTech/mac-mint/actions/runs/39204402387) and [successful backend/website run](https://github.com/QuntmTech/mac-mint/actions/runs/39204402359). Both Mac versions passed 251 cases with expected skips, 123 rendered states, packaging/startup and fresh-runner downloaded ZIP/DMG checks; all 39 website browser tests passed. A first native packaging run caught an argument-order error in `lipo -verify_arch`; `2c6013c` corrects both verifier calls. Do not cite that earlier failed run as installer acceptance. The website guidance was deployed using the tested combined build; read-only checks passed seven desktop account/recovery routes and phone navigation/layout without JavaScript errors, missing assets or mutating requests.
+
+No price, Stripe account configuration, release tag or public feed attestation changed. Repository Apple signing/notarization credentials were absent. These changes do not certify a consumer download, real permission dialogs, macOS 14/Intel hardware journeys or the user's iCloud library. The older sections below retain historical results; fetch `origin/main` before reviewing.
+
+## Earlier extension — 2026-10-18
+
+[PR #33](https://github.com/QuntmTech/mac-mint/pull/33) tracks all six phases: app uninstall discovery and related-data safety; reversible manual/automatic process slowdown and exceptions; bulk photo selection; the repeated blank review-deck preview; MacMint's own resource footprint; and review/validation/delivery. Its checks and artifacts identify final validation and merge status. The dated section 0 below is the previous delivery checkpoint, not a claim that `c0ade0e` is still the newest source.
+
+Read `AppTaming.swift`, `AppTamingController.swift`, the `SystemMonitor` integration and `UNINSTALL_AND_TAMING.md` before reviewing slowdown. It uses same-user Darwin background priority, not a hard CPU/RAM cap or process suspension. Restoration has durable intents, boot/PID/birth/path checks, exclusive journal ownership and uncertain-outcome preservation. Automatic mode is explicit, conservative and off at each launch; exceptions persist.
+
+Photos now supports bulk selection by tab/group and deselection of all results while protecting keepers. The deck first displays a local 256px thumbnail, then attempts a larger preview, preserves degraded results, bounds/cancels requests and refuses blind queueing. The user's repeated-blank-library report still needs acceptance on that actual iCloud account. Resource changes supersede the earlier cache figures: photo/file pixel caches are 8+8 MiB, icons use an explicit 2 MiB LRU, disposable caches clear on navigation/pressure, horizontal comparisons are lazy, and scan iterations drain autoreleased temporaries. Neither these budgets nor synthetic stress tests certify total application RAM.
+
+New evidence lives in `AppUninstallTests`, `AppTamingTests`, `AppTamingControllerTests`, `NativeTamingTests`, `PhotoMemoryTests` and expanded photo tests/smoke fixtures. The packaged startup helper also measures the live Performance view through the read-only `--performance` launch shortcut. Preserve the distinction between automated native fixture evidence and the user's 19,282-photo live workload. Existing Stripe, distribution and manual accessibility gates remain as documented below.
+
+## 0. Previous verified delivery checkpoint
+
+At this earlier checkpoint, the verified application implementation was on `main` at **`c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`**. The older branches, counts and “pending CI” language below describe their checkpoints, not the newest implementation.
 
 | Delivery | Merged evidence |
 | --- | --- |

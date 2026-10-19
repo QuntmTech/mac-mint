@@ -202,7 +202,7 @@ private struct RedeemForm: View {
       Button {
         Task { await account.checkPurchase() }
       } label: {
-        Label("Check Purchase", systemImage: "arrow.clockwise")
+        Label("Check My Purchase", systemImage: "arrow.clockwise")
           .frame(maxWidth: .infinity)
       }
       .buttonStyle(.borderedProminent)
@@ -374,9 +374,10 @@ struct AccountSettingsCard: View {
   private func planLabel(_ entitlement: Entitlement) -> String {
     guard entitlement.active else { return "No active plan" }
     if let expiry = entitlement.expiryDate {
+      if entitlement.source == "subscription_trial" { return "Trial ends \(expiry.formatted(date: .abbreviated, time: .omitted))" }
       return "Pro • Access until \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
-    return "Pro • Lifetime"
+    return entitlement.isLifetime ? "Pro • Lifetime" : "Refresh account to verify expiry"
   }
 }
 
@@ -400,5 +401,6 @@ struct AccountAccessSheet: View {
     }
     .frame(width: 560, height: 560)
     .onChange(of: account.isUnlocked) { _, unlocked in if unlocked { dismiss() } }
+    .onExitCommand { dismiss() }
   }
 }

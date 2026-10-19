@@ -33,6 +33,22 @@ final class AppReliabilityTests: XCTestCase {
     XCTAssertEqual(model.queuedBytes, 0)
   }
 
+  func testBulkPhotoSelectionRefreshesTheQueueSummary() async throws {
+    let (model, folder) = try await readyModel()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let photos = ["a.jpg", "b.jpg", "c.jpg"].map {
+      PhotoFingerprint(url: folder.appendingPathComponent($0), bytes: 100, hash: 1, sharpness: 1, pixelWidth: 10, pixelHeight: 10)
+    }
+    model.photoSource = .folder(folder)
+    model.photoScan = PhotoScanResult(photos: photos, similarGroups: [], blurry: [], screenshots: [],
+      skippedLibraries: [], issues: [], wasCancelled: false)
+    model.setPhotoSelection(photos, selected: true)
+    try await waitUntil { model.queuedCount == 3 }
+    XCTAssertEqual(model.queuedBytes, 300)
+    model.setPhotoSelection(photos, selected: false)
+    try await waitUntil { model.queuedCount == 0 }
+  }
+
   func testCleanupEstimatesAndVolumeReadingAreCached() async throws {
     let (model, folder) = try await readyModel()
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -43,10 +59,20 @@ final class AppReliabilityTests: XCTestCase {
       CleanupTarget(category: .deviceBackups, url: folder.appendingPathComponent("Backup"), displayName: "Backup",
         size: 2 * gib, risk: .review, reason: "Personal", isSelected: false),
     ]
+    let leftovers = [
+      AppLeftover(url: folder.appendingPathComponent("Library/Caches/com.example.app"), size: 300, confidence: .high, reason: "Exact"),
+      AppLeftover(url: folder.appendingPathComponent("Library/Group Containers/group.example"), size: 700, confidence: .medium,
+        reason: "Shared", isShared: true),
+    ]
+    model.appLeftovers = leftovers
+    model.selectedLeftoverIDs = [leftovers[0].id]
     model.refreshQueueSummaryNow()
     XCTAssertEqual(model.selectedCleanupBytes, gib)
     XCTAssertEqual(model.reclaimableBytes, gib)
     XCTAssertEqual(model.reviewableBytes, 2 * gib)
+    XCTAssertEqual(model.queueSummary.selectedLeftoverBytes, 300, "Uninstall totals use the stored summary")
+    model.selectedLeftoverIDs = Set(leftovers.map(\.id))
+    try await waitUntil { model.queueSummary.selectedLeftoverBytes == 1_000 }
 
     let reading = await model.refreshVolumeSummary()
     XCTAssertGreaterThan(reading.total, 0)

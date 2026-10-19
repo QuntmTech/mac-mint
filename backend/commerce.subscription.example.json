@@ -1,0 +1,16 @@
+{
+  "enabled": false,
+  "livemode": false,
+  "web_origin": "https://macmint.co",
+  "billing_mode": "subscription",
+  "price_id": "",
+  "amount_minor": 3999,
+  "currency": "usd",
+  "plan": "pro",
+  "duration_days": 0,
+  "billing_interval": "year",
+  "billing_interval_count": 1,
+  "trial_days": 3,
+  "max_devices": 3,
+  "portal_configuration_id": ""
+}
