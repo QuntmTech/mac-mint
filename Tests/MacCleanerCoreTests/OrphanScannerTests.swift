@@ -69,7 +69,7 @@ final class OrphanScannerTests: XCTestCase {
     let excluded = try write(home, "Library/Caches/com.gone.editor/keep.db")
     let included = try write(home, "Library/Caches/com.other.app/data.db").deletingLastPathComponent()
     let report = await scanner(home, apps: []).scan(ignoredPaths: [excluded.path])
-    XCTAssertEqual(report.value.map(\.url), [included])
+    XCTAssertEqual(report.value.map { $0.url.resolvingSymlinksInPath() }, [included.resolvingSymlinksInPath()])
     let preferences = try write(home, "Library/Preferences")
     let blocked = await scanner(home, apps: []).scan(ignoredPaths: [preferences.path])
     XCTAssertFalse(blocked.issues.contains { $0.path == preferences.path })

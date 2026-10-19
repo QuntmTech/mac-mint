@@ -85,7 +85,7 @@ final class SmartCareTests: XCTestCase {
     let fixedNow = now
     let scanner = DownloadsScanner(downloadsDirectory: downloads, usage: usage, now: { fixedNow })
     let report = await scanner.scan(minimumBytes: 1, ignoredPaths: [excluded.path])
-    XCTAssertEqual(report.value.map(\.url), [included])
+    XCTAssertEqual(report.value.map { $0.url.resolvingSymlinksInPath() }, [included.resolvingSymlinksInPath()])
     // A non-directory root would produce an access error if enumerated before exclusions.
     let blocked = await DownloadsScanner(downloadsDirectory: included).scan(ignoredPaths: [included.path])
     XCTAssertTrue(blocked.value.isEmpty)
