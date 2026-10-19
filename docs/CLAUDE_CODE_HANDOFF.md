@@ -1,8 +1,16 @@
 # MacMint — handoff to Claude Code for independent review
 
-**Updated 2026-10-18. Start with [../HANDOFF.md](../HANDOFF.md) and the [latest delivery checklist](UNINSTALL_AND_TAMING.md).**
+**Updated 2026-10-19. Start with [../HANDOFF.md](../HANDOFF.md) and [installation and setup](INSTALLATION_AND_ONBOARDING.md).**
 
-## Latest extension — 2026-10-18
+## Latest installation extension — 2026-10-19
+
+Implementation `2c6013c` adds a drag-to-Applications DMG alongside the ZIP, universal release builds, explicit accepted-notarization/stapling gates and read-only verification of the built and downloaded image plus an isolated app copy. `FirstRunSetup.swift` owns advisory location classification and persisted setup steps. `InstallationGuide.swift`, onboarding and permission settings explain the intended installed copy. Setup resumes after an access-related restart, offers optional same-account connection and hands Quick Scan back to its presenter to start after dismissal. The website account download includes DMG/ZIP-specific steps; the desktop action is named **Check My Purchase** consistently.
+
+Read the [implementation and acceptance plan](INSTALLATION_AND_ONBOARDING.md), [release procedure](RELEASING.md), [successful native run](https://github.com/QuntmTech/mac-mint/actions/runs/39204402387) and [successful backend/website run](https://github.com/QuntmTech/mac-mint/actions/runs/39204402359). Both Mac versions passed 251 cases with expected skips, 123 rendered states, packaging/startup and fresh-runner downloaded ZIP/DMG checks; all 39 website browser tests passed. A first native packaging run caught an argument-order error in `lipo -verify_arch`; `2c6013c` corrects both verifier calls. Do not cite that earlier failed run as installer acceptance. The website guidance was deployed using the tested combined build; read-only checks passed seven desktop account/recovery routes and phone navigation/layout without JavaScript errors, missing assets or mutating requests.
+
+No price, Stripe account configuration, release tag or public feed attestation changed. Repository Apple signing/notarization credentials were absent. These changes do not certify a consumer download, real permission dialogs, macOS 14/Intel hardware journeys or the user's iCloud library. The older sections below retain historical results; fetch `origin/main` before reviewing.
+
+## Earlier extension — 2026-10-18
 
 [PR #33](https://github.com/QuntmTech/mac-mint/pull/33) tracks all six phases: app uninstall discovery and related-data safety; reversible manual/automatic process slowdown and exceptions; bulk photo selection; the repeated blank review-deck preview; MacMint's own resource footprint; and review/validation/delivery. Its checks and artifacts identify final validation and merge status. The dated section 0 below is the previous delivery checkpoint, not a claim that `c0ade0e` is still the newest source.
 
@@ -12,9 +20,9 @@ Photos now supports bulk selection by tab/group and deselection of all results w
 
 New evidence lives in `AppUninstallTests`, `AppTamingTests`, `AppTamingControllerTests`, `NativeTamingTests`, `PhotoMemoryTests` and expanded photo tests/smoke fixtures. The packaged startup helper also measures the live Performance view through the read-only `--performance` launch shortcut. Preserve the distinction between automated native fixture evidence and the user's 19,282-photo live workload. Existing Stripe, distribution and manual accessibility gates remain as documented below.
 
-## 0. Current delivery status — read this before the historical checkpoints
+## 0. Previous verified delivery checkpoint
 
-The latest verified application implementation is on `main` at **`c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`**. This handoff refresh changes documentation only. Fetch `origin/main` before reviewing; later documentation commits may follow that implementation SHA. The older branches, counts and “pending CI” language below describe their checkpoints, not the final delivery state.
+At this earlier checkpoint, the verified application implementation was on `main` at **`c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`**. The older branches, counts and “pending CI” language below describe their checkpoints, not the newest implementation.
 
 | Delivery | Merged evidence |
 | --- | --- |

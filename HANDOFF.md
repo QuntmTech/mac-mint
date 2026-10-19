@@ -1,12 +1,14 @@
 # MacMint — start here for independent review
 
-Updated 2026-10-18. This is the entry point for Claude Code or another reviewer. Start with [the latest six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33), including its check results and artifacts. The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
+Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
 
 ## Goal and current progress
 
 Review a native Mac storage/cleanup app for everyday owners and developers, with particular attention to data safety, recovery, privacy, account boundaries, native usability and CPU/RAM use. The user requested an independent set of eyes on the implementation and subsequent refinements.
 
-The previous verified delivery was `c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`. Review current `origin/main`, plus PR #33 if it has not yet merged. The latest extension adds clearer app uninstall, timed manual slowdown, opt-in Auto Tame with saved exceptions and recovery intents, bulk photo selection, review-deck preview fixes, bounded image caches and native memory measurements. It retains the earlier safety/recovery work, local inspection before sign-in, optional AI, preview-first organization, Stripe readiness, permission guidance and neutral themes. The delivery checklist distinguishes automated evidence from the actual user's iCloud-library and memory-profile checks.
+Review current `origin/main`; historical SHAs and counts below are checkpoints. The installation extension at `2c6013c` adds a universal-capable DMG pipeline, downloaded-image verification, current-copy installation guidance, restart-resumable setup, consistent Quick Scan dispatch after dismissal and same-account purchase instructions. Its [native checks](https://github.com/QuntmTech/mac-mint/actions/runs/39204402387) and [backend/website checks](https://github.com/QuntmTech/mac-mint/actions/runs/39204402359) identify the implementation head and final results. Documentation commits may follow. Apple signing credentials were absent; consumer publication and the actual quarantined installation/permission walkthrough remain open release gates.
+
+The earlier six-phase extension adds clearer app uninstall, timed manual slowdown, opt-in Auto Tame with saved exceptions and recovery intents, bulk photo selection, review-deck preview fixes, bounded image caches and native memory measurements. It retains the earlier safety/recovery work, local inspection before sign-in, optional AI, preview-first organization, Stripe readiness, permission guidance and neutral themes. That checklist distinguishes automated evidence from the actual user's iCloud-library and memory-profile checks.
 
 ## Get the repository
 
