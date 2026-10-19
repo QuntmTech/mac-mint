@@ -202,7 +202,7 @@ private struct RedeemForm: View {
       Button {
         Task { await account.checkPurchase() }
       } label: {
-        Label("Check Purchase", systemImage: "arrow.clockwise")
+        Label("Check My Purchase", systemImage: "arrow.clockwise")
           .frame(maxWidth: .infinity)
       }
       .buttonStyle(.borderedProminent)

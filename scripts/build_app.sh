@@ -47,7 +47,7 @@ for ARCHITECTURE in "${ARCHITECTURES[@]}"; do
 done
 BIN="$BIN_STAGE/MacMint"
 if [[ ${#BINARIES[@]} -eq 1 ]]; then cp "${BINARIES[0]}" "$BIN"; else lipo -create "${BINARIES[@]}" -output "$BIN"; fi
-lipo -verify_arch "${ARCHITECTURES[@]}" "$BIN"
+lipo "$BIN" -verify_arch "${ARCHITECTURES[@]}"
 APP="$ROOT/dist/MacMint.app"
 ZIP="$ROOT/dist/MacMint.zip"
 CONTENTS="$APP/Contents"

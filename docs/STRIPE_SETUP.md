@@ -54,7 +54,7 @@ The PocketBase Goja runtime cannot load the Node Stripe SDK. `macmint_payments_l
 
 Test migrations against a backed-up staging database before deployment. The order migration adds immutable request data and an `expired` state while preserving old payment evidence. Existing orders without the data needed for a safe retry remain available for fulfillment/reconciliation; they do not silently become new payment attempts.
 
-Deploy backend hooks/migrations before the website that consumes the new status contract. The local account app's explicit Check Purchase uses the existing device activation API. A purchase grants entitlement; registering this Mac remains an explicit account action. Periodic verification must not reactivate a deactivated device.
+Deploy backend hooks/migrations before the website that consumes the new status contract. The local account app's explicit Check My Purchase uses the existing device activation API. A purchase grants entitlement; registering this Mac remains an explicit account action. Periodic verification must not reactivate a deactivated device.
 
 Read-only endpoints:
 

@@ -10,6 +10,8 @@ struct FullDiskAccessGuide: View {
         .font(.headline)
       Text("Lets MacMint inspect protected app data for broader scan coverage. Without it, you can still inspect permitted locations; unreadable areas appear in scan issues.")
         .font(.callout).foregroundStyle(.secondary)
+      Text("Install and open MacMint from Applications before granting this access.")
+        .font(.callout).fixedSize(horizontal: false, vertical: true)
       HStack {
         Button("Open Full Disk Access") { permissions.open(.fullDiskAccess) }
           .buttonStyle(MintButtonStyle(prominent: false))

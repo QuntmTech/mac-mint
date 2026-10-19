@@ -58,7 +58,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
 - **Optional menu bar companion** with the same readings and quick actions. It only samples while it's open.
 - **Opt-in low-space alerts and weekly scan reminders:** at most once a day, never 10 pm–8 am, and they never clean anything automatically.
-- **First-run onboarding** with a Full Disk Access check, plus an optional "Open at login" setting (SMAppService).
+- **Resumable first-run setup** with installation guidance, optional permission instructions and same-account purchase connection. An optional "Open at login" setting uses SMAppService.
 - **Browser caches** for Chrome, Firefox, Edge, Brave, Arc, Vivaldi, Opera, and Safari. A browser's cache is skipped while that browser is open.
 
 ### Photos
@@ -208,9 +208,15 @@ Current V2 regression suite: **18 tests** covering:
 
 ## Requirements
 
-- macOS 14+
-- Swift 6 toolchain / Xcode command-line tools
+- macOS 14+ (Apple Silicon or Intel)
+- Swift 6 toolchain / Xcode command-line tools only when building from source
 - Full Disk Access is optional; without it, protected locations may be reported as scan issues rather than inspected.
+
+## Install a packaged release
+
+When a validated consumer download is available on your [MacMint account page](https://macmint.co/account), open `MacMint.dmg`, drag MacMint onto the Applications shortcut, then open MacMint from Applications and eject the image. No Terminal commands or Xcode are needed. The compatibility ZIP can instead be expanded and its app moved to Applications.
+
+Setup lets you explore locally or start Quick Scan. Permissions and account connection can wait; connect the same account as your website purchase when you want paid operations. A direct purchase does not need a separate redemption code. See [installation and setup](docs/INSTALLATION_AND_ONBOARDING.md) for the implementation and release acceptance gates.
 
 ## Run from source on macOS
 
@@ -228,10 +234,10 @@ The script now:
 
 1. runs the core regression suite;
 2. validates `Resources/Info.plist` with `plutil`;
-3. builds the release `MacCleaner` executable;
-4. constructs `dist/MacMint.app` and `dist/MacMint.zip`;
-5. ad-hoc signs it for local testing;
-6. verifies the code signature;
+3. builds the release `MacMint` executable (set `MACMINT_ARCHS="arm64 x86_64"` for a universal app);
+4. constructs `dist/MacMint.app`, `dist/MacMint.zip` and a drag-to-Applications `dist/MacMint.dmg`;
+5. ad-hoc signs a local preview, or uses the configured Developer ID and notarization credentials;
+6. verifies signatures, checksums, the disk image and an isolated app copy;
 7. opens the app unless `NO_OPEN=1` is set.
 
 ## Architecture

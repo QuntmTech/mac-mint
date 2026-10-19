@@ -26,7 +26,7 @@ codesign --verify --strict --verbose=2 "$MOUNT/MacMint.app"
 if [[ -n "${EXPECTED_ARCHS:-}" ]]; then
   EXPECTED_ARCHITECTURES=()
   read -r -a EXPECTED_ARCHITECTURES <<< "$EXPECTED_ARCHS"
-  lipo -verify_arch "${EXPECTED_ARCHITECTURES[@]}" "$MOUNT/MacMint.app/Contents/MacOS/MacMint"
+  lipo "$MOUNT/MacMint.app/Contents/MacOS/MacMint" -verify_arch "${EXPECTED_ARCHITECTURES[@]}"
 fi
 if [[ "${REQUIRE_NOTARIZATION:-0}" == "1" ]]; then
   xcrun stapler validate "$DMG"
