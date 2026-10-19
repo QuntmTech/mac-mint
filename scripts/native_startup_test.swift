@@ -54,7 +54,8 @@ private struct LaunchOptions {
   var onboardingDone = true
   var activates = true
   var extraArguments: [String] = []
-  /// Resource scenarios start from the default window, not one restored from a previous run.
+  /// Resource scenarios start from the default window, not one restored from a previous run,
+  /// and reopen the instance if a launch finishes without one.
   var ignoresSavedState = false
 }
 
@@ -211,6 +212,19 @@ private struct NativeStartupTest {
       app.isFinishedLaunching
     else { throw ProbeFailure(description: "\(label): PID \(pid) did not finish ordinary AppKit launch.") }
     log("\(label): PID \(pid) finished launching")
+    if options.ignoresSavedState, !waitUntil(seconds: 8, { app.isTerminated || hasMainWindow(pid) }), !app.isTerminated {
+      // Some consecutive activated launches on CI runners finish without a workspace window.
+      // Reopen the same instance, as clicking its Dock icon does, and say so in the log.
+      logWindows(pid, label: label)
+      log("\(label): no workspace window after 8 s; sending a Dock-style reopen to PID \(pid)")
+      let reopen = NSWorkspace.OpenConfiguration()
+      reopen.activates = true
+      reopen.addsToRecentItems = false
+      reopen.createsNewApplicationInstance = false
+      reopen.promptsUserIfNeeded = false
+      let ignore: @Sendable (NSRunningApplication?, Error?) -> Void = { _, _ in }
+      NSWorkspace.shared.openApplication(at: appURL, configuration: reopen, completionHandler: ignore)
+    }
     guard waitUntil(seconds: 20, { app.isTerminated || hasMainWindow(pid) }), !app.isTerminated,
       hasMainWindow(pid)
     else {
