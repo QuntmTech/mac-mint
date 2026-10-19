@@ -91,12 +91,16 @@ final class AppEfficiencyTests: XCTestCase {
     let activity = AppActivity(center: center, evaluate: { front.value })
     let events = Box<[Bool]>([])
     activity.observe { events.value.append($0) }
+    func post(_ name: Notification.Name) {
+      center.post(name: name, object: nil)
+      RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+    }
     front.value = false
-    center.post(name: NSApplication.didHideNotification, object: nil)
-    center.post(name: NSWindow.didChangeOcclusionStateNotification, object: nil)
-    center.post(name: NSApplication.didResignActiveNotification, object: nil)
+    post(NSApplication.didHideNotification)
+    post(NSWindow.didChangeOcclusionStateNotification)
+    post(NSApplication.didResignActiveNotification)
     front.value = true
-    center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+    post(NSApplication.didBecomeActiveNotification)
     XCTAssertEqual(events.value, [false, true])
     XCTAssertTrue(activity.isForeground)
   }
