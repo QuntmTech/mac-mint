@@ -12,8 +12,10 @@ final class AppUpdatesStore: ObservableObject {
   func check(_ apps: [AppRecord]) {
     guard !isChecking else { return }
     isChecking = true
+    // MacMint updates itself through Settings → Updates.
+    let others = apps.filter { $0.bundleIdentifier != Bundle.main.bundleIdentifier }
     Task {
-      updates = await AppUpdateChecker().check(apps)
+      updates = await AppUpdateChecker().check(others)
       lastChecked = Date()
       isChecking = false
     }
@@ -33,7 +35,7 @@ struct AppUpdatesView: View {
           Text(store.available.isEmpty ? "App updates" : "\(store.available.count) update\(store.available.count == 1 ? "" : "s") available")
             .font(.title2.bold())
           Text(
-            "Checks the App Store, each app's own update feed, and Homebrew. Only app identifiers and feed addresses are sent — MacMint never downloads or installs anything itself."
+            "Checks the App Store, each app's own update feed, and Homebrew. Only app identifiers and feed addresses are sent — MacMint never downloads or installs other apps' updates."
           )
           .font(.callout)
           .foregroundStyle(.secondary)

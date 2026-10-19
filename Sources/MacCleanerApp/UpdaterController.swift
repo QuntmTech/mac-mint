@@ -123,6 +123,7 @@ final class UpdaterController: NSObject, ObservableObject {
   func bind(to model: AppViewModel) {
     guard boundModel !== model else { return }
     boundModel = model
+    workSubscription = []
     relaunchGate.isWorking = { [weak model] in model?.isWorking ?? false }
     model.$isWorking.removeDuplicates()
       .receive(on: DispatchQueue.main)
