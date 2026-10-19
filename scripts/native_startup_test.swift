@@ -54,6 +54,8 @@ private struct LaunchOptions {
   var onboardingDone = true
   var activates = true
   var extraArguments: [String] = []
+  /// Resource scenarios start from the default window, not one restored from a previous run.
+  var ignoresSavedState = false
 }
 
 private struct CPUWindow {
@@ -172,7 +174,7 @@ private struct NativeStartupTest {
     // NSArgumentDomain overrides only this process's defaults. No `defaults write`,
     // HOME substitution or user-data cleanup is used. Resource scenarios also pass
     // `--resource-probe`, which keeps the app's support files in a temporary folder.
-    configuration.arguments = [
+    configuration.arguments = (options.ignoresSavedState ? ["-ApplePersistenceIgnoreState", "YES"] : []) + [
       "-care.showMenuBar", options.menuBarInserted ? "YES" : "NO",
       "-care.onboardingDone", options.onboardingDone ? "YES" : "NO",
       "-care.lowSpaceAlerts", "NO",
@@ -618,11 +620,13 @@ extension NativeStartupTest {
     let regular = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular && !$0.isTerminated }
     log("Resource scenarios: \(regular.count) regular apps running before MacMint (\(companions.count) disposable companions)")
     var report = ResourceReport()
+    // Whatever was measured is published, including when a later scenario fails.
+    defer { publish(report, enforced: enforce) }
     var fresh: Footprint?
 
     let overview = "(a) Overview idle"
     let overviewFolder = try fixture.launchFolder("overview")
-    try withLaunchedApp(target, LaunchOptions(label: overview, extraArguments: ["--resource-probe", overviewFolder.path])) { app in
+    try withLaunchedApp(target, LaunchOptions(label: overview, extraArguments: ["--resource-probe", overviewFolder.path], ignoresSavedState: true)) { app in
       try settle(app, label: overview, seconds: 10)
       logState(app, overview)
       var system = SystemObserver(); system.start()
@@ -641,7 +645,7 @@ extension NativeStartupTest {
     let performanceFolder = try fixture.launchFolder("performance")
     var hiddenAt: (samples: Int, published: Int)?
     try withLaunchedApp(target, LaunchOptions(label: performance,
-      extraArguments: ["--performance", "--resource-probe", performanceFolder.path])) { app in
+      extraArguments: ["--performance", "--resource-probe", performanceFolder.path], ignoresSavedState: true)) { app in
       try settle(app, label: performance, seconds: 8)
       logState(app, performance)
       var system = SystemObserver(); system.start()
@@ -669,7 +673,7 @@ extension NativeStartupTest {
 
     let heavy = "(d) heavy session"
     let heavyFolder = try fixture.launchFolder("heavy", manifest: ["storage": fixture.storage.path, "photos": fixture.photos.path])
-    try withLaunchedApp(target, LaunchOptions(label: heavy, extraArguments: ["--resource-probe", heavyFolder.path])) { app in
+    try withLaunchedApp(target, LaunchOptions(label: heavy, extraArguments: ["--resource-probe", heavyFolder.path], ignoresSavedState: true)) { app in
       var system = SystemObserver(); system.start()
       let status = try waitForStatus(app, folder: heavyFolder, label: heavy, seconds: 300)
       report.system(heavy + ", scans", system.finish())
@@ -697,8 +701,16 @@ extension NativeStartupTest {
       logState(app, heavy)
     }
 
+    let exceeded = report.rows.filter(\.exceeded)
+    if enforce, !exceeded.isEmpty {
+      throw ProbeFailure(description: "Resource budgets exceeded: " + exceeded.map { "\($0.scenario) \($0.metric)" }.joined(separator: "; "))
+    }
+  }
+
+  private static func publish(_ report: ResourceReport, enforced: Bool) {
+    let environment = ProcessInfo.processInfo.environment
     report.lines.forEach(log)
-    let markdown = report.markdown(enforced: enforce)
+    let markdown = report.markdown(enforced: enforced)
     if let folder = environment["MACMINT_NATIVE_STARTUP_DIAGNOSTICS"] {
       let base = URL(fileURLWithPath: folder)
       try? markdown.write(to: base.appendingPathComponent("resource-report.md"), atomically: true, encoding: .utf8)
@@ -706,10 +718,6 @@ extension NativeStartupTest {
     }
     if let summary = environment["GITHUB_STEP_SUMMARY"], let handle = FileHandle(forWritingAtPath: summary) {
       _ = handle.seekToEndOfFile(); handle.write(Data((markdown + "\n").utf8)); try? handle.close()
-    }
-    let exceeded = report.rows.filter(\.exceeded)
-    if enforce, !exceeded.isEmpty {
-      throw ProbeFailure(description: "Resource budgets exceeded: " + exceeded.map { "\($0.scenario) \($0.metric)" }.joined(separator: "; "))
     }
   }
 
