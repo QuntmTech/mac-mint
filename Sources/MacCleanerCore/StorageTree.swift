@@ -230,7 +230,14 @@ public actor StorageTreeScanner {
     }
   }
 
+  /// Each folder drains its own autorelease pool: listing a folder returns autoreleased URLs,
+  /// arrays and prefetched values, which otherwise live until the whole map finishes and
+  /// leave the heap fragmented around the nodes that are kept.
   private func scanFolder(_ url: URL, state: inout ScanState, isRoot: Bool = false) -> StorageNode {
+    drainingAutoreleasePool { scanFolderContents(url, state: &state, isRoot: isRoot) }
+  }
+
+  private func scanFolderContents(_ url: URL, state: inout ScanState, isRoot: Bool) -> StorageNode {
     if FileSystem.isIgnored(url, ignoredPaths: state.ignoredPaths) {
       state.coverage.excludedItems += 1
       return StorageNode(url: url, name: "Excluded", kind: .aggregate, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
