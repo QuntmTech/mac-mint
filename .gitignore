@@ -8,3 +8,6 @@ web/playwright-report/
 backend/commerce.local.json
 
 __pycache__/
+# SwiftPM rewrites this per platform (Linux has no dependencies). build_app.sh checks the
+# resolved Sparkle revision instead.
+Package.resolved
