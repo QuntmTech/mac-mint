@@ -162,7 +162,7 @@ public struct AIAskRequest: Codable, Sendable {
   }
 }
 
-public struct AIStatus: Sendable {
+public struct AIStatus: Sendable, Equatable {
   public let enabled: Bool
   public let features: [String: Bool]
   public let reachable: Bool

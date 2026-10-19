@@ -103,7 +103,7 @@ struct RootView: View {
       guard !SmokeTest.isRequested else { return }
       Task {
         await account.refreshAccess()
-        await account.refreshAIStatus()
+        await account.refreshAIStatusIfStale()
       }
     }
     .sheet(isPresented: $model.showingScanIssues) {
