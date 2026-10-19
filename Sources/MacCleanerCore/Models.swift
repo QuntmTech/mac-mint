@@ -341,3 +341,23 @@ public struct CleanupResult: Sendable {
     self.wasCancelled = wasCancelled
   }
 }
+
+/// Limits progress callbacks, and the main-actor hops behind them, to a steady rate.
+/// The first call always reports so short operations still show progress.
+public struct ProgressThrottle: Sendable {
+  private let interval: TimeInterval
+  private let now: @Sendable () -> TimeInterval
+  private var last: TimeInterval?
+
+  public init(interval: TimeInterval = 0.2, now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    self.interval = interval
+    self.now = now
+  }
+
+  public mutating func shouldReport() -> Bool {
+    let current = now()
+    if let last, current - last < interval { return false }
+    last = current
+    return true
+  }
+}

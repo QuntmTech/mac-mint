@@ -181,4 +181,15 @@ extension SimilarPhotosTests {
     XCTAssertEqual(Set(scan.fileCandidates(named: "a.jpg").map(\.id)), [a.id,b.id])
     XCTAssertTrue(scan.fileCandidates(named: "missing.jpg").isEmpty)
   }
+
+  func testPrunedResultCanCarryItsScanGenerationWhileNewScansDiffer() {
+    let a = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/a.jpg"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let b = PhotoFingerprint(url: URL(fileURLWithPath: "/tmp/b.jpg"), bytes: 1, hash: 0, sharpness: 1, pixelWidth: 1, pixelHeight: 1)
+    let scan = PhotoScanResult(photos: [a, b], similarGroups: [], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
+    let pruned = PhotoScanResult(photos: [b], similarGroups: [], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false, generation: scan.generation)
+    let rescan = PhotoScanResult(photos: [a, b], similarGroups: [], blurry: [], screenshots: [], skippedLibraries: [], issues: [], wasCancelled: false)
+    XCTAssertEqual(pruned.generation, scan.generation)
+    XCTAssertNotEqual(rescan.generation, scan.generation)
+    XCTAssertEqual(pruned.selectedPhotos(ids: [a.id, b.id]).map(\.id), [b.id])
+  }
 }

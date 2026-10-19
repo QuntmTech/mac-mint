@@ -112,6 +112,7 @@ struct PlanReviewSheet: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.dismiss) private var dismiss
   @State private var showExcluded = false
+  @State private var exclusionError: String?
 
   private var grouped: [(String, [PlanItem])] {
     plan.sources.map { source in (source, plan.items.filter { $0.source == source }) }
@@ -134,10 +135,7 @@ struct PlanReviewSheet: View {
                 PlanItemRow(item: item, onRemove: { remove(item) })
                   .contextMenu {
                     Button("Keep this item") { remove(item) }
-                    Button("Exclude from Future Scans") {
-                      model.ignore(item.url)
-                      remove(item)
-                    }
+                    Button("Exclude from Future Scans") { exclude(item) }
                     Button("Show Folder Contents in Finder") { model.reveal(item.url) }
                   }
               }
@@ -164,6 +162,14 @@ struct PlanReviewSheet: View {
     .frame(width: 720)
     .frame(minHeight: 420, maxHeight: 680)
     .scrollContentBackground(.hidden).background(AppTheme.canvas)
+  }
+
+  /// The row leaves the review only after the exclusion is saved; otherwise the error stays here.
+  private func exclude(_ item: PlanItem) {
+    Task {
+      exclusionError = await model.addExclusion(item.url)
+      if exclusionError == nil { remove(item) }
+    }
   }
 
   private func remove(_ item: PlanItem) {
@@ -199,6 +205,10 @@ struct PlanReviewSheet: View {
       }
       Text("Remove anything you want to keep. Only the items below will move.")
         .font(.callout).foregroundStyle(.secondary)
+      if let exclusionError {
+        Label(exclusionError, systemImage: "exclamationmark.triangle")
+          .font(.callout).foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
+      }
     }.padding(24)
   }
 
@@ -357,6 +367,8 @@ struct ReviewQueueView: View {
         HStack(spacing: 8) {
           if model.queuedCount > 0 {
             Button("Clear selection") { model.clearQueue() }.buttonStyle(MintButtonStyle(prominent: false))
+          }
+          if !model.queuedItems.isEmpty {
             Button { model.reviewEverything() } label: {
               if model.isPreparingPlan { ProgressView().controlSize(.small) }
               else { Label("Review \(ByteFormatter.string(model.queuedBytes))", systemImage: "checklist") }
@@ -375,6 +387,9 @@ struct ReviewQueueView: View {
           actionTitle: "Explore Cleanup", action: { model.selectedSection = .cleaner })
       } else {
         List {
+          if model.queuedLibraryPhotoCount > 0 {
+            Section { libraryPhotos } header: { Text("Photos library") }
+          }
           ForEach(grouped, id: \.0) { source, items in
             Section {
               ForEach(items, id: \.url) { item in
@@ -392,6 +407,31 @@ struct ReviewQueueView: View {
         .listStyle(.inset)
       }
     }
+  }
+
+  /// Library assets never join the Trash plan. Photos asks for its own confirmation.
+  private var libraryPhotos: some View {
+    let count = model.queuedLibraryPhotoCount
+    return VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 11) {
+        IconTile(symbol: "photo.stack", size: 30)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("\(count) Photos library item\(count == 1 ? "" : "s")").fontWeight(.medium)
+          Text("Photos asks you to confirm. Deleted items stay in Photos ▸ Recently Deleted for about 30 days, and deletion syncs to devices using iCloud Photos.")
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 8)
+        Button("Show in Photos") { model.selectedSection = .photos }.controlSize(.small)
+        Button("Delete in Photos…") { Task { await model.deleteSelectedLibraryPhotos() } }
+          .controlSize(.small)
+          .disabled(model.isWorking || model.isScanning || model.isPreparingPlan)
+      }
+      if let error = model.photoDeletionError {
+        Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(AppTheme.warning)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+    .padding(.vertical, 10)
   }
 }
 

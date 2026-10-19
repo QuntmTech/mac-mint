@@ -8,6 +8,7 @@ struct HelpView: View {
   @Environment(\.dismiss) private var dismiss
   @State private var showDiagnostics = false
   @State private var showPermissions = false
+  @State private var exportError: String?
   private var diagnostics: String {
     """
     MacMint \(UpdateService.currentVersion)
@@ -45,9 +46,16 @@ struct HelpView: View {
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "MacMint-diagnostics.txt"
             if panel.runModal() == .OK, let url = panel.url {
-              do { try diagnostics.write(to: url, atomically: true, encoding: .utf8) }
-              catch { model.statusMessage = "Could not export diagnostics: \(error.localizedDescription)" }
+              do { try diagnostics.write(to: url, atomically: true, encoding: .utf8); exportError = nil }
+              catch {
+                let message = "Could not export diagnostics: \(error.localizedDescription)"
+                exportError = message
+                model.statusMessage = message
+              }
             }
+          }
+          if let exportError {
+            Label(exportError, systemImage: "exclamationmark.triangle").font(.callout).foregroundStyle(AppTheme.warning)
           }
         }
       }.padding(24)

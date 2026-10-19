@@ -23,11 +23,17 @@ public actor DuplicateRemovalVerifier {
     self.hash = hash
   }
 
+  /// `progress` receives (checked, total) groups that contain a selection, at a throttled rate.
   public func plan(
-    groups: [DuplicateGroup], selectedIDs: Set<UUID>, ignoredPaths: Set<String> = []
+    groups: [DuplicateGroup], selectedIDs: Set<UUID>, ignoredPaths: Set<String> = [],
+    progress: (@Sendable (Int, Int) -> Void)? = nil
   ) -> DuplicateRemovalPlan {
     var approved: [LargeFile] = []
     var skipped: [OperationFailure] = []
+    let total = progress == nil ? 0 : groups.filter { $0.files.contains { selectedIDs.contains($0.id) } }.count
+    var checked = 0
+    var throttle = ProgressThrottle()
+    defer { if let progress, checked == total { progress(checked, total) } }
 
     for group in groups {
       if Task.isCancelled {
@@ -35,6 +41,10 @@ public actor DuplicateRemovalVerifier {
       }
       let selected = group.files.filter { selectedIDs.contains($0.id) }
       guard !selected.isEmpty else { continue }
+      if let progress {
+        if throttle.shouldReport() { progress(checked, total) }
+        checked += 1
+      }
 
       let keepers = group.files.filter { !selectedIDs.contains($0.id) }
       guard !keepers.isEmpty else {

@@ -160,10 +160,14 @@ public actor StorageTreeScanner {
     var rootVolume: String?
     let progress: ProgressHandler?
     let ignoredPaths: Set<String>
+    // Fast disks enumerate tens of thousands of items per second; publish about 5 times a second.
+    var throttle = ProgressThrottle()
 
     mutating func tick(_ path: String) {
       coverage.scannedItems += 1
-      if coverage.scannedItems % 500 == 0 { progress?(coverage.scannedItems, path) }
+      if coverage.scannedItems % 64 == 0, progress != nil, throttle.shouldReport() {
+        progress?(coverage.scannedItems, path)
+      }
     }
   }
 
