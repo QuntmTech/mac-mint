@@ -7,7 +7,7 @@ This pass reviews the desktop, portable safety core, account/AI services, purcha
 - [x] Implement recurring Checkout, verified invoice/subscription synchronization, absolute access periods, cancellation and payment recovery.
 - [x] Implement customer-owned billing management, explicit recurring/trial terms and server-authorized repurchase.
 - [x] Review desktop account expiry, cleanup/recovery, photo/resource handling, AI session boundaries and updates.
-- [ ] Complete the new regression, browser and native CI gates and record delivery evidence below.
+- [x] Complete the new regression, browser and native CI gates and record delivery evidence below.
 - [ ] Complete actual Stripe-account acceptance, external inbox delivery, production service deployment and consumer signing/installation.
 
 ## Approved offer
@@ -24,6 +24,7 @@ US$39.99 per year, three-day free trial, payment method collected, one trial per
 | Library screenshots were always empty | PhotoKit IDs are synthetic URLs, so filename detection cannot classify them; the library scan explicitly supplied an empty screenshot list. | Carry PhotoKit `photoScreenshot` metadata into fingerprints and populate the tab; screenshots stay out of blurry suggestions. Core regression and native compilation. |
 | Photo mutation could overlap a scan through a controller call | UI controls were disabled, but the library-removal controller lacked scan/preparation guards. | Both review and removal refuse overlapping work while retaining selections; native controller regression without real PhotoKit deletion. |
 | Restricted accounts could pay for unusable recurring access | Revoked/suspended base access deliberately blocks subscriptions, but a new/resumed checkout could still collect money. | Reject subscription checkout before any provider call and give a support action. Unit regressions cover both statuses. Existing customers can still open billing. |
+| Delayed-payment failure could allow duplicate recurring checkout | Failure could arrive before the completion event and mark an order replaceable while its subscription still required recovery. | Resolve/synchronize the authoritative subscription first. An incomplete subscription keeps checkout pending; missing identity remains retryable/uncertain. Unit and real PocketBase protocol tests cover reordered events. |
 | Demo scan duration grew when timer callbacks were delayed | Progress counted callbacks, so busy/throttled browsers stretched a short illustrative scan. | Compute progress from elapsed monotonic time; a delayed-callback interaction regression proves catch-up without extra timers. |
 | Whole-item inventories traversed excluded descendants | Downloads and Removed Apps sized an ancestor even with an excluded child; Cleaner retained a separate literal path comparison. | Skip whole-item ancestors containing exclusions before sizing, skip excluded roots before enumeration, and use the shared volume/alias-aware matcher. Scanner regressions retain eligible siblings and avoid excluded-root access errors. |
 
@@ -50,6 +51,14 @@ No production billing mutation, real charge, refund, email delivery, consumer re
 
 ## Validation and delivery
 
-Local portable core: **185 tests passed**, zero failures. Backend: **52 Node tests passed**, plus disposable PocketBase transaction/migration/webhook, authenticated AI/local SMTP, and recurring/trial/portal integration checks. Installer notarization failure checks: **4 passed**. Homepage interaction checks: **50 passed**. Website build and lint passed. Native source parse, workflow lint and whitespace checks passed.
+Local portable core: **185 tests passed**, zero failures. Backend: **53 Node tests passed**, plus disposable PocketBase transaction/migration/webhook, authenticated AI/local SMTP, and recurring/trial/portal integration checks. Installer notarization failure checks: **4 passed**. Homepage interaction checks: **50 passed**. Website build and lint passed. Native source parse, workflow lint and whitespace checks passed.
 
-The initial browser run exposed two new assertion/copy mismatches, a generic billing-address error and delayed mobile demo progress; these were corrected. Final browser and native CI results will be recorded after the implementation head passes. See [Stripe setup](STRIPE_SETUP.md) for real-account acceptance and the still-closed approved offer.
+All **44 browser tests passed**, including recurring/trial disclosure, light/dark and phone billing presentation, safe portal redirects, payment recovery and server-authorized resubscription. Visual inspection confirmed the billing layouts. The [backend/website CI](https://github.com/QuntmTech/mac-mint/actions/runs/39208436914) passed.
+
+The [real Stripe sandbox contract report](validation/stripe-sandbox-2026-10-19.json) records **nine passed checks**, including the first annual invoice paid with a Stripe test token, with zero live operations. This is separate from the disposable backend webhook tests. It does not certify owner-account setup, real webhook transport, annual time advancement or external email. The optional operator probe is source-controlled; no credentials or hosted-session URLs are committed.
+
+The initial browser run exposed two assertion/copy mismatches, a generic billing-address error and delayed mobile demo progress; these were corrected. Native CI also caught `/var` versus `/private/var` URL comparisons in the two new scanner tests; the tests now compare resolved locations. [Native builds at `03da749`](https://github.com/QuntmTech/mac-mint/actions/runs/39208436969) passed 258 cases on each macOS 15/26 runner, with one expected skip and zero failures. Packaging repeats have two expected skips. Startup, idle-loop, rendering, ZIP/DMG packaging and fresh-runner downloaded-package/installer checks all passed. Subsequent billing/operator/documentation edits do not alter those native sources.
+
+In the isolated startup fixture, idle readings were 0.1–0.9% of one core with the menu bar off/on and 1.2–2.6% with Performance visible. The 2,000-image memory fixture reported 0–4 MiB incremental peak. These short fixture readings are not a sustained energy benchmark, total app RAM budget, or acceptance of the user's actual photo library.
+
+See [Stripe setup](STRIPE_SETUP.md) for real-account acceptance and the still-closed approved offer.

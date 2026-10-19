@@ -181,6 +181,21 @@ test('new subscriptions cannot be opened while another subscription requires pay
   billing.sync(f.app, f.subscription.id)
   assert.throws(() => payments.orderForRequest(f.app, { id: 'user1', get: () => 'buyer@example.invalid' }, 'another-request', f.config), error => error.code === 'plan_exists')
 })
+test('delayed-payment failure arriving before checkout completion cannot open a second subscription', () => {
+  const f = fixture(); f.session.payment_status = 'unpaid'; f.subscription.status = 'incomplete'; f.invoice.status = 'open'
+  payments.recordTerminalSession(f.app, { id: f.session.id }, 'failed')
+  assert.equal(f.order.get('state'), 'pending')
+  assert.equal(billing.hasOngoing(f.app, 'user1'), true)
+  assert.equal(payments.checkoutStatus(f.app, { id: 'user1' }, 'fixture-request').can_start_new, false)
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false)
+  f.subscription.status = 'incomplete_expired'
+  billing.event(f.app, 'customer.subscription.updated', { id: f.subscription.id })
+  assert.equal(f.order.get('state'), 'failed')
+  assert.equal(payments.checkoutStatus(f.app, { id: 'user1' }, 'fixture-request').can_start_new, true)
+  const uncertain = fixture(); uncertain.session.subscription = null; uncertain.session.payment_status = 'unpaid'
+  assert.throws(() => payments.recordTerminalSession(uncertain.app, { id: uncertain.session.id }, 'failed'), /termination is not yet verified/)
+  assert.equal(uncertain.order.get('state'), 'pending')
+})
 test('malformed license expiry cannot turn into unlimited account access', () => {
   const f = fixture(), ent = lib.ensureEntitlement(f.app, 'user1')
   ent.set('plan', 'pro'); ent.set('status', 'active'); ent.set('expires_at', 'malformed')

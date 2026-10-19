@@ -257,6 +257,11 @@ function fulfillSession(app, full) {
 }
 function recordTerminalSession(app, session, state) {
   const full = authoritativeSession(app, session)
+  // A failed delayed payment can still own an incomplete/past-due subscription.
+  // Bind and synchronize it before permitting replacement checkout; session failure
+  // alone is not proof that recurring billing has ended.
+  if (full.mode === "subscription" && full.subscription) return require(`${__hooks}/macmint_billing.js`).fulfill(app, full)
+  if (full.mode === "subscription" && full.status !== "expired") throw Error("Subscription termination is not yet verified")
   // Duplicate or out-of-order terminal events cannot downgrade a successful payment.
   if (full.payment_status === "paid") return full.mode === "subscription" ? require(`${__hooks}/macmint_billing.js`).fulfill(app, full) : fulfillSession(app, full)
   if (state === "expired" && full.status !== "expired") return false

@@ -159,6 +159,10 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             session = next(iter(sessions.values()))
             key = next(key for key, (status, _) in zip(keys, attempts) if status == 200)
             sub, invoice = complete(session)
+            assert webhook('checkout.session.async_payment_failed', session['id'])[0] == 200
+            failed_status = call('/api/macmint/checkout/status?request_key=' + key, token=token)[1]
+            assert failed_status['state'] == 'pending' and failed_status['can_start_new'] is False
+            assert call('/api/macmint/checkout', dict(request_key=str(uuid.uuid4())), token)[1]['error'] == 'checkout_in_progress'
             assert webhook('checkout.session.completed', session['id'])[0] == 200
             assert me()['entitlement']['active'] is False
             invoice['status'] = 'paid'; sub['status'] = 'active'; session['payment_status'] = 'paid'

@@ -105,4 +105,14 @@ These use disposable databases, synthetic provider protocol responses and local 
 
 In the intended isolated Stripe sandbox, prove account verification → annual offer → payment-method collection → three-day trial → explicit Mac activation → first paid invoice → renewal → payment failure/action-required → recovery → period-end cancellation → final expiry. Use test clocks where supported. Include canceling during the trial, duplicate/reordered/retried webhooks, dropped create responses, a changed account email/offer, second-trial refusal, cross-user portal access, device limits and device transfer. Confirm Stripe trial reminders/receipt emails and the short trial's first-charge disclosure. [Customer Portal integration](https://docs.stripe.com/customer-management/integrate-customer-portal).
 
+An additional **real API contract probe** passed on 2026-10-19 in a fresh unclaimed sandbox (expires October 26), using no live account or real card. Its nine checks include the configured annual Price, zero-total trial Checkout, subscription-item/invoice schema, portal response, manually ended trial, first annual invoice paid with `tok_visa`, cancellation flags and terminal cancellation. The test subscription was canceled and the unused Checkout expired. The sanitized [report](validation/stripe-sandbox-2026-10-19.json) includes the probe script hash. Test-clock and account-read permissions were denied for the anonymous key; neither was bypassed. The probe uses manual trial completion and does not certify annual renewal, real webhook transport, Checkout form completion, or the intended business account.
+
+For an operator-selected isolated sandbox, supply a restricted test key through protected environment injection, confirm the selected account separately, and run:
+
+```sh
+python3 backend/scripts/probe-stripe-sandbox.py --run-test-objects --report .build/stripe-sandbox/probe-report.json
+```
+
+This command creates test products, a Price, portal configuration, customer, payment method and subscription. It pays only a test invoice, cancels its subscription and expires its unused Checkout; it leaves test product/Price evidence. It rejects live/unrestricted key prefixes and never prints credentials or hosted-session URLs. It is explicitly opt-in and never part of ordinary CI.
+
 Before live checkout, prove external verification/reset email delivery and a validated Developer ID-signed, notarized, stapled stable download with a real Gatekeeper/permission walkthrough. Stripe is installed/enabled in this session but exposes no account tools; the live backend currently lacks these billing routes/migrations and has SMTP disabled. No live Price, subscription, charge or production billing configuration was created by this review. Consider Stripe Tax after confirming registration requirements; automatic tax remains disabled pending that setup and separate validation.
