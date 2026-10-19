@@ -19,9 +19,24 @@ const array = v => Array.isArray(v) ? v : []
 const object = v => v && typeof v === "object" && !Array.isArray(v) ? v : {}
 const numericMap = (v, keys) => Object.fromEntries(Object.entries(object(v)).filter(([key]) => keys.indexOf(key) >= 0).map(([key, value]) => [key, num(value)]))
 const folders = v => array(v).slice(0, 14).filter(f => f && CATEGORIES.indexOf(f.path) >= 0).map(f => ({ path: f.path, gb: num(f.gb) }))
+const PLACEHOLDERS = { "developer-tool": "Unrecognized developer cache", other: "Unrecognized Library item" }
 function identifier(kind, value) {
-  if (kind === "developer-tool") return TOOLS.indexOf(value) >= 0 ? value : "Unrecognized developer cache"
-  return Object.prototype.hasOwnProperty.call(APPS, value) ? value : "Unrecognized Library item"
+  if (kind === "developer-tool") return TOOLS.indexOf(value) >= 0 ? value : PLACEHOLDERS["developer-tool"]
+  return Object.prototype.hasOwnProperty.call(APPS, value) ? value : PLACEHOLDERS.other
+}
+// Unrecognized names are never sent, so a provider answer could only guess. Answer locally,
+// without a provider call or allowance, in the same shape as a model explanation.
+const isPlaceholder = value => value === PLACEHOLDERS["developer-tool"] || value === PLACEHOLDERS.other
+function localExplanation(kind) {
+  const developer = kind === "developer-tool"
+  return {
+    summary: developer
+      ? "MacMint only shares recognized developer tool names, so this cache was not sent for an AI explanation. Check which tool created it before removing it."
+      : "MacMint only shares recognized app identifiers, so this item was not sent for an AI explanation. Check which app created it before removing it.",
+    owner: "Unknown", category: developer ? "developer" : "unknown", verdict: "unknown",
+    whatHappens: "Moving it to the Trash may remove settings or data that an app or tool uses. You can restore it from History.",
+    confidence: "low",
+  }
 }
 function recommendations(values) {
   return array(values).slice(0, 15).filter(r => r && Object.prototype.hasOwnProperty.call(RECOMMENDATIONS, r.id)).map(r => ({
@@ -41,4 +56,4 @@ function context(value) {
     recommendations: array(c.recommendations).filter(r => r && LABELS.indexOf(r.title) >= 0).slice(0, 12).map(r => ({ title: r.title, gb: num(r.gb), items: Math.floor(num(r.items)), confidence: ["Rebuildable", "Likely", "Review", "Likely unneeded", "Needs review"].indexOf(r.confidence) >= 0 ? r.confidence : "Review" })),
   }
 }
-module.exports = { identifier, recommendations, growth, context, CATEGORIES }
+module.exports = { identifier, isPlaceholder, localExplanation, recommendations, growth, context, CATEGORIES }

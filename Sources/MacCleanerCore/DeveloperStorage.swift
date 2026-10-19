@@ -352,7 +352,12 @@ public actor DeveloperStorageScanner {
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
         let layers = json["layers"] as? [[String: Any]]
       else { return nil }
-      let size = layers.compactMap { ($0["size"] as? NSNumber)?.int64Value }.reduce(0, +)
+      // Manifests are local, untrusted JSON: ignore negative sizes and saturate instead of trapping.
+      let size = layers.compactMap { ($0["size"] as? NSNumber)?.int64Value }.filter { $0 > 0 }
+        .reduce(Int64(0)) { total, next in
+          let (sum, overflow) = total.addingReportingOverflow(next)
+          return overflow ? .max : sum
+        }
       // manifests/<registry>/<namespace>/<model>/<tag>
       let tag = manifest.lastPathComponent
       let model = manifest.deletingLastPathComponent().lastPathComponent

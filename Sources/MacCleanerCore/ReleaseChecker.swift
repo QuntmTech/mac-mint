@@ -23,6 +23,11 @@ public struct ReleaseInfo: Codable, Hashable, Sendable {
     self.notes = notes
     self.sha256 = sha256
   }
+  /// The published archive digest when well formed, for comparing a downloaded archive.
+  public var expectedSHA256: String? {
+    guard let sha256, sha256.count == 64, sha256.allSatisfy({ $0.isHexDigit && !$0.isUppercase }) else { return nil }
+    return sha256
+  }
 }
 
 public enum UpdateStatus: Hashable, Sendable {
@@ -88,6 +93,40 @@ public struct ReleaseChecker: Sendable {
     if let minimum, mine < AppVersion(minimum) { return .required(latest, minimum: minimum) }
     if let latest, mine < AppVersion(latest.version) { return .available(latest) }
     return .current
+  }
+
+  /// Opened instead of a missing or untrusted feed download URL.
+  public static let fallbackDownloadURL = URL(string: "https://macmint.co/account")!
+
+  /// Feed URLs open in the browser, so only first-party HTTPS locations are trusted: the
+  /// MacMint site and QuntmTech/mac-mint GitHub release assets. GitHub redirects those to
+  /// signed githubusercontent URLs, which serve any repository's assets and are therefore
+  /// not accepted directly. No credentials, ports, queries, fragments, percent-encoding or
+  /// dot segments. Mirrors `trustedDownloadURL` in backend macmint_payments_lib.js.
+  public static func trustedDownloadURL(_ string: String?) -> URL? {
+    guard let string, string.count <= 2000, string.hasPrefix("https://"),
+      let components = URLComponents(string: string),
+      components.user == nil, components.password == nil, components.port == nil,
+      components.query == nil, components.fragment == nil,
+      components.percentEncodedHost?.contains("%") == false,
+      let host = components.host?.lowercased()
+    else { return nil }
+    let path = components.percentEncodedPath
+    let pathCharacters = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~+/-")
+    guard path.hasPrefix("/"), path.allSatisfy(pathCharacters.contains) else { return nil }
+    let segments = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
+    guard !segments.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+    switch host {
+    case "macmint.co":
+      break
+    case "github.com":
+      guard segments.count == 6, segments[0] == "QuntmTech", segments[1] == "mac-mint",
+        segments[2] == "releases", segments[3] == "download", !segments[4].isEmpty, !segments[5].isEmpty
+      else { return nil }
+    default:
+      return nil
+    }
+    return components.url
   }
 
   private struct ListResponse: Decodable { let items: [ReleaseInfo] }

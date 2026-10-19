@@ -97,7 +97,9 @@ public actor AppScanner {
     let started = Date()
     let roots = leftoverRoots()
     let bundleID = app.bundleIdentifier?.lowercased()
-    let others = Set(otherBundleIDs.map { $0.lowercased() }).subtracting(bundleID.map { [$0] } ?? [])
+    // Excluded apps are hidden from the inventory but still own their data.
+    let others = Set((otherBundleIDs.union(installedBundleIdentifiers())).map { $0.lowercased() })
+      .subtracting(bundleID.map { [$0] } ?? [])
     let appTokens = meaningfulTokens(in: app.name)
     let context = MatchContext(bundleID: bundleID, appTokens: appTokens, otherBundleIDs: others)
     var matches: [AppLeftover] = []
@@ -342,6 +344,25 @@ public actor AppScanner {
       isShared: isShared,
       identity: FileSystem.fileIdentity(at: url)
     )
+  }
+
+  /// Bundle identifiers of every app in the Applications roots, regardless of exclusions.
+  private func installedBundleIdentifiers() -> Set<String> {
+    var ids: Set<String> = []
+    for root in applicationRoots where fileManager.fileExists(atPath: root.path) {
+      guard
+        let enumerator = fileManager.enumerator(
+          at: root, includingPropertiesForKeys: [.isDirectoryKey],
+          options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true })
+      else { continue }
+      FileSystem.walk(enumerator) { url in
+        if Task.isCancelled { return .stop }
+        guard url.pathExtension.lowercased() == "app" else { return .continue }
+        if let id = OrphanScanner.readBundleID(url) { ids.insert(id) }
+        return .skipDescendants
+      }
+    }
+    return ids
   }
 
   private func meaningfulTokens(in value: String) -> Set<String> {

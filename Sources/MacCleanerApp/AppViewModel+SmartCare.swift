@@ -96,7 +96,6 @@ extension AppViewModel {
   }
 
   func refreshRecommendations() {
-    if aiReview != nil || aiReviewBusy || assistantBusy { invalidateAIReview() }
     var inputs = RecommendationEngine.Inputs()
     inputs.runningBundleIDs = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     inputs.cleanupTargets = cleanupTargets
@@ -109,6 +108,23 @@ extension AppViewModel {
     inputs.trashBytes = trashStatus?.isComplete == true ? trashStatus?.bytes ?? 0 : 0
     inputs.growth = storageGrowth
     recommendations = RecommendationEngine.recommend(inputs)
+    // Revisiting Overview recomputes the same list; only a changed review context retires
+    // the advisory AI review and any consent prepared from the old context.
+    let fingerprint = Self.reviewFingerprint(recommendations, growth: storageGrowth)
+    guard fingerprint != recommendationFingerprint else { return }
+    recommendationFingerprint = fingerprint
+    invalidateRecommendationReview()
+  }
+
+  /// The fields an AI review request is built from (disk totals change constantly and are excluded).
+  static func reviewFingerprint(_ recommendations: [Recommendation], growth: [StorageGrowth]) -> Int {
+    var hasher = Hasher()
+    for item in recommendations {
+      hasher.combine(item.id); hasher.combine(item.title); hasher.combine(item.detail)
+      hasher.combine(item.bytes); hasher.combine(item.count); hasher.combine(item.confidence)
+    }
+    for change in growth { hasher.combine(change.path); hasher.combine(change.before); hasher.combine(change.after) }
+    return hasher.finalize()
   }
 
   func review(_ recommendation: Recommendation) {
@@ -128,9 +144,7 @@ extension AppViewModel {
       title: "Quick Scan — rebuildable items", items: items, ignoredPaths: ignoredPaths)
   }
 
-  var safeRecommendationBytes: Int64 {
-    OperationPlanner.plan(title: "estimate", items: RecommendationEngine.safeItems(recommendations), ignoredPaths: ignoredPaths).totalBytes
-  }
+  var safeRecommendationBytes: Int64 { queueSummary.safeRecommendationBytes }
 
   func open(_ destination: Recommendation.Destination) {
     switch destination {
@@ -184,9 +198,9 @@ extension AppViewModel {
 
   /// Records today's free space (at most one sample per day) and reloads the chart.
   func recordFreeSpace() {
-    let stats = volumeStats
     Task {
-      if let samples = try? await Self.spaceStore.record(freeBytes: stats.free, totalBytes: stats.total) {
+      let reading = await refreshVolumeSummary()
+      if let samples = try? await Self.spaceStore.record(freeBytes: reading.free, totalBytes: reading.total) {
         spaceHistory = samples
       }
     }

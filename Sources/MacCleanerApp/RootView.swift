@@ -149,6 +149,14 @@ struct RootView: View {
         showingOnboarding = true
       }
     }
+    .task {
+      // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and slowly.
+      guard !SmokeTest.isRequested else { return }
+      while !Task.isCancelled {
+        await model.refreshVolumeSummary()
+        try? await Task.sleep(for: .seconds(60))
+      }
+    }
   }
 
   private var workspaceBar: some View {
@@ -231,12 +239,12 @@ struct RootView: View {
   }
 
   private var sidebarFooter: some View {
-    let stats = model.volumeStats
+    let stats = model.volume
     let fraction = stats.total > 0 ? min(1, Double(stats.used) / Double(stats.total)) : 0
     return VStack(alignment: .leading, spacing: 11) {
       HStack(spacing: 8) {
         Image(systemName: "internaldrive").foregroundStyle(AppTheme.accentText)
-        Text(model.volumeName).lineLimit(1).font(.caption.weight(.semibold))
+        Text(stats.name).lineLimit(1).font(.caption.weight(.semibold))
       }
       GeometryReader { geometry in
         Capsule().fill(AppTheme.border)
@@ -245,7 +253,7 @@ struct RootView: View {
           }
       }.frame(height: 5).accessibilityLabel("Disk \(Int(fraction * 100)) percent used")
       HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Text(ByteFormatter.string(stats.free)).font(.system(size: 17, weight: .semibold)).monospacedDigit()
+        Text(stats.total > 0 ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
         Text("available").font(.caption).foregroundStyle(.secondary)
       }
     }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
@@ -321,7 +329,7 @@ struct RootView: View {
           .frame(width: 140)
       }
 
-      if model.isScanning || model.isWorking {
+      if model.isScanning || model.isWorking || model.isPreparingPlan {
         Button(model.isWorking ? "Stop" : "Cancel") { model.cancelCurrentOperation() }
           .controlSize(.small)
       }

@@ -39,7 +39,7 @@ struct DashboardView: View {
   }
 
   private var hero: some View {
-    let stats = model.volumeStats
+    let stats = model.volume
     return HStack(spacing: 24) {
       VStack(alignment: .leading, spacing: 16) {
         Label("QUICK SCAN", systemImage: "sparkle")

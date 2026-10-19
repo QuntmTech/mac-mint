@@ -109,6 +109,40 @@ final class StorageTreeTests: XCTestCase {
     XCTAssertEqual(Treemap.layout([0, 0], in: bounds).map(\.area), [0, 0])
   }
 
+  func testProgressThrottleReportsFirstCallThenAtMostOncePerInterval() {
+    final class Clock: @unchecked Sendable { var now: TimeInterval = 100 }
+    let clock = Clock()
+    var throttle = ProgressThrottle(interval: 0.2, now: { clock.now })
+    XCTAssertTrue(throttle.shouldReport())
+    clock.now += 0.05
+    XCTAssertFalse(throttle.shouldReport())
+    clock.now += 0.1
+    XCTAssertFalse(throttle.shouldReport())
+    clock.now += 0.06
+    XCTAssertTrue(throttle.shouldReport())
+    XCTAssertFalse(throttle.shouldReport())
+  }
+
+  func testStorageProgressIsThrottledWithoutLosingTheFinalCount() async throws {
+    let root = makeTempDirectory()
+    defer { try? fm.removeItem(at: root) }
+    for index in 0..<200 { try write(root, "Many/\(index).txt", 1) }
+    final class Reports: @unchecked Sendable {
+      private let lock = NSLock()
+      private var values: [Int] = []
+      func append(_ value: Int) { lock.lock(); values.append(value); lock.unlock() }
+      var all: [Int] { lock.lock(); defer { lock.unlock() }; return values }
+    }
+    let reports = Reports()
+    let scan = await StorageTreeScanner().scan(root) { count, _ in reports.append(count) }
+    XCTAssertEqual(scan.coverage.scannedItems, 201)
+    XCTAssertFalse(reports.all.isEmpty, "Scans shorter than the old 500-item step still report progress")
+    // The old scanner reported every 500 items regardless of speed; a fast local scan now
+    // reports at most a handful of times per second.
+    let seconds = max(scan.duration, 0.001)
+    XCTAssertLessThanOrEqual(Double(reports.all.count), seconds / 0.2 + 1)
+  }
+
   @discardableResult
   private func write(_ root: URL, _ relative: String, _ bytes: Int) throws -> URL {
     let url = root.appendingPathComponent(relative)

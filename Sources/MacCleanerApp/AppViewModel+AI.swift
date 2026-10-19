@@ -39,13 +39,20 @@ extension AppViewModel {
 
   func invalidateAIReview() {
     aiGeneration = UUID()
-    aiReviewTask?.cancel()
     assistantTask?.cancel()
     explanationTask?.cancel()
+    assistantBusy = false
+    invalidateRecommendationReview()
+  }
+
+  /// Recommendation changes retire the review and pending consent, whose payload described the
+  /// old context. Assistant questions already carry their own frozen context and keep running.
+  func invalidateRecommendationReview() {
+    aiReviewGeneration = UUID()
+    aiReviewTask?.cancel()
     aiReview = nil
     aiOrderRecommendations = false
     aiReviewBusy = false
-    assistantBusy = false
     reviewAIError = nil
     pendingAIAction = nil
     aiConsentPending = false
@@ -166,25 +173,25 @@ extension AppViewModel {
 
   func runAIReview(account: AccountStore) {
     guard !recommendations.isEmpty, !aiReviewBusy, !isScanning, !isWorking else { return }
-    let generation = aiGeneration
+    let generation = aiGeneration, reviewGeneration = aiReviewGeneration
     let request = AIContextBuilder.reviewRequest(recommendations: recommendations,
       totalBytes: volumeStats.total, freeBytes: volumeStats.free, growth: storageGrowth,
       home: FileManager.default.homeDirectoryForCurrentUser)
     aiPayloadPreview = previewPayload(request)
     withAIConsent { [self] in
-      guard generation == aiGeneration, !aiReviewBusy, !isScanning, !isWorking else { return }
+      guard generation == aiGeneration, reviewGeneration == aiReviewGeneration, !aiReviewBusy, !isScanning, !isWorking else { return }
       aiReviewBusy = true
       reviewAIError = nil
       aiReviewTask = Task {
         do {
           let response = try await account.aiReview(request)
-          guard !Task.isCancelled, aiEnabled, aiGeneration == generation else { return }
+          guard !Task.isCancelled, aiEnabled, aiGeneration == generation, aiReviewGeneration == reviewGeneration else { return }
           aiReview = response
           aiOrderRecommendations = true
         } catch {
-          if !Task.isCancelled, aiGeneration == generation { reviewAIError = error.localizedDescription }
+          if !Task.isCancelled, aiGeneration == generation, aiReviewGeneration == reviewGeneration { reviewAIError = error.localizedDescription }
         }
-        if aiGeneration == generation { aiReviewBusy = false }
+        if aiGeneration == generation, aiReviewGeneration == reviewGeneration { aiReviewBusy = false }
       }
     }
   }

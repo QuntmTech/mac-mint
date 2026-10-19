@@ -30,11 +30,12 @@ extension AppViewModel {
 
 extension AppViewModel {
   enum OrganizationAccessError: LocalizedError {
-    case busy, exclusions, activation
+    case busy, exclusions, recovery, activation
     var errorDescription: String? {
       switch self {
       case .busy: return "Wait for the current operation to finish."
       case .exclusions: return "Saved exclusions must be available before organizing files."
+      case .recovery: return "MacMint is still checking recovery records from the last session. Try again in a moment."
       case .activation: return "Activate your plan before applying these changes. Your preview is kept."
       }
     }
@@ -43,6 +44,7 @@ extension AppViewModel {
   func applyOrganization(_ inventory: OrganizationInventory, proposals: [OrganizationProposal]) async throws -> OrganizationRecord {
     guard !isWorking, !isScanning else { throw OrganizationAccessError.busy }
     guard exclusionsReady else { throw OrganizationAccessError.exclusions }
+    guard recoveryReady else { throw OrganizationAccessError.recovery }
     guard authorizeRemoval() else { throw OrganizationAccessError.activation }
     isWorking = true; operationTitle = "Organization"
     defer { isWorking = false; operationTitle = nil }

@@ -51,14 +51,8 @@ struct ApplicationsView: View {
     }
   }
 
-  private var selectedLeftoverBytes: Int64 {
-    OperationPlanner.plan(title: "Related files", items: model.appLeftovers.filter {
-      model.selectedLeftoverIDs.contains($0.id)
-    }.map { item in
-      PlanItem(url: item.url, displayName: item.url.lastPathComponent, kind: .appLeftover,
-        expectedBytes: item.size, reason: item.reason, source: "Apps")
-    }, ignoredPaths: model.ignoredPaths).totalBytes
-  }
+  /// Planned off the main actor with the rest of the queue summary.
+  private var selectedLeftoverBytes: Int64 { model.queueSummary.selectedLeftoverBytes }
 
   var body: some View {
     VStack(spacing: 0) {

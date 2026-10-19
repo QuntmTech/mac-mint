@@ -270,4 +270,67 @@ final class RunningOwnerTests: XCTestCase {
     XCTAssertEqual(report.outcomes.first?.status, .skipped)
     XCTAssertTrue(fm.fileExists(atPath: cache.path))
   }
+
+  func testGenericAppCachesCarryTheirOwnerSoRunningAppsAreSkipped() async throws {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    for name in ["com.tinyspeck.slackmacgap", "Spotify", "unowned-cache"] {
+      let dir = home.appendingPathComponent("Library/Caches/\(name)")
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      try Data(repeating: 1, count: 4096).write(to: dir.appendingPathComponent("blob"))
+    }
+    let targets = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scan()
+      .filter { $0.category == .userCaches }
+    let owners = Dictionary(uniqueKeysWithValues: targets.map { ($0.url.lastPathComponent, $0.ownerBundleID) })
+    XCTAssertEqual(owners["com.tinyspeck.slackmacgap"], "com.tinyspeck.slackmacgap")
+    XCTAssertEqual(owners["Spotify"], "com.spotify.client")
+    XCTAssertEqual(owners["unowned-cache"], .some(nil))
+
+    let slack = try XCTUnwrap(targets.first { $0.url.lastPathComponent == "com.tinyspeck.slackmacgap" })
+    let executor = OperationExecutor(
+      trashService: MovingTrashService(trashDirectory: home.appendingPathComponent(".Trash")),
+      safetyPolicy: SafetyPolicy(homeDirectory: home),
+      isAppRunning: { $0.lowercased() == "com.tinyspeck.slackmacgap" })
+    let report = await executor.run(OperationPlanner.plan(title: "t", items: [PlanItem.cleanup(slack)]))
+    XCTAssertEqual(report.outcomes.first?.status, .skipped)
+    XCTAssertTrue(fm.fileExists(atPath: slack.url.path))
+  }
+}
+
+/// Replaces the planned item with a different file just before moving it, like a racing app.
+private actor SwappingTrashService: TrashService {
+  let inner: MovingTrashService
+  init(trashDirectory: URL) { inner = MovingTrashService(trashDirectory: trashDirectory) }
+
+  func trash(_ url: URL) async throws -> URL? {
+    // Allocate the replacement before freeing the original so its inode can't be reused.
+    let replacement = url.appendingPathExtension("replacement")
+    try Data(repeating: 9, count: 4096).write(to: replacement)
+    try FileManager.default.removeItem(at: url)
+    try FileManager.default.moveItem(at: replacement, to: url)
+    return try await inner.trash(url)
+  }
+}
+
+final class MoveProofTests: XCTestCase {
+  func testItemReplacedDuringTheMoveIsUncertainWithoutAReceipt() async throws {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    let file = home.appendingPathComponent("Downloads/big.dmg")
+    try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data(repeating: 1, count: 8192).write(to: file)
+    let item = PlanItem(
+      url: file, displayName: "big.dmg", kind: .reviewedFile, expectedBytes: 8192, reason: "Large", source: "Test",
+      identity: FileSystem.fileIdentity(at: file))
+
+    let executor = OperationExecutor(
+      trashService: SwappingTrashService(trashDirectory: home.appendingPathComponent(".Trash")),
+      safetyPolicy: SafetyPolicy(homeDirectory: home))
+    let report = await executor.run(OperationPlanner.plan(title: "t", items: [item]))
+    let outcome = try XCTUnwrap(report.outcomes.first)
+    XCTAssertEqual(outcome.status, .uncertain)
+    XCTAssertNil(outcome.receipt, "a receipt would claim the reviewed item is restorable from Trash")
+  }
 }
