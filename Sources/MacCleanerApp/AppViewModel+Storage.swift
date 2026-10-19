@@ -2,7 +2,37 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
+/// Startup-volume reading. Important-usage capacity can take noticeable time to compute,
+/// so views show a cached value refreshed off the main actor.
+struct VolumeSummary: Equatable, Sendable {
+  var name = "Startup Disk"
+  var used: Int64 = 0
+  var free: Int64 = 0
+  var total: Int64 = 0
+
+  static func read(_ url: URL = FileManager.default.homeDirectoryForCurrentUser) -> VolumeSummary {
+    let values = try? url.resourceValues(forKeys: [
+      .volumeLocalizedNameKey, .volumeTotalCapacityKey,
+      .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+    ])
+    let total = Int64(values?.volumeTotalCapacity ?? 0)
+    let free = values?.volumeAvailableCapacityForImportantUsage ?? Int64(values?.volumeAvailableCapacity ?? 0)
+    return VolumeSummary(name: values?.volumeLocalizedName ?? "Startup Disk",
+      used: max(0, total - free), free: max(0, free), total: max(0, total))
+  }
+}
+
 extension AppViewModel {
+  @discardableResult
+  func refreshVolumeSummary() async -> VolumeSummary {
+    let reading = await Task.detached(priority: .utility) { VolumeSummary.read() }.value
+    if reading != volume { volume = reading }
+    return reading
+  }
+
+  /// Synchronous refresh for the offscreen render harness.
+  func refreshVolumeSummaryNow() { volume = VolumeSummary.read() }
+
   var storageCurrentNode: StorageNode? {
     guard let root = storageScan?.root else { return nil }
     if let path = storagePath, let node = root.node(at: path) { return node }

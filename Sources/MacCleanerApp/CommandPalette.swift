@@ -23,10 +23,6 @@ struct CommandPalette: View {
       $0.selectedSection = .dashboard
       $0.runSmartCare()
     })
-    list.append(Entry(id: "action:scan", title: "Run Quick Scan (caches only)", subtitle: "Action", icon: "sparkle") {
-      $0.selectedSection = .dashboard
-      $0.runSmartScan()
-    })
     list += model.recommendations.map { recommendation in
       Entry(
         id: "rec:\(recommendation.id)", title: recommendation.title,

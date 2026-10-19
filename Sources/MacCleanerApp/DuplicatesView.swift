@@ -11,6 +11,9 @@ struct DuplicatesView: View {
     model.duplicateGroups.reduce(0) { $0 + $1.reclaimableBytes }
   }
 
+  /// Another module's scan leaves these results visible.
+  private var scanningHere: Bool { model.isScanning && model.operationTitle == "Duplicate Finder" }
+
   var body: some View {
     VStack(spacing: 0) {
       header
@@ -18,13 +21,13 @@ struct DuplicatesView: View {
       controls
       Divider()
 
-      if model.duplicateGroups.isEmpty && !model.isScanning {
+      if model.duplicateGroups.isEmpty && !scanningHere {
         EmptyState(
           icon: "square.on.square", title: "No exact duplicates found",
           detail:
             "Choose a folder and scan. Files are matched by size, sample hash, then full streaming SHA-256."
         )
-      } else if model.isScanning {
+      } else if scanningHere {
         VStack(spacing: 12) {
           ProgressView().controlSize(.large)
           Text("Hashing candidate files…")
@@ -36,6 +39,7 @@ struct DuplicatesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else {
+        if model.isScanning { OtherScanNote() }
         List {
           ForEach(model.duplicateGroups) { group in
             Section {
@@ -210,5 +214,17 @@ struct DuplicatesView: View {
       .frame(width: 28)
     }
     .padding(.vertical, 5)
+  }
+}
+
+/// Shown above existing results while a different scan is running.
+struct OtherScanNote: View {
+  @EnvironmentObject private var model: AppViewModel
+
+  var body: some View {
+    Label("\(model.operationTitle ?? "Another scan") is running. These are your previous results.", systemImage: "hourglass")
+      .font(.caption).foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 8)
   }
 }
