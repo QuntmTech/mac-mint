@@ -374,6 +374,7 @@ struct AccountSettingsCard: View {
   private func planLabel(_ entitlement: Entitlement) -> String {
     guard entitlement.active else { return "No active plan" }
     if let expiry = entitlement.expiryDate {
+      if entitlement.source == "subscription_trial" { return "Trial ends \(expiry.formatted(date: .abbreviated, time: .omitted))" }
       return "Pro • Access until \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
     return "Pro • Lifetime"

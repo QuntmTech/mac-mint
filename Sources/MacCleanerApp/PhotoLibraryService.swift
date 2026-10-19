@@ -62,7 +62,8 @@ enum PhotoLibraryService {
             url: url(for: asset.localIdentifier), bytes: 0,
             hash: measured.hash, sharpness: measured.sharpness,
             pixelWidth: asset.pixelWidth, pixelHeight: asset.pixelHeight,
-            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate)
+            captured: asset.creationDate, assetID: asset.localIdentifier, modified: asset.modificationDate,
+            isScreenshot: asset.mediaSubtypes.contains(.photoScreenshot))
         }
         if let fingerprint { results.append(fingerprint) }
       }

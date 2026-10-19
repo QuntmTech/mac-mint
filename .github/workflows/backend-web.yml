@@ -25,6 +25,8 @@ jobs:
         run: python3 backend/tests/integration.py
       - name: Authenticated AI and SMTP recovery integration checks
         run: python3 backend/tests/service_integration.py
+      - name: Recurring subscription and billing portal integration checks
+        run: python3 backend/tests/subscriptions_integration.py
   website:
     runs-on: ubuntu-latest
     steps:

@@ -23,13 +23,17 @@ public struct PhotoFingerprint: Identifiable, Hashable, Sendable {
   public let assetID: String?
   /// File or PhotoKit asset modification time at scan time.
   public let modified: Date?
+  /// PhotoKit supplies classification for synthetic library URLs; folder files use their names.
+  private let screenshotClassification: Bool?
 
   public init(
     url: URL, bytes: Int64, hash: UInt64, sharpness: Double, pixelWidth: Int, pixelHeight: Int,
-    captured: Date? = nil, identity: String? = nil, assetID: String? = nil, modified: Date? = nil
+    captured: Date? = nil, identity: String? = nil, assetID: String? = nil, modified: Date? = nil,
+    isScreenshot: Bool? = nil
   ) {
     self.assetID = assetID
     self.modified = modified
+    self.screenshotClassification = isScreenshot
     self.id = assetID.map { "photos:" + $0 } ?? url.standardizedFileURL.path
     self.url = url
     self.bytes = bytes
@@ -43,7 +47,7 @@ public struct PhotoFingerprint: Identifiable, Hashable, Sendable {
 
   public var pixelCount: Int { pixelWidth * pixelHeight }
   public var isLibraryAsset: Bool { assetID != nil }
-  public var isScreenshot: Bool { PhotoAnalysis.looksLikeScreenshot(url) }
+  public var isScreenshot: Bool { screenshotClassification ?? PhotoAnalysis.looksLikeScreenshot(url) }
 }
 
 /// Visually similar images. "Similar" is a judgement, not proof of identity: the suggested

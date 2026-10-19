@@ -143,6 +143,27 @@ final class PhotoReviewTests: XCTestCase {
     return (AppViewModel(supportDirectory: support), support)
   }
 
+  func testLibraryRemovalCannotStartWhileScanningOrPreparingAnotherReview() async {
+    let (model, support) = reviewModel(); defer { try? FileManager.default.removeItem(at: support) }
+    let photo = PhotoFingerprint(url: PhotoLibraryService.url(for: "fixture"), bytes: 0,
+      hash: 1, sharpness: 1, pixelWidth: 100, pixelHeight: 100, assetID: "fixture")
+    model.photoScan = PhotoScanResult(photos: [photo], similarGroups: [], blurry: [], screenshots: [],
+      skippedLibraries: [], issues: [], wasCancelled: false)
+    model.selectedPhotoIDs = [photo.id]
+    var authorizationChecks = 0
+    model.authorizeRemoval = { authorizationChecks += 1; return false }
+    model.isScanning = true
+    model.reviewPhotos()
+    await model.deleteSelectedLibraryPhotos()
+    model.isScanning = false; model.isPreparingPlan = true
+    model.reviewPhotos()
+    await model.deleteSelectedLibraryPhotos()
+    XCTAssertEqual(authorizationChecks, 0)
+    XCTAssertFalse(model.isWorking)
+    XCTAssertFalse(model.showingAccount)
+    XCTAssertEqual(model.selectedPhotoIDs, [photo.id])
+  }
+
   private func scan(_ photos: [PhotoFingerprint], keeper: PhotoFingerprint) -> PhotoScanResult {
     PhotoScanResult(photos: photos,
       similarGroups: [.init(id: "set", photos: photos, keeperIndex: photos.firstIndex { $0.id == keeper.id }!)],

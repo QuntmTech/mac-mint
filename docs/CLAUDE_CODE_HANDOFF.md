@@ -2,6 +2,14 @@
 
 **Updated 2026-10-19. Start with [../HANDOFF.md](../HANDOFF.md) and [installation and setup](INSTALLATION_AND_ONBOARDING.md).**
 
+## Latest public-readiness and recurring billing extension — 2026-10-19
+
+Start with [PUBLIC_READINESS_REVIEW.md](PUBLIC_READINESS_REVIEW.md) and [STRIPE_SETUP.md](STRIPE_SETUP.md) for this pass (paths are under `docs/` from the repository root). The owner approved **US$39.99/year with a three-day free trial**; the existing three-Mac allowance is retained. Checkout remains disabled until the intended Stripe business account, sandbox lifecycle, email delivery, deployment and signed consumer download pass acceptance.
+
+Recurring access now lives in private `billing_subscriptions`, independently of redeemed/one-time licenses. Read `macmint_billing.js`, the subscription migration and disposable subscription integration fixture. Review authoritative ownership, trial-only expiry, first-charge/renewal failures, absolute invoice periods, concurrent sync generations, terminal-state latching, portal cancellation and one-trial eligibility. `BillingCard` and `Checkout` expose these terms and owner-bound management without granting access from browser returns. Old one-time orders remain compatible. No live Stripe account setup or charge is claimed.
+
+Additional fixes reject malformed expiry as unlimited access, bind delayed AI availability/request continuations to their session, populate library screenshots from PhotoKit metadata, and block overlapping photo mutation. Source review also covers planner/executor/recovery, uninstaller, organization, process controls, preview caches, onboarding/permissions and release boundaries. The review document records the scope and remaining native/provider evidence; it is not a zero-bug or complete-public-launch certification.
+
 ## Latest installation extension — 2026-10-19
 
 Implementation `2c6013c` adds a drag-to-Applications DMG alongside the ZIP, universal release builds, explicit accepted-notarization/stapling gates and read-only verification of the built and downloaded image plus an isolated app copy. `FirstRunSetup.swift` owns advisory location classification and persisted setup steps. `InstallationGuide.swift`, onboarding and permission settings explain the intended installed copy. Setup resumes after an access-related restart, offers optional same-account connection and hands Quick Scan back to its presenter to start after dismissal. The website account download includes DMG/ZIP-specific steps; the desktop action is named **Check My Purchase** consistently.

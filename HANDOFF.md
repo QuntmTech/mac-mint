@@ -2,6 +2,14 @@
 
 Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
 
+## Latest public-readiness and recurring billing extension — 2026-10-19
+
+Start with [public-readiness review](docs/PUBLIC_READINESS_REVIEW.md) and [Stripe setup](docs/STRIPE_SETUP.md) for this pass (paths are under `docs/` from the repository root). The owner approved **US$39.99/year with a three-day free trial**; the existing three-Mac allowance is retained. Checkout remains disabled until the intended Stripe business account, sandbox lifecycle, email delivery, deployment and signed consumer download pass acceptance.
+
+Recurring access now lives in private `billing_subscriptions`, independently of redeemed/one-time licenses. Read `macmint_billing.js`, the subscription migration and disposable subscription integration fixture. Review authoritative ownership, trial-only expiry, first-charge/renewal failures, absolute invoice periods, concurrent sync generations, terminal-state latching, portal cancellation and one-trial eligibility. `BillingCard` and `Checkout` expose these terms and owner-bound management without granting access from browser returns. Old one-time orders remain compatible. No live Stripe account setup or charge is claimed.
+
+Additional fixes reject malformed expiry as unlimited access, bind delayed AI availability/request continuations to their session, populate library screenshots from PhotoKit metadata, and block overlapping photo mutation. Source review also covers planner/executor/recovery, uninstaller, organization, process controls, preview caches, onboarding/permissions and release boundaries. The review document records the scope and remaining native/provider evidence; it is not a zero-bug or complete-public-launch certification.
+
 ## Goal and current progress
 
 Review a native Mac storage/cleanup app for everyday owners and developers, with particular attention to data safety, recovery, privacy, account boundaries, native usability and CPU/RAM use. The user requested an independent set of eyes on the implementation and subsequent refinements.

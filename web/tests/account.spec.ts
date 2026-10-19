@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import type { Offer, Subscription } from '../src/lib/offers.js'
 
 // Every remote request is intercepted. These are browser protocol fixtures, not real accounts.
 async function backend(page: Page, signedIn = false, verified = true) {
@@ -10,8 +11,9 @@ async function backend(page: Page, signedIn = false, verified = true) {
   const state = { user, currentUser: user, token, redeemWait: Promise.resolve(), redeemRequests: 0, verificationAttempts: 0, verificationFails: false,
     checkoutError: '' as '' | 'checkout_complete' | 'checkout_expired' | 'checkout_unavailable' | 'checkout_in_progress' | 'checkout_attention',
     canonicalKey: '84bfa09d-9db2-4f79-a680-b3a461d7af08', checkoutURLOverride: null as string | null,
-    statusOffer: undefined as { amount_minor: number; currency: string; plan: string; duration_days: number; max_devices: number } | undefined,
-    offer: { enabled: true, amount_minor: 7900, currency: 'usd', duration_days: 365, max_devices: 3 },
+    statusOffer: undefined as Omit<Offer, 'enabled'> | undefined,
+    offer: { enabled: true, amount_minor: 7900, currency: 'usd', duration_days: 365, max_devices: 3 } as Offer,
+    subscription: null as Subscription | null, portalURL: 'https://billing.stripe.com/p/session/fixture', portalRequests: 0,
     configFails: false, configWait: Promise.resolve(), checkoutWait: Promise.resolve(),
     status: 'pending' as 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'not_found',
     statusCanStartNew: false, statusFails: false, statusRequests: [] as string[],
@@ -25,6 +27,7 @@ async function backend(page: Page, signedIn = false, verified = true) {
     const url = new URL(route.request().url())
     if (url.origin === 'http://127.0.0.1:4173') return route.continue()
     if (url.origin === 'https://checkout.stripe.com') return route.fulfill({ contentType: 'text/html', body: '<h1>Local checkout fixture</h1>' })
+    if (url.origin === 'https://billing.stripe.com') return route.fulfill({ contentType: 'text/html', body: '<h1>Local billing fixture</h1>' })
     if (url.origin !== 'https://macmint.cloudpod.pro') {
       state.unexpected.push(url.origin); return route.abort()
     }
@@ -34,7 +37,9 @@ async function backend(page: Page, signedIn = false, verified = true) {
     if (path === '/api/macmint/me') {
       state.accountRequests++
       return respond({ user: state.currentUser, entitlement: { plan: state.active ? 'pro' : 'free', active: state.active,
-        status: 'active', expires_at: null, max_devices: state.active ? 3 : 0, source: state.active ? 'stripe' : 'signup' }, devices: [], server_time: new Date().toISOString() })
+        status: 'active', expires_at: state.subscription?.trial_through ?? state.subscription?.paid_through ?? null,
+        max_devices: state.active ? 3 : 0, source: state.subscription?.status === 'trialing' ? 'subscription_trial' : state.active ? 'stripe' : 'signup' },
+        billing: { subscription: state.subscription }, devices: [], server_time: new Date().toISOString() })
     }
     if (path === '/api/macmint/redeem') {
       const redeemUser = { ...state.currentUser }
@@ -52,6 +57,10 @@ async function backend(page: Page, signedIn = false, verified = true) {
       state.statusRequests.push(url.searchParams.get('request_key') ?? '')
       return state.statusFails ? respond({ message: 'Status temporarily unavailable.' }, 503)
         : respond({ state: state.status, can_start_new: state.statusCanStartNew, offer: state.statusOffer })
+    }
+    if (path === '/api/macmint/billing/portal') {
+      state.portalRequests++
+      return respond({ url: state.portalURL })
     }
     if (path === '/api/macmint/checkout') {
       state.checkoutRequests.push(route.request().postDataJSON())
@@ -467,3 +476,79 @@ for (const format of ['dmg', 'zip']) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   })
 }
+
+const annualOffer = { enabled: true, billing_mode: 'subscription' as const, billing_interval: 'year' as const,
+  billing_interval_count: 1, trial_days: 3, amount_minor: 3999, currency: 'usd', duration_days: 0, max_devices: 3 }
+const subscriptionFixture: Subscription = { ...annualOffer, status: 'trialing', cancel_at_period_end: false,
+  cancel_at: null, paid_through: null, trial_through: '2027-02-04T12:00:00Z', current_period_end: '2027-02-04T12:00:00Z' }
+
+test('annual trial shows the first charge, automatic renewal, cancellation and Mac allowance before checkout', async ({ page }) => {
+  const state = await backend(page, true)
+  state.offer = { ...annualOffer }
+  await page.goto('/account')
+  await expect(page.locator('p.text-lg.font-semibold')).toContainText('3 days free, then $39.99 / year USD')
+  await expect(page.getByText('Recurring subscription · Up to 3 Macs')).toBeVisible()
+  await expect(page.getByText(/A payment method is required.*Cancel before the trial ends/)).toBeVisible()
+  await expect(page.getByText(/Renews automatically each year/)).toBeVisible()
+  await expect(page.getByText('Lifetime access', { exact: true })).toHaveCount(0)
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+test('trial account has a bounded end date and owner billing management in light and dark modes', async ({ page }) => {
+  const state = await backend(page, true)
+  state.active = true; state.subscription = { ...subscriptionFixture }
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.goto('/account')
+  await expect(page.getByText(/^Trial ends /)).toBeVisible()
+  const billing = page.getByRole('region', { name: 'Subscription billing' })
+  await expect(billing).toContainText(/free trial.*ends/)
+  await expect(billing).toContainText('billing starts at $39.99 per year')
+  await expect(page.getByText('Lifetime access', { exact: true })).toHaveCount(0)
+  await page.emulateMedia({ colorScheme: 'light' })
+  await page.getByRole('button', { name: 'Manage billing or cancel' }).click()
+  await expect(page).toHaveURL(state.portalURL)
+  expect(state.portalRequests).toBe(1); expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+test('payment recovery rejects unsafe portal redirects and still permits retry when checkout is closed', async ({ page }) => {
+  const state = await backend(page, true)
+  state.offer.enabled = false
+  state.subscription = { ...subscriptionFixture, status: 'past_due', trial_days: 0, trial_through: null }
+  state.portalURL = 'https://billing.stripe.com.attacker.invalid/session'
+  await page.goto('/account')
+  await expect(page.getByRole('alert')).toContainText('Payment needs attention')
+  await page.getByRole('button', { name: 'Manage billing or cancel' }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'address could not be verified' })).toBeVisible()
+  await expect(page).toHaveURL(/\/account$/)
+  state.portalURL = 'https://billing.stripe.com/p/session/fixture'
+  await page.getByRole('button', { name: 'Manage billing or cancel' }).click()
+  await expect(page).toHaveURL(state.portalURL)
+  expect(state.portalRequests).toBe(2); expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+test('ended subscription can restart only with server authorization and refreshes used trial terms', async ({ page }) => {
+  const state = await backend(page, true)
+  state.offer = { ...annualOffer, trial_days: 0 }; state.statusOffer = { ...annualOffer }
+  state.status = 'fulfilled'; state.statusCanStartNew = true
+  state.subscription = { ...subscriptionFixture, status: 'canceled' }
+  await retainCheckout(page)
+  await page.goto('/account?checkout=processing')
+  await expect(page.getByText('Your previous subscription has ended. You can start a new subscription.')).toBeVisible()
+  await page.getByRole('button', { name: 'Start a new checkout attempt' }).click()
+  await expect(page.locator('p.text-lg.font-semibold')).toContainText('$39.99 / year USD')
+  await expect(page.locator('p.text-lg.font-semibold')).not.toContainText('days free')
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toBeEnabled()
+  expect(await page.evaluate(() => sessionStorage.getItem('mm_checkout_fixtureuser1234'))).toBe(null)
+  await expect(page.getByRole('button', { name: 'View billing history' })).toBeVisible()
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})
+
+test('canceling renewal explains the access end without offering a second purchase', async ({ page }) => {
+  const state = await backend(page, true)
+  state.active = true; state.subscription = { ...subscriptionFixture, status: 'active', trial_through: null,
+    paid_through: '2027-02-04T12:00:00Z', cancel_at_period_end: true }
+  await page.goto('/account')
+  await expect(page.getByRole('region', { name: 'Subscription billing' })).toContainText(/Renewal is canceled.*Access ends/)
+  await expect(page.getByRole('button', { name: 'Continue to checkout' })).toHaveCount(0)
+  expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
+})

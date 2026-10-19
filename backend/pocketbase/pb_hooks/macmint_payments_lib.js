@@ -43,7 +43,28 @@ function validConfiguration(cfg, nowMillis = Date.now()) {
     cfg.duration_days * 86400000 + nowMillis <= 8640000000000000 &&
     Number.isSafeInteger(cfg.max_devices) && cfg.max_devices >= 1 && cfg.max_devices <= 100 &&
     typeof cfg.livemode === "boolean" && typeof cfg.enabled === "boolean" &&
-    ((cfg.plan === "lifetime") === (cfg.duration_days === 0)) && webOrigin(cfg.web_origin, cfg.livemode) !== null)
+    validBillingTerms(cfg) && webOrigin(cfg.web_origin, cfg.livemode) !== null)
+}
+function billingMode(value) { return value.billing_mode || "payment" }
+function validBillingTerms(cfg) {
+  if (billingMode(cfg) === "payment") return (cfg.plan === "lifetime") === (cfg.duration_days === 0)
+  return billingMode(cfg) === "subscription" && cfg.plan === "pro" && cfg.duration_days === 0 &&
+    (cfg.trial_days === undefined || Number.isSafeInteger(cfg.trial_days) && cfg.trial_days >= 0 && cfg.trial_days <= 30) &&
+    ["month", "year"].indexOf(cfg.billing_interval) >= 0 && cfg.billing_interval_count === 1 &&
+    typeof cfg.portal_configuration_id === "string" && /^bpc_[A-Za-z0-9]+$/.test(cfg.portal_configuration_id)
+}
+function publicOffer(cfg) {
+  const offer = {}
+  for (const field of ["amount_minor", "currency", "plan", "duration_days", "max_devices"]) offer[field] = cfg[field]
+  if (billingMode(cfg) === "subscription") {
+    offer.billing_mode = "subscription"; offer.billing_interval = cfg.billing_interval; offer.billing_interval_count = cfg.billing_interval_count
+    offer.trial_days = cfg.trial_days || 0
+  }
+  return offer
+}
+function offerForUser(app, cfg, userId) {
+  if (billingMode(cfg) !== "subscription" || !userId) return cfg
+  return { ...cfg, trial_days: require(`${__hooks}/macmint_billing.js`).trialUsed(app, userId) ? 0 : cfg.trial_days || 0 }
 }
 // A diagnostic contains reason codes only: never echo config records or secret values.
 function readiness(app) {
@@ -72,12 +93,17 @@ function checkoutStatus(app, user, key) {
   catch (_) { return { state: "not_found", can_start_new: false } }
   const state = String(order.get("state"))
   if (["created", "pending", "fulfilled", "failed", "expired"].indexOf(state) < 0) throw Error("Unknown checkout state")
-  const result = { state, can_start_new: state === "failed" || state === "expired" }
+  let repeat = false
+  if (state === "fulfilled") {
+    const lib = require(`${__hooks}/macmint_lib.js`)
+    const billing = require(`${__hooks}/macmint_billing.js`)
+    repeat = !lib.effectiveEntitlement(app, user.id).active && billing.canRepurchase(app, user.id, order)
+  }
+  const result = { state, can_start_new: state === "failed" || state === "expired" || repeat }
   const snapshot = { enabled: true }
-  for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode"]) snapshot[field] = order.get(field)
+  for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode", "billing_mode", "billing_interval", "billing_interval_count", "portal_configuration_id", "trial_days"]) snapshot[field] = order.get(field)
   if (validConfiguration(snapshot)) {
-    result.offer = {}
-    for (const field of ["amount_minor", "currency", "plan", "duration_days", "max_devices"]) result.offer[field] = snapshot[field]
+    result.offer = publicOffer(snapshot)
   }
   return result
 }
@@ -101,11 +127,21 @@ function orderForRequest(app, user, key, cfg) {
       throw { code: "checkout_in_progress", request_key: pending[0].get("request_key") }
     }
     if (pending.length) throw { code: "checkout_attention" }
+    const lib = require(`${__hooks}/macmint_lib.js`)
+    if (require(`${__hooks}/macmint_billing.js`).hasOngoing(tx, user.id) ||
+        billingMode(cfg) === "subscription" && lib.effectiveEntitlement(tx, user.id).active) throw { code: "plan_exists" }
     order = new Record(tx.findCollectionByNameOrId("checkout_orders"))
     order.set("user", user.id); order.set("request_key", key); order.set("state", "created")
     order.set("customer_email", String(user.get("email") || ""))
     order.set("web_origin", webOrigin(cfg.web_origin, cfg.livemode))
     for (const field of ["price_id", "amount_minor", "currency", "plan", "duration_days", "max_devices", "livemode"]) order.set(field, cfg[field])
+    order.set("billing_mode", billingMode(cfg))
+    if (billingMode(cfg) === "subscription") {
+      order.set("trial_days", offerForUser(tx, cfg, user.id).trial_days)
+      for (const field of ["billing_interval", "billing_interval_count", "portal_configuration_id"]) order.set(field, cfg[field])
+      const previous = require(`${__hooks}/macmint_billing.js`).customer(tx, user.id, cfg.livemode)
+      if (previous) order.set("customer_id", previous)
+    }
     tx.save(order)
   })
   return order
@@ -130,19 +166,29 @@ function checkout(app, user, key) {
   // Historical unbound orders may already have POSTed with an unknown email. Changing
   // parameters under the same idempotency key is unsafe; webhooks can still reconcile them.
   if (!order.get("customer_email")) throw { code: "checkout_attention" }
+  const mode = order.get("billing_mode") || "payment"
   const price = client.send("GET", "prices/" + encodeURIComponent(order.get("price_id")))
-  if (!price.active || price.type !== "one_time" || price.unit_amount !== order.get("amount_minor") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
+  if (!price.active || price.type !== (mode === "subscription" ? "recurring" : "one_time") || price.unit_amount !== order.get("amount_minor") || price.currency !== order.get("currency") || price.livemode !== order.get("livemode")) throw Error("This offer needs attention before purchase.")
+  if (mode === "subscription" && (!price.recurring || price.recurring.interval !== order.get("billing_interval") || price.recurring.interval_count !== order.get("billing_interval_count") || price.recurring.usage_type !== "licensed")) throw Error("This recurring offer needs attention before purchase.")
+  if (mode === "subscription") require(`${__hooks}/macmint_billing.js`).verifyPortalConfiguration(client, order.get("portal_configuration_id"), order.get("livemode"))
   // Old orders used this original hardcoded origin. Never replace it with current
   // configuration while retrying a potentially accepted provider request.
   const origin = order.get("web_origin") || "https://macmint.co"
   if (webOrigin(origin, order.get("livemode")) !== origin) throw Error("Invalid checkout origin")
-  const session = client.send("POST", "checkout/sessions", {
-    mode: "payment", "line_items[0][price]": order.get("price_id"), "line_items[0][quantity]": 1,
+  const fields = {
+    mode, "line_items[0][price]": order.get("price_id"), "line_items[0][quantity]": 1,
     client_reference_id: user.id, "metadata[macmint_order]": order.id,
-    customer_email: order.get("customer_email"),
     success_url: origin + "/account?checkout=processing", cancel_url: origin + "/account?checkout=cancelled",
     integration_identifier: "macmint_hosted_" + order.id.slice(0, 8).replace(/\d/g, n => "abcdefghij"[Number(n)]),
-  }, "macmint-order-" + order.id)
+  }
+  if (order.get("customer_id")) fields.customer = order.get("customer_id")
+  else fields.customer_email = order.get("customer_email")
+  if (mode === "subscription") {
+    fields["subscription_data[metadata][macmint_order]"] = order.id
+    fields.payment_method_collection = "always"
+    if (order.get("trial_days") > 0) fields["subscription_data[trial_period_days]"] = order.get("trial_days")
+  }
+  const session = client.send("POST", "checkout/sessions", fields, "macmint-order-" + order.id)
   if (!/^cs_[A-Za-z0-9_]+$/.test(session.id || "")) throw Error("Checkout could not be opened.")
   app.runInTransaction(tx => {
     const current = tx.findRecordById("checkout_orders", order.id)
@@ -154,7 +200,7 @@ function checkout(app, user, key) {
   return checkoutURL(session, app.findRecordById("checkout_orders", order.id), user)
 }
 function checkoutURL(session, order, user) {
-  if (session.id !== order.get("session_id") || session.mode !== "payment" ||
+  if (session.id !== order.get("session_id") || session.mode !== (order.get("billing_mode") || "payment") ||
       session.client_reference_id !== user.id || !session.metadata || session.metadata.macmint_order !== order.id ||
       session.livemode !== order.get("livemode")) throw Error("Checkout session mismatch")
   if (order.get("state") === "fulfilled" || session.status === "complete" || session.payment_status === "paid") throw { code: "checkout_complete" }
@@ -171,14 +217,18 @@ function authoritativeSession(app, session) {
 }
 function verifyOrderSession(order, full) {
   const lines = full.line_items && full.line_items.data
-  if (full.mode !== "payment" || full.client_reference_id !== order.get("user") || full.amount_total !== order.get("amount_minor") ||
+  const total = order.get("billing_mode") === "subscription" && order.get("trial_days") > 0 ? 0 : order.get("amount_minor")
+  if (full.mode !== (order.get("billing_mode") || "payment") || full.client_reference_id !== order.get("user") || full.amount_total !== total ||
       full.currency !== order.get("currency") || full.livemode !== order.get("livemode") || !lines || lines.length !== 1 ||
       full.line_items.has_more || lines[0].quantity !== 1 || !lines[0].price || lines[0].price.id !== order.get("price_id") ||
       (order.get("session_id") && order.get("session_id") !== full.id)) throw Error("Order mismatch")
 }
 function fulfill(app, session) {
   // A signed event is only a trigger. Retrieve authoritative session + line items.
-  return fulfillSession(app, authoritativeSession(app, session))
+  const full = authoritativeSession(app, session)
+  verifyOrderSession(app.findRecordById("checkout_orders", full.metadata.macmint_order), full)
+  if (full.mode === "subscription") return require(`${__hooks}/macmint_billing.js`).fulfill(app, full)
+  return fulfillSession(app, full)
 }
 function fulfillSession(app, full) {
   if (full.payment_status !== "paid") return false
@@ -204,7 +254,7 @@ function fulfillSession(app, full) {
 function recordTerminalSession(app, session, state) {
   const full = authoritativeSession(app, session)
   // Duplicate or out-of-order terminal events cannot downgrade a successful payment.
-  if (full.payment_status === "paid") return fulfillSession(app, full)
+  if (full.payment_status === "paid") return full.mode === "subscription" ? require(`${__hooks}/macmint_billing.js`).fulfill(app, full) : fulfillSession(app, full)
   if (state === "expired" && full.status !== "expired") return false
   if (state === "failed" && (full.status !== "complete" || full.payment_status !== "unpaid")) return false
   if (["expired", "failed"].indexOf(state) < 0) throw Error("Invalid checkout transition")
@@ -216,4 +266,4 @@ function recordTerminalSession(app, session, state) {
   })
   return true
 }
-module.exports = { StripeClient, secret, configuration, validConfiguration, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession }
+module.exports = { StripeClient, secret, configuration, validConfiguration, publicOffer, offerForUser, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession, authoritativeSession, verifyOrderSession }
