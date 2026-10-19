@@ -325,31 +325,37 @@ private struct PerformanceResourceCard: View, Equatable {
       && left.fraction == right.fraction && left.status == right.status && left.sort == right.sort
   }
 
-  var body: some View {
-    Button { select(key) } label: {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack {
-          Label(title, systemImage: icon).font(.callout.weight(.semibold)).foregroundStyle(.primary)
-          Spacer(minLength: 8)
-          Text(status).font(.caption.weight(.medium)).foregroundStyle(tint).lineLimit(1)
-        }
-        HStack(alignment: .firstTextBaseline) {
-          Text(value).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
-            .tracking(-0.8).foregroundStyle(AppTheme.ink).lineLimit(1).minimumScaleFactor(0.6)
-          Spacer(minLength: 8)
-          Image(systemName: sort.key == key && sort.direction == .ascending ? "arrow.up" : "arrow.down")
-            .font(.caption.weight(.semibold)).foregroundStyle(sort.key == key ? .primary : .secondary)
-        }
-        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-        PerformanceMeter(fraction: fraction, tint: tint).frame(height: 5)
+  private var selected: Bool { sort.key == key }
+
+  private var face: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Label(title, systemImage: icon).font(.callout.weight(.semibold)).foregroundStyle(.primary)
+        Spacer(minLength: 8)
+        Text(status).font(.caption.weight(.medium)).foregroundStyle(tint).lineLimit(1)
       }
-      .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
-      .padding(14)
-      .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.corner))
-      .overlay(RoundedRectangle(cornerRadius: AppTheme.corner).strokeBorder(
-        sort.key == key || contrast == .increased ? AppTheme.ink.opacity(0.45) : AppTheme.border,
-        lineWidth: sort.key == key ? 1.5 : 1))
-      .contentShape(RoundedRectangle(cornerRadius: AppTheme.corner))
+      HStack(alignment: .firstTextBaseline) {
+        Text(value).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
+          .tracking(-0.8).foregroundStyle(AppTheme.ink).lineLimit(1).minimumScaleFactor(0.6)
+        Spacer(minLength: 8)
+        Image(systemName: selected && sort.direction == .ascending ? "arrow.up" : "arrow.down")
+          .font(.caption.weight(.semibold)).foregroundStyle(selected ? Color.primary : Color.secondary)
+      }
+      Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+      PerformanceMeter(fraction: fraction, tint: tint).frame(height: 5)
+    }
+  }
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: AppTheme.corner)
+    let stroke: Color = selected || contrast == .increased ? AppTheme.ink.opacity(0.45) : AppTheme.border
+    Button { select(key) } label: {
+      face
+        .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(AppTheme.surface, in: shape)
+        .overlay(shape.strokeBorder(stroke, lineWidth: selected ? 1.5 : 1))
+        .contentShape(shape)
     }
     .buttonStyle(.plain)
     .help("Sort running apps by highest " + title.lowercased() + " use")

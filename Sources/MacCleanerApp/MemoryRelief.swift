@@ -34,11 +34,15 @@ final class MemoryRelief {
     source.resume(); pressureSource = source
     activity.observe { [weak self] foreground in self?.foregroundChanged(foreground) }
     closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil,
-      queue: .main) { @Sendable [weak self] note in
-      let normal = MainActor.assumeIsolated { (note.object as? NSWindow).map { $0.level == .normal && !($0 is NSPanel) } ?? false }
-      guard normal else { return }
-      // Release after the window and its views have actually gone away.
-      Task { @MainActor [weak self] in self?.release() }
+      queue: .main) { @Sendable [weak self] _ in
+      // Checked after the window and its views have actually gone away; sheets and the
+      // menu bar popover closing don't count while a workspace window remains.
+      Task { @MainActor [weak self] in
+        let open = NSApplication.shared.windows.contains {
+          $0.isVisible && $0.level == .normal && !($0 is NSPanel) && $0.canBecomeMain
+        }
+        if !open { self?.release() }
+      }
     }
   }
 
