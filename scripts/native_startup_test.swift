@@ -215,6 +215,8 @@ private struct NativeStartupTest {
       if app.isTerminated {
         throw ProbeFailure(description: "\(label): PID \(pid) exited before its normal main window appeared.")
       }
+      logWindows(pid, label: label)
+      if ProcessInfo.processInfo.environment["MACMINT_PROBE_PROFILE"] == "1" { profileCPU(app, name: "no-window") }
       throw ProbeFailure(description: "\(label): no normal main-window bounds appeared for PID \(pid).")
     }
     log("\(label): normal-layer main window exists (no title, AX, or pixel capture required)")
@@ -226,6 +228,8 @@ private struct NativeStartupTest {
       throw ProbeFailure(description: "\(label): PID \(pid) did not exit within 12 seconds of normal Quit.")
     }
     log("\(label): normal Quit completed")
+    // Let activation pass to another app before the next launch asks for it.
+    _ = waitUntil(seconds: 2) { false }
   }
 
   @MainActor
@@ -304,6 +308,15 @@ private struct NativeStartupTest {
     let bytes = output.fileHandleForReading.readDataToEndOfFile()
     command.waitUntilExit()
     return command.terminationStatus == 0 && String(decoding: bytes, as: UTF8.self).contains(marker)
+  }
+
+  private static func logWindows(_ pid: pid_t, label: String) {
+    let windows = (CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]]) ?? []
+    let owned = windows.filter { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid }
+    log("\(label): \(owned.count) window(s) for PID \(pid); active=\(NSRunningApplication(processIdentifier: pid)?.isActive ?? false)")
+    for window in owned {
+      log("\(label):   layer=\(window[kCGWindowLayer as String] ?? "?") onscreen=\(window[kCGWindowIsOnscreen as String] ?? "?") bounds=\(window[kCGWindowBounds as String] ?? "?")")
+    }
   }
 
   private static func hasMainWindow(_ pid: pid_t) -> Bool {
@@ -660,8 +673,9 @@ extension NativeStartupTest {
       log("Companion apps: not launched outside a disposable CI runner.")
       return []
     }
-    let paths = ["Calculator", "TextEdit", "Stickies", "Font Book", "Dictionary", "Preview", "Utilities/Grapher",
-      "Utilities/Script Editor"].map { "/System/Applications/\($0).app" }
+    // Apps without document browsers or first-run panels, which could hold activation.
+    let paths = ["Calculator", "Stickies", "Font Book", "Dictionary", "Utilities/Audio MIDI Setup",
+      "Utilities/ColorSync Utility", "Utilities/Disk Utility", "Utilities/Terminal"].map { "/System/Applications/\($0).app" }
     var mailboxes: [LaunchMailbox] = []
     for path in paths where FileManager.default.fileExists(atPath: path) {
       let configuration = NSWorkspace.OpenConfiguration()
