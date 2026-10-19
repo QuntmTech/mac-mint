@@ -349,6 +349,9 @@ private struct PerformanceResourceCard: View, Equatable {
   var body: some View {
     let shape = RoundedRectangle(cornerRadius: AppTheme.corner)
     let stroke: Color = selected || contrast == .increased ? AppTheme.ink.opacity(0.45) : AppTheme.border
+    let hint: String = "Sorts running apps by highest \(title.lowercased()) use"
+    let label: String = "\(title), \(value). \(subtitle). \(status)"
+    let identifier: String = "performance-card-\(key.rawValue.lowercased())"
     Button { select(key) } label: {
       face
         .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
@@ -358,11 +361,11 @@ private struct PerformanceResourceCard: View, Equatable {
         .contentShape(shape)
     }
     .buttonStyle(.plain)
-    .help("Sort running apps by highest " + title.lowercased() + " use")
+    .help("Sort running apps by highest \(title.lowercased()) use")
     .accessibilityElement(children: .combine)
-    .accessibilityLabel(title + ", " + value + ". " + subtitle + ". " + status)
-    .accessibilityHint("Sorts running apps by highest " + title.lowercased() + " use")
-    .accessibilityIdentifier("performance-card-" + key.rawValue.lowercased())
+    .accessibilityLabel(label)
+    .accessibilityHint(hint)
+    .accessibilityIdentifier(identifier)
   }
 }
 
@@ -406,13 +409,20 @@ private struct PerformanceLiveText: View {
       let sampledAt = feed.sampledAt(live)
       let time = sampledAt?.formatted(date: .omitted, time: .standard)
       let state = feed.paused ? "Paused" : (sampledAt == nil ? "Measuring" : "Live")
-      Text("Main processes · helpers not included · " + (time.map { state + " · " + $0 } ?? state))
+      let reading: String = time.map { "\(state) · \($0)" } ?? state
+      let detail: String = Self.detail(time: time, paused: feed.paused, interval: feed.samplingInterval)
+      Text("Main processes · helpers not included · \(reading)")
         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        .help(time.map { time in
-          feed.paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
-            : "Updated \(time) · refreshes about every \(Int(feed.samplingInterval)) seconds"
-        } ?? (feed.paused ? "Paused before the first sample. Resume to measure activity." : "Measuring app activity…"))
+        .help(detail)
     }
+  }
+
+  private static func detail(time: String?, paused: Bool, interval: TimeInterval) -> String {
+    guard let time else {
+      return paused ? "Paused before the first sample. Resume to measure activity." : "Measuring app activity…"
+    }
+    return paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
+      : "Updated \(time) · refreshes about every \(Int(interval)) seconds"
   }
 }
 
