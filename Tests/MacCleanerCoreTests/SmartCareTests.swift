@@ -73,6 +73,25 @@ final class SmartCareTests: XCTestCase {
     XCTAssertTrue(SafetyPolicy(homeDirectory: URL(fileURLWithPath: "/Users/u")).reviewedFileDecision(for: plan.url).allowed)
   }
 
+  func testDownloadsSkipExcludedRootsAndAncestorsWithoutSizingProtectedDescendants() async throws {
+    let downloads = makeTempDirectory()
+    defer { try? fm.removeItem(at: downloads) }
+    let folder = downloads.appendingPathComponent("Old exports")
+    try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+    let excluded = try write(folder, "keep.pdf", kb: 4)
+    let included = try write(downloads, "included.zip", kb: 4)
+    let usage = StaticUsage([folder.path: UsageEvidence(added: daysAgo(200), useCount: 0, isIndexed: true),
+      included.path: UsageEvidence(added: daysAgo(200), useCount: 0, isIndexed: true)])
+    let fixedNow = now
+    let scanner = DownloadsScanner(downloadsDirectory: downloads, usage: usage, now: { fixedNow })
+    let report = await scanner.scan(minimumBytes: 1, ignoredPaths: [excluded.path])
+    XCTAssertEqual(report.value.map { $0.url.resolvingSymlinksInPath() }, [included.resolvingSymlinksInPath()])
+    // A non-directory root would produce an access error if enumerated before exclusions.
+    let blocked = await DownloadsScanner(downloadsDirectory: included).scan(ignoredPaths: [included.path])
+    XCTAssertTrue(blocked.value.isEmpty)
+    XCTAssertTrue(blocked.issues.isEmpty)
+  }
+
   // MARK: Unused apps
 
   func testAppScannerRecordsLastUsedFromSpotlightOnly() async throws {

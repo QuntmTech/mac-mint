@@ -316,7 +316,7 @@ test('full refunds revoke the order license and access once; replays and late su
   assert.equal(f.order.get('state'), 'refunded')
   assert.equal(f.order.get('refunded_minor'), 1900)
   assert.equal(licenses(f)[0].get('status'), 'revoked')
-  assert.deepEqual([entitlement(f).active, entitlement(f).status], [false, 'revoked'])
+  assert.deepEqual([entitlement(f).active, entitlement(f).plan, entitlement(f).status], [false, 'free', 'active'], 'no account restriction')
   assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_fixture' }).result, 'unchanged')
   payments.fulfill(f.app, { id: f.session.id })
   payments.recordTerminalSession(f.app, { id: f.session.id }, 'expired')

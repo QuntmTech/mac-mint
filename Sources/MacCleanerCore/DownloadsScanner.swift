@@ -93,6 +93,9 @@ public actor DownloadsScanner {
     minimumIdleDays: Int = 90, minimumBytes: Int64 = 5 * 1_048_576, ignoredPaths: Set<String> = []
   ) async -> ScanReport<[DownloadItem]> {
     let started = Date()
+    guard !FileSystem.isIgnored(downloads, ignoredPaths: ignoredPaths) else {
+      return ScanReport(value: [], duration: Date().timeIntervalSince(started))
+    }
     let keys: [URLResourceKey] = [
       .isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey,
     ]
@@ -111,7 +114,10 @@ public actor DownloadsScanner {
     var items: [DownloadItem] = []
     for entry in entries {
       if Task.isCancelled { break }
-      if FileSystem.isIgnored(entry, ignoredPaths: ignoredPaths) { continue }
+      // This inventory acts on whole top-level items. Do not traverse a folder
+      // containing excluded descendants or offer an ancestor that cannot be removed.
+      if FileSystem.isIgnored(entry, ignoredPaths: ignoredPaths) ||
+        FileSystem.containsIgnoredDescendant(entry, ignoredPaths: ignoredPaths) { continue }
       guard let values = try? FileSystem.fresh(entry).resourceValues(forKeys: Set(keys)),
         values.isSymbolicLink != true
       else { continue }

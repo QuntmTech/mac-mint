@@ -25,6 +25,7 @@ class StripeFixture(BaseHTTPRequestHandler):
         path, _, query = self.path.partition('?')
         if path.startswith('/v1/charges/'): return self.respond(charges[path.rsplit('/', 1)[-1]])
         if path.startswith('/v1/disputes/'): return self.respond(disputes[path.rsplit('/', 1)[-1]])
+        if path == '/v1/invoice_payments': return self.respond(dict(object='list', has_more=False, data=[]))  # One-time payments have no invoice.
         if path == '/v1/checkout/sessions':
             intent = urllib.parse.parse_qs(query).get('payment_intent', [''])[0]
             return self.respond(dict(object='list', has_more=False, data=[v for v in sessions.values() if v.get('payment_intent') == intent][:1]))
@@ -126,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             print('PASS: 16 concurrent AI reservations, exactly 8 approvals')
             limits = call('/__test/rate-limits')[1]
             assert limits['enabled'] is True, limits
-            assert {'/api/macmint/redeem', '/api/macmint/checkout', '*:auth', 'users:create', 'site_events:create', '/api/macmint/stripe/webhook', '/api/'} <= set(limits['labels'])
+            assert {'/api/macmint/redeem', '/api/macmint/checkout', '/api/macmint/billing/portal', '*:auth', 'users:create', 'site_events:create', '/api/macmint/stripe/webhook', '/api/'} <= set(limits['labels'])
             bogus = dict(code='MINT-AAAA-BBBB-CCCC-DDDD')
             redeems = [call('/api/macmint/redeem', bogus, token, ip='198.51.100.7')[0] for _ in range(11)]
             assert redeems == [404] * 10 + [429], redeems

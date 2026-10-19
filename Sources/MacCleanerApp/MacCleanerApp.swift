@@ -29,6 +29,8 @@ struct MacCleanerDesktopApp: App {
         .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 980, minHeight: 620)
         .task {
+          PreviewCaches.startMemoryPressureHandling()
+          monitor.activateControls()
           care.start()
           updates.start()
           await account.start()

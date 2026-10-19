@@ -26,6 +26,8 @@ const RULES = [
   { label: "/api/macmint/redeem", maxRequests: 10, duration: 600 },
   { label: "/api/macmint/devices/activate", maxRequests: 20, duration: 600 },
   { label: "/api/macmint/checkout", maxRequests: 10, duration: 600 },
+  // Each call creates a Stripe billing portal session.
+  { label: "/api/macmint/billing/portal", maxRequests: 10, duration: 600 },
   // Prefix rules match in list order: keep specific prefixes before /api/.
   { label: "/api/macmint/ai/", maxRequests: 30, duration: 60 },
   { label: "/api/batch", maxRequests: 3, duration: 1 },

@@ -15,7 +15,7 @@ struct DuplicateComparisonSheet: View {
       Text("Content matches by SHA-256. Hard links share one physical file; APFS clones may share storage too, so eventual savings can be lower than file sizes.")
         .font(.callout).foregroundStyle(.secondary)
       ScrollView(.horizontal) {
-        HStack(alignment: .top, spacing: 20) {
+        LazyHStack(alignment: .top, spacing: 20) {
           ForEach(group.files) { file in
             VStack(alignment: .leading, spacing: 8) {
               FileThumbnail(url: file.url, size: 180)
@@ -51,7 +51,7 @@ struct PhotoComparisonSheet: View {
       Text("Each photo resembles the suggested keeper; similarity is not proof that a photo is unwanted. Library deletion syncs to your other devices. Restore library assets through Photos → Recently Deleted.")
         .font(.callout).foregroundStyle(.secondary)
       ScrollView(.horizontal) {
-        HStack(alignment: .top, spacing: 20) {
+        LazyHStack(alignment: .top, spacing: 20) {
           ForEach(group.photos) { photo in
             VStack(alignment: .leading, spacing: 8) {
               PhotoThumbnail(photo: photo, side: 320, allowCloud: cloudPreviews.contains(photo.id))

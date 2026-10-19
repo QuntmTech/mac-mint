@@ -1,5 +1,4 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
-import { Link } from 'react-router-dom'
 import { LogoMark } from './Logo'
 
 export const AuthCard = ({ title, subtitle, children, footer }: {
@@ -9,9 +8,9 @@ export const AuthCard = ({ title, subtitle, children, footer }: {
   footer?: ReactNode
 }) => (
   <div className="mx-auto flex w-full max-w-md flex-col px-4 py-16 sm:py-24">
-    <Link to="/" className="mx-auto mb-6" aria-label="MacMint home">
+    <a href="/" className="mx-auto mb-6" aria-label="MacMint home">
       <LogoMark className="size-12" />
-    </Link>
+    </a>
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 dark:border-slate-800 dark:bg-slate-900">
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
       {subtitle && <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}

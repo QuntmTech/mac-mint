@@ -1,83 +1,64 @@
-# Stripe purchase setup
+# Stripe subscriptions and purchase setup
 
-MacMint uses a hosted Stripe Checkout page, server-side purchase orders, signed webhooks, and transactional license grants. The app and website never receive a Stripe secret or restricted API key. The current license implementation accepts **one-time payments** for either time-limited Pro access or lifetime access. Access duration is not a recurring subscription interval.
+The approved starting offer is **US$39.99/year, a three-day free trial, and up to three Macs per account**. Collect a payment method in hosted Checkout; allow one trial per MacMint account. Terms remain server configurable. The intended Stripe business account has not been identified or verified in this session.
 
-Pricing is intentionally unset in `backend/commerce.example.json`. Keep checkout disabled while the owner chooses the offer. A recurring subscription requires a separate Billing lifecycle implementation and tests; changing `duration_days` alone does not add renewals, cancellation, or recurring charges.
+Use `backend/commerce.subscription.example.json` for this offer. It deliberately has `enabled: false`, `livemode: false`, and blank Price/portal IDs. The legacy `commerce.example.json` remains available for compatible one-time purchases. Changing `duration_days` never schedules renewals.
 
-## Inputs still needed
+## Architecture and access rules
 
-Before provisioning a real offer, confirm the intended Stripe account/sandbox, price and currency, one-time versus recurring billing, access duration, device allowance, and refund/support policy. No price or live product was created by the readiness work.
+The app and website never receive provider credentials or card details. Hosted Stripe Checkout creates the subscription, Billing handles renewals, and an authenticated server route creates short-lived Customer Portal sessions for payment details, invoices and cancellation.
 
-The Stripe connector initially reported `UNAUTHORIZED` / “requires reauthentication,” including after a reconnect was reported. A later retry returned “MCP tool call blocked by app configuration.” Neither retry provided account access. This prevented inspection or configuration of the user's Stripe account. The public production checkout-config endpoint returned HTTP 404 during the read-only readiness check; repository changes must be deployed and migrations tested before that route is available there. These are observed setup gaps, not proof of a payment failure.
+Each order freezes its user, email, return origin, Price, amount, cadence, trial eligibility, device allowance and portal configuration before the first provider request. A transaction permits one unresolved checkout per user; retries reuse the original order and idempotency key. Browser return parameters never grant access. Database-only status checks cannot create provider requests or silently replace an uncertain checkout.
 
-## Configuration template and offline preflight
+`billing_subscriptions` is private. Its access dates are separate from redeemed/one-time licenses. Trial access ends at the verified `trial_end`; an unpaid first invoice never grants an annual period. Renewals replace an absolute verified invoice service-period end rather than appending time. Repeated deliveries cannot double the duration. `past_due` retains only previously paid time; `unpaid`, `paused`, `canceled` and `incomplete_expired` grant no recurring access. Period-end cancellation preserves the paid period. Cancellation never erases an independent valid lifetime license. Explicit account revocation/suspension blocks access.
 
-From the repository root:
+Subscription and invoice events fetch current Stripe objects. Ownership resolves through the original authoritative Checkout Session, not arbitrary invoice metadata. Concurrent sync generations reject older results, and terminal subscription records cannot reactivate. A verified fulfilled subscription can be repurchased only after it is terminal, with no ongoing subscription or other active access. An unpaid subscription must be recovered through billing rather than duplicated.
+
+Trial eligibility is private and marked used when the completed Checkout binding is recorded, even if a subsequent provider read fails. A canceled/expired trial cannot be restarted on the same account. A returning customer receives a refreshed zero-trial offer. Previously saved orders retain their original terms. The initial zero-value trial invoice is not treated as a paid year.
+
+## Configuration and preflight
 
 ```sh
-cp backend/commerce.example.json backend/commerce.local.json
+cp backend/commerce.subscription.example.json backend/commerce.local.json
 node backend/scripts/check-commerce-readiness.cjs --config backend/commerce.local.json
 ```
 
-`commerce.local.json` is ignored by Git. The example contains no price and the command is expected to exit **2** with `status: blocked` until the inputs are supplied. It never changes the file, contacts Stripe, enables checkout, or prints credential/configuration values.
+The local JSON is Git-ignored. The command is read-only, never contacts Stripe and never prints secret values. Exit 2 means blocked; exit 0 means only local prerequisites complete. `launch_ready` is always false because real provider, email and installer evidence is separate.
 
-| Field | Meaning |
+| Field | Recurring offer |
 | --- | --- |
-| `enabled` | Keep false until staging verification and release gates pass. |
-| `livemode` | Explicitly false for the isolated sandbox; true only for the intended live account. |
-| `web_origin` | Trusted account-website origin for return links. Defaults to `https://macmint.co` when omitted; set the staging HTTPS origin for staging. No path, query, credentials or fragment. |
-| `price_id` | The approved account's existing active one-time Stripe Price. |
-| `amount_minor` | Exact integer `unit_amount` returned by Stripe for that Price. |
-| `currency` | The matching lowercase Stripe currency code. |
-| `plan` | `pro` for time-limited access or `lifetime`. |
-| `duration_days` | Positive for Pro; zero for lifetime. Does not schedule future charges. |
-| `max_devices` | Approved license device allowance, between 1 and 100. |
+| `enabled` | Keep false until staging, provider and installer acceptance pass. |
+| `livemode` | false for the isolated sandbox; true only in the intended live account. |
+| `web_origin` | Trusted HTTPS website origin, no path/query/credentials/fragment. Defaults to `https://macmint.co`. |
+| `billing_mode` | `subscription` (legacy blank/`payment` retains one-time semantics). |
+| `price_id` | Active recurring licensed Price from that same Stripe account/mode. |
+| `amount_minor`, `currency` | `3999`, `usd`, exactly matching the Price. |
+| `plan`, `duration_days` | `pro`, `0`; recurring access comes from verified trial/invoice periods. |
+| `billing_interval`, `billing_interval_count` | `year`, `1`. Monthly offers are also supported explicitly. |
+| `trial_days` | `3`; zero for ineligible returning accounts; bounded integer 0–30. |
+| `max_devices` | `3`; accepted range 1–100. |
+| `portal_configuration_id` | Explicit active `bpc_…` in the same account/mode. |
 
-The CLI also checks the shape and mode of `STRIPE_RESTRICTED_KEY` and the presence of `STRIPE_WEBHOOK_SECRET` in its environment. Supply them through a protected secret store or a safe local secret-injection workflow; do not put values into source files or paste them into chat. Hosts using the private `app_secrets` fallback should use the authenticated server diagnostic instead of assuming local environment checks describe the deployed host.
+Configure the portal with payment-method updates and cancellation **at period end**. Disable subscription updates: changing to an unknown Price is not implemented by this single-offer integration. The server checks the portal configuration before creating Checkout and before opening the portal. New checkout can be disabled without blocking existing customers from managing/canceling subscriptions.
 
-For isolated local development, `http://localhost:<port>` or `http://127.0.0.1:<port>` is accepted only when `livemode` is false. Real staging should use HTTPS. The origin and account email freeze onto each order before its first Stripe request, so a settings or email change cannot alter a retry's idempotent parameters. Older orders retain their original production return origin. Browser-supplied return URLs are ignored.
+Only sandbox local development accepts HTTP localhost/127.0.0.1 origins. Real staging uses HTTPS. Currency display follows Stripe charge units, including special zero-decimal conventions. [Stripe currency rules](https://docs.stripe.com/currencies#special-cases).
 
-Exit **0** means `local_prerequisites_complete`, not launch approval. `launch_ready` remains false because the CLI cannot establish Price ownership, real key permissions, event delivery, release validation, email delivery, or an actual purchase. Currency presentation follows Stripe charge units, including its special cases; see [Stripe's currency rules](https://docs.stripe.com/currencies#special-cases).
+## Provider credentials and permissions
 
-## Server secrets and permissions
-
-Use a separate general Stripe sandbox for development, isolated from live account settings and from CI fixtures. Store a least-privilege restricted key and matching endpoint signing secret in the host's secret store:
+Use the intended business account and a separate general Stripe sandbox. Store a least-privilege restricted API key and matching signing secret in the host's protected secret store:
 
 - `STRIPE_RESTRICTED_KEY`, or private `app_secrets.name = stripe_restricted_key`.
 - `STRIPE_WEBHOOK_SECRET`, or private `app_secrets.name = stripe_webhook_secret`.
 
-The REST adapter needs Checkout Session create/read access, including line-item retrieval and listing sessions by payment intent, Price read access, and Charges and Disputes read access for refund and dispute handling. Verify the exact restricted-key permissions in the sandbox; a plausible prefix does not establish authorization. No publishable key or Stripe.js is needed for this hosted redirect flow. See [Stripe key handling](https://docs.stripe.com/keys) and [sandbox guidance](https://docs.stripe.com/sandboxes).
+The adapter needs Checkout Sessions create/read (including line items, and listing by subscription and by payment intent), Prices read, Subscriptions read, Invoices read (including invoice payments, which map a refunded or disputed subscription charge to its invoice), Charges read, Disputes read, Billing Portal Configurations read and Billing Portal Sessions create. Verify actual restricted-key permissions in the isolated sandbox. No publishable key or Stripe.js is required. Never commit values or paste them into chat. [Stripe key handling](https://docs.stripe.com/keys), [sandboxes](https://docs.stripe.com/sandboxes).
 
-The PocketBase Goja runtime cannot load the Node Stripe SDK. `macmint_payments_lib.js` therefore uses a small server-only REST client pinned to API version `2026-08-26.dahlia`. Stripe error bodies and credentials are not forwarded to clients.
+PocketBase Goja cannot load Stripe's Node SDK, so the server-only REST adapter pins `2026-08-26.dahlia`. It uses invoice `parent.subscription_details.subscription`, line `pricing.price_details.price`, and subscription-item `current_period_end`. Verify these shapes against the pinned provider API during real sandbox acceptance; protocol fixtures do not certify real credentials or API compatibility.
 
-## Migrations, deployment, and diagnostics
+## Webhooks and deployment
 
-Test migrations against a backed-up staging database before deployment. The order migration adds immutable request data and an `expired` state while preserving old payment evidence. Existing orders without the data needed for a safe retry remain available for fulfillment/reconciliation; they do not silently become new payment attempts.
+Back up staging first and apply **all** versioned migrations, including `1792109500_subscriptions.js`. Reapplying migrations is tested; rollback deliberately preserves billing evidence. Deploy hooks/migrations before the website consuming the new response contract. No provider IDs or secrets are accepted from the browser as billing ownership.
 
-Deploy backend hooks/migrations before the website that consumes the new status contract. The local account app's explicit Check Purchase uses the existing device activation API. A purchase grants entitlement; registering this Mac remains an explicit account action. Periodic verification must not reactivate a deactivated device.
-
-Read-only endpoints:
-
-- `GET /api/macmint/checkout/config`: public purchasable offer, or `enabled: false` when prerequisites are absent. Returns no credentials.
-- `GET /api/macmint/checkout/status?request_key=<UUID>`: authenticated, owner-scoped order status. Known orders include their immutable offer terms. It makes no Stripe API calls. Only verified terminal `failed`/`expired` states permit a new attempt.
-- `GET /api/macmint/admin/commerce/readiness`: superuser-only diagnostic returning `ready` and named `reasons`. It never returns the configuration, secret values, or Stripe object IDs. A true result checks configured local prerequisites, not sandbox end-to-end evidence.
-
-Superuser recovery routes:
-
-- `POST /api/macmint/admin/checkout/reconcile` with `{ "order": "<order id>" }`: retrieves the order's Checkout Session from Stripe and applies its authoritative state through the normal fulfillment and expiry code (paid → fulfilled once; expired → expired). Use it for `checkout_attention` and for pending orders whose terminal webhook never arrived. An open session or a complete-but-unpaid asynchronous payment is reported, not changed; resend the missing Stripe event instead. An order that never recorded a session takes `"session": "cs_..."` (found by its `macmint_order` metadata in the Dashboard; the session must carry that order ID), or, only after checking Stripe and at least 25 hours after creation, `"confirm_expired_without_session": true`.
-- `POST /api/macmint/admin/licenses/revoke` with `{ "license": "<id>" }`, `{ "code": "MINT-…" }` or `{ "order": "<order id>" }`, optional `"reason"`: revokes the license and recomputes the owner's entitlement in one transaction. Idempotent.
-
-Browser returns such as `checkout=processing` are hints for the interface, never proof of payment. A missing or unrecognized order remains unconfirmed. The browser preserves retry identity on cancellation, network errors, and uncertain responses; another unresolved order must be resumed or reconciled before a new one is created.
-
-## Required webhook endpoint
-
-Register the deployed backend URL ending in:
-
-```text
-/api/macmint/stripe/webhook
-```
-
-Subscribe to these event types with a compatible API version:
+Register the backend endpoint `/api/macmint/stripe/webhook` with a matching API version and these events:
 
 ```text
 checkout.session.completed
@@ -87,30 +68,70 @@ checkout.session.expired
 charge.refunded
 charge.dispute.created
 charge.dispute.updated
+customer.subscription.created
+customer.subscription.updated
+customer.subscription.deleted
+customer.subscription.paused
+customer.subscription.resumed
+invoice.paid
+invoice.payment_failed
+invoice.payment_action_required
+invoice.finalization_failed
+invoice.voided
+invoice.marked_uncollectible
 ```
 
-The handler verifies the raw-body signature and timestamp, then retrieves the authoritative Checkout Session and line items. Payment must be paid and match the immutable order's user, mode, Price, amount, currency and quantity before an atomic license/entitlement grant. Expired/failed notifications cannot downgrade a fulfilled purchase. Concurrent/repeated successful deliveries do not extend access twice. See [Stripe fulfillment](https://docs.stripe.com/checkout/fulfillment?payment-ui=stripe-hosted).
+The handler verifies the raw-body HMAC and timestamp, retrieves authoritative objects, and returns retryable 503 on synchronization failure. Provider calls occur outside database transactions. Original Checkout ownership, mode, customer, Price, amount, currency, quantity, cadence and invoice period are validated before updating access. [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks), [trial behavior](https://docs.stripe.com/billing/subscriptions/trials).
 
-Refunds and disputes are handled the same way: the signed event is a trigger, and the server retrieves the Charge or Dispute, maps its payment intent to the order (recorded at fulfillment; older orders are found through their Checkout Session), and in one transaction marks the order `refunded` or `disputed`, revokes its license and recomputes the entitlement from the user's remaining licenses. Replays change nothing, and a later success event cannot restore access. A partial refund only sets `attention = partial_refund` on the order for operator review. A dispute *inquiry* (status `warning_needs_response` / `warning_under_review`) withdraws no funds and only sets `attention = dispute_inquiry`; a formal chargeback (`needs_response`, `under_review`, `lost`), including an inquiry that escalates and arrives as `charge.dispute.updated`, revokes. A refunded order permits a new purchase attempt; a disputed one does not. Operator-set (`manual`) entitlements are not rewritten; an `entitlement_review` audit row is written instead. Events for payments that are not MacMint checkouts are acknowledged and ignored. A won dispute does not restore access automatically, and a dispute first seen as won or closed is ignored; grant a replacement license if appropriate.
+Refunds and disputes are handled the same way: the signed event is a trigger, and the server retrieves the Charge or Dispute and maps its payment intent.
 
-An unresolved legacy order or a lost create response outside the safe idempotency window requires operator reconciliation with Stripe (see the reconcile route above). Preserve its row and request identity. Check the actual session/payment state before marking a terminal outcome; do not delete the order, grant access from the return URL, or create an uncertain replacement payment. If a terminal webhook is missing, database-only status deliberately remains pending even if trying to resume reports an expired provider session. Fix delivery and reconcile the authoritative state before permitting a replacement.
+- **One-time orders** (payment intent recorded at fulfillment; older orders are found through their Checkout Session): one transaction marks the order `refunded` or `disputed`, revokes its license and recomputes the entitlement from the user's remaining licenses. When none remain, the entitlement becomes the plain free state, not `revoked`: `revoked`/`suspended` stay reserved for operator account restrictions, which also block subscriptions. A refunded order permits a new purchase attempt; a disputed one does not.
+- **Subscription invoices** (payment intent → InvoicePayment → invoice → subscription, which must be MacMint's and owned by the same customer and mode): one transaction sets `access_hold` (`refunded` or `disputed`) on that `billing_subscriptions` row. Held subscriptions grant no access. Status syncs and renewal invoices keep updating the row but never clear the hold, so a later renewal cannot silently restore access. While the subscription stays ongoing, the account cannot start a second subscription.
+- In both cases replays change nothing, a later success or renewal event cannot restore access, and a partial refund only sets `attention = partial_refund` for operator review. A dispute *inquiry* (`warning_needs_response` / `warning_under_review`) withdraws no funds and only sets `attention = dispute_inquiry`. A formal chargeback (`needs_response`, `under_review`, `lost`) revokes or holds, including an inquiry that escalates and arrives as `charge.dispute.updated`. A dispute first seen as won or closed is ignored. Operator-set (`manual`) or restricted entitlements are not rewritten; an `entitlement_review` audit row is written instead. Payments of other products are acknowledged and ignored.
 
-## Verification before opening sales
+**Operator re-grant.** Nothing restores access automatically, including a won dispute. For a subscription, resolve the case in Stripe (cancel the subscription if access should end), then call `POST /api/macmint/admin/billing/release-hold` with `{ "order": "<order id>" }` or `{ "subscription": "sub_…" }` and a `"reason"`; the release is audited. For a one-time purchase, mint a replacement license (`POST /api/macmint/admin/licenses`) and have the customer redeem it.
 
-Repository checks, using the pinned disposable PocketBase test runtime:
+Endpoints:
+
+- `GET /api/macmint/checkout/config`: public offer or `enabled:false`; authenticated users get their trial eligibility. No-store.
+- `GET /api/macmint/checkout/status?request_key=<UUID>`: authenticated owner-only durable state and frozen offer, no provider calls.
+- `POST /api/macmint/billing/portal`: authenticated owner-bound customer; ignores browser customer/return URLs. Works while checkout is disabled.
+- `GET /api/macmint/admin/commerce/readiness`: superuser-only reason codes, no configuration/secrets/object IDs. Local prerequisites alone are not launch evidence.
+
+Superuser recovery routes:
+
+- `POST /api/macmint/admin/checkout/reconcile` with `{ "order": "<order id>" }`: applies Stripe's authoritative state through the normal code paths. A one-time order's Checkout Session goes paid → fulfilled once, expired → expired. A subscription order with a bound subscription is resynchronized from its subscription and latest invoice (holds survive). An unbound subscription order is bound through its session. Open sessions and complete-but-unpaid asynchronous payments are reported, not changed; resend the missing Stripe event instead. An order that never recorded a session takes `"session": "cs_..."` (found by its `macmint_order` metadata; the session must carry that order ID), or, only after checking Stripe and at least 25 hours after creation, `"confirm_expired_without_session": true`.
+- `POST /api/macmint/admin/licenses/revoke` with `{ "license": "<id>" }`, `{ "code": "MINT-…" }`, `{ "order": "<order id>" }` or `{ "subscription": "sub_…" }`, optional `"reason"`: revokes a license and recomputes the owner's entitlement, or places an `operator` hold on a subscription order. Idempotent.
+- `POST /api/macmint/admin/billing/release-hold`: the subscription re-grant described above.
+
+An unresolved old order or an uncertain create response outside the safe idempotency window requires operator reconciliation against Stripe. Preserve its row/request identity. Confirm actual provider state before permitting a replacement; never delete the evidence or grant access from a return URL. Refunds and disputes follow the rules above; anything flagged for review needs an operator decision against Stripe.
+
+## Verification before sales
 
 ```sh
 node --test backend/tests/*.test.cjs
 python3 backend/tests/integration.py
 python3 backend/tests/service_integration.py
-cd web
-npm run build
-npm run lint
-npx playwright test
+python3 backend/tests/subscriptions_integration.py
+(cd web && npm run build && npm run lint)
+bash web/scripts/build-homepage.sh
+(cd web && npm run test:browser)
 ```
 
-These tests use synthetic Stripe protocol responses and isolated databases; they do **not** establish that the owner's real Stripe account, restricted key or webhook registration works. Native account lifecycle tests run in macOS CI.
+These use disposable databases, synthetic provider protocol responses and local mail fixtures. Native account/offline/AI lifecycle tests run in macOS CI. They do **not** prove real account permissions, charges, email delivery or downloaded consumer installation.
 
-In the intended isolated sandbox, prove verified account → configured offer → Stripe Checkout → paid webhook → owner status → account entitlement → explicit Mac activation. Also test declined, cancelled, expired and delayed payments; dropped create/return responses; reloads/new tabs; concurrent webhook retries; different users; a changed account email, offer or return origin; device limits; and sign-out during verification.
+In the intended isolated Stripe sandbox, prove account verification → annual offer → payment-method collection → three-day trial → explicit Mac activation → first paid invoice → renewal → payment failure/action-required → recovery → period-end cancellation → final expiry. Use test clocks where supported. Include canceling during the trial, duplicate/reordered/retried webhooks, dropped create responses, a changed account email/offer, second-trial refusal, cross-user portal access, device limits and device transfer. Confirm Stripe trial reminders/receipt emails and the short trial's first-charge disclosure. [Customer Portal integration](https://docs.stripe.com/customer-management/integrate-customer-portal).
 
-Use a validated, notarized stable build before enabling checkout. Prove external verification/reset email delivery. In the sandbox, also prove full refund → access revoked, partial refund → flagged only, and dispute → access revoked. Keep any future subscription lifecycle explicit rather than treating the existing one-time purchase implementation as support for it. Automatic tax requires confirmed registrations and separate testing before enabling it. Only publish the offer and open live sales after the actual sandbox and consumer-install gates pass.
+An additional **real API contract probe** passed on 2026-10-19 in a fresh unclaimed sandbox (expires October 26), using no live account or real card. Its nine checks include the configured annual Price, zero-total trial Checkout, subscription-item/invoice schema, portal response, manually ended trial, first annual invoice paid with `tok_visa`, cancellation flags and terminal cancellation. The test subscription was canceled and the unused Checkout expired. The sanitized [report](validation/stripe-sandbox-2026-10-19.json) includes the probe script hash. Test-clock and account-read permissions were denied for the anonymous key; neither was bypassed. The probe uses manual trial completion and does not certify annual renewal, real webhook transport, Checkout form completion, or the intended business account.
+
+For an operator-selected isolated sandbox, supply a restricted test key through protected environment injection, confirm the selected account separately, and run:
+
+```sh
+python3 backend/scripts/probe-stripe-sandbox.py --run-test-objects --report .build/stripe-sandbox/probe-report.json
+```
+
+This command creates test products, a Price, portal configuration, customer, payment method and subscription. It pays only a test invoice, cancels its subscription and expires its unused Checkout; it leaves test product/Price evidence. It rejects live/unrestricted key prefixes and never prints credentials or hosted-session URLs. It is explicitly opt-in and never part of ordinary CI.
+
+In the sandbox, also prove one-time and subscription-invoice full refunds → access revoked/held, partial refund → flagged only, dispute inquiry → flagged only, chargeback → revoked/held, a renewal after a chargeback → still held, and the operator release.
+
+Before live checkout, prove external verification/reset email delivery and a validated Developer ID-signed, notarized, stapled stable download with a real Gatekeeper/permission walkthrough. Stripe is installed/enabled in this session but exposes no account tools; the live backend currently lacks these billing routes/migrations and has SMTP disabled. No live Price, subscription, charge or production billing configuration was created by this review. Consider Stripe Tax after confirming registration requirements; automatic tax remains disabled pending that setup and separate validation.

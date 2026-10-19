@@ -1,4 +1,6 @@
 import { pb } from './pb'
+import type { Subscription } from './offers'
+export type { Subscription } from './offers'
 
 export type Entitlement = {
   plan: 'free' | 'pro'
@@ -26,6 +28,7 @@ export type AccountSnapshot = {
   server_time: string
   redeemed?: boolean
   already_redeemed?: boolean
+  billing?: { subscription: Subscription | null }
 }
 
 export type Release = {

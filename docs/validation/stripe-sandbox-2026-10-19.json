@@ -1,0 +1,30 @@
+{
+  "mode": "explicit_sandbox",
+  "api_version": "2026-08-26.dahlia",
+  "checks": [
+    "approved recurring Price contract",
+    "period-end cancellation portal contract",
+    "annual Checkout trial total and line-item contract",
+    "three-day trial and item-level period contract",
+    "invoice parent and line pricing contract",
+    "customer portal session response contract",
+    "first annual invoice paid using a Stripe test token",
+    "period-end cancellation preserves active paid time",
+    "terminal cancellation response contract"
+  ],
+  "customer_created": true,
+  "subscription_created": true,
+  "live_operations": 0,
+  "test_clock_used": false,
+  "status": "passed_provider_contract_probe",
+  "limitations": [
+    "Trial ended manually for this probe; renewal/test-clock advancement and real webhook delivery require separate acceptance.",
+    "This does not enable production checkout or certify the intended live business account."
+  ],
+  "test_subscription_canceled": true,
+  "unused_checkout_expired": true,
+  "date": "2026-10-19",
+  "environment": "Fresh unclaimed sandbox provisioned for this review; expires 2026-10-26",
+  "script": "backend/scripts/probe-stripe-sandbox.py",
+  "script_sha256": "50fd8616d9c8bab1f93d11bfbb10f6d2149bb7e9ae36e1e1ab71d639bf9820da"
+}

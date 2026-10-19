@@ -6,7 +6,7 @@ export const productConfig = {
   repositoryUrl: "https://github.com/QuntmTech/mac-mint",
   releasesUrl: "https://github.com/QuntmTech/mac-mint/releases",
   supportUrl: "mailto:support@macmint.co",
-  signInUrl: "https://macmint.co/login",
-  signUpUrl: "https://macmint.co/signup",
+  signInUrl: "/login",
+  signUpUrl: "/signup",
   sourceCommit: "095f2e6b11bd7adc571c5d6f79ff1370f582c32f",
 };

@@ -3,24 +3,13 @@ import { useSearchParams } from 'react-router-dom'
 import { Button, Alert } from './Form'
 import { pb, errorMessage } from '../lib/pb'
 
-type Offer = { enabled: boolean; amount_minor?: number; currency?: string; duration_days?: number; max_devices?: number }
-type OrderStatus = { state: 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'refunded' | 'disputed' | 'not_found'; can_start_new: boolean; offer?: Omit<Offer, 'enabled'> }
-// Terminal attempts a new purchase may replace. A disputed payment is final but blocks a new one.
-const terminalStates = new Set(['failed', 'expired', 'refunded'])
-const finalStates = new Set(['fulfilled', 'failed', 'expired', 'refunded', 'disputed'])
-// Stripe's minor-unit conventions differ from ISO/Intl for a few currencies.
-const zeroDecimal = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'])
+import { formattedPrice, validOfferTerms, type Offer } from '../lib/offers'
 
-const formattedPrice = (offer: Omit<Offer, 'enabled'>) => {
-  if (!Number.isSafeInteger(offer.amount_minor) || offer.amount_minor! <= 0 || !/^[a-z]{3}$/i.test(offer.currency ?? '')) return null
-  try {
-    const currency = offer.currency!.toUpperCase()
-    if (['ISK', 'UGX'].includes(currency) && offer.amount_minor! % 100 !== 0) return null
-    const formatter = new Intl.NumberFormat(undefined, { style: 'currency', currency })
-    const exponent = zeroDecimal.has(currency) ? 0 : ['ISK', 'UGX'].includes(currency) ? 2 : (formatter.resolvedOptions().maximumFractionDigits ?? 2)
-    return formatter.format(offer.amount_minor! / 10 ** exponent)
-  } catch { return null }
-}
+type OrderStatus = { state: 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'refunded' | 'disputed' | 'not_found'; can_start_new: boolean; offer?: Omit<Offer, 'enabled'> }
+// Attempts a new purchase may replace: verified failures, refunds, and a fulfilled
+// subscription order once its subscription has ended. A disputed payment blocks a new one.
+const restartableStates = new Set(['failed', 'expired', 'refunded', 'fulfilled'])
+const finalStates = new Set(['fulfilled', 'failed', 'expired', 'refunded', 'disputed'])
 
 export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: {
   userId: string; verified: boolean; hasPlan: boolean; returnState: string | null; onRefresh: () => Promise<void>
@@ -49,7 +38,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
   const purchaseInFlight = useRef(false)
   const shouldPoll = returnState === 'processing' || completed
   const reversed = status?.state === 'refunded' || status?.state === 'disputed'
-  const processing = (shouldPoll && !reversed) || status?.state === 'fulfilled'
+  const processing = ((shouldPoll && !reversed) || status?.state === 'fulfilled') && !status?.can_start_new
 
   const invalidateStatus = useCallback(() => { statusGeneration.current++ }, [])
   const close = useCallback(() => { alive.current = false; invalidateStatus() }, [invalidateStatus])
@@ -63,9 +52,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
     pb.send<Offer>('/api/macmint/checkout/config', { method: 'GET' })
       .then(value => {
         if (!active) return
-        if (value.enabled !== false && (value.enabled !== true || !formattedPrice(value) ||
-          !Number.isInteger(value.duration_days) || value.duration_days! < 0 ||
-          !Number.isInteger(value.max_devices) || value.max_devices! < 1)) throw Error('Invalid offer')
+        if (value.enabled !== false && (value.enabled !== true || !validOfferTerms(value))) throw Error('Invalid offer')
         setOffer(value)
       })
       .catch(() => { if (active) setConfigError(true) })
@@ -80,7 +67,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
     try {
       const result = await pb.send<OrderStatus>('/api/macmint/checkout/status', { method: 'GET', query: { request_key: key } })
       if (!['created', 'pending', 'fulfilled', 'failed', 'expired', 'refunded', 'disputed', 'not_found'].includes(result.state) ||
-          typeof result.can_start_new !== 'boolean' || (result.can_start_new && !terminalStates.has(result.state))) throw Error('Invalid checkout status')
+          typeof result.can_start_new !== 'boolean' || (result.can_start_new && !restartableStates.has(result.state))) throw Error('Invalid checkout status')
       if (!alive.current || generation !== statusGeneration.current || pb.authStore.record?.id !== userId) return null
       setStatus(result)
       if (result.state === 'fulfilled') { setStatusBusy(false); await onRefresh() }
@@ -159,6 +146,8 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
         } else setAttention(true)
       }
       if (code === 'checkout_attention') setAttention(true)
+      if (code === 'account_restricted') setAttention(true)
+      if (code === 'plan_exists') { setAttention(true); await onRefresh() }
       setCompleted(code === 'checkout_complete')
       setError(errorMessage(err, 'Checkout could not be opened. Retry to resume the same payment session.'))
       // The status endpoint alone authorizes replacing a failed/expired attempt.
@@ -170,21 +159,23 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
   }
 
   const startNew = () => {
-    if (!status?.can_start_new || !terminalStates.has(status.state)) return
+    if (!status?.can_start_new || !restartableStates.has(status.state)) return
     try { sessionStorage.removeItem(storageKey) }
     catch { setStorageError(true); return }
     statusGeneration.current++
     setRequestKey(null); setStatus(null); setError(null); setCompleted(false); setAttention(false); setStatusError(null); setAutomaticChecksFinished(false)
+    setOffer(null); setConfigError(false)
+    setConfigRevision(value => value + 1)
     setParams(params => { params.delete('checkout'); return params }, { replace: true })
   }
 
   if (hasPlan && returnState !== 'processing' && returnState !== 'cancelled') return null
-  const canStartNew = status?.can_start_new === true && terminalStates.has(status.state)
+  const canStartNew = status?.can_start_new === true && restartableStates.has(status.state)
   const checkingExisting = Boolean(requestKey && !status && !statusError)
   const disputed = status?.state === 'disputed'
   const blocked = !verified || processing || hasPlan || canStartNew || checkingExisting || storageError || attention || disputed
   const displayedOffer = requestKey ? status?.offer : offer
-  const hasOfferTerms = displayedOffer && formattedPrice(displayedOffer) && Number.isInteger(displayedOffer.duration_days) && displayedOffer.duration_days! >= 0 && Number.isInteger(displayedOffer.max_devices) && displayedOffer.max_devices! > 0
+  const hasOfferTerms = displayedOffer && validOfferTerms(displayedOffer)
 
   return <div className="mt-5 space-y-3 border-t border-slate-200 pt-5 dark:border-slate-800">
     {hasPlan ? <Alert tone="success">Your plan is active. Sign in to MacMint on your Mac to use paid features.</Alert> : <>
@@ -196,7 +187,9 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
       {returnState === 'cancelled' && !processing && <Alert tone="info">Checkout was closed. Resume the same checkout below. No access is granted until payment is confirmed.</Alert>}
       {storageError && <Alert>Checkout needs browser session storage to resume safely. Allow storage for this site and reload before purchasing.</Alert>}
       {statusError && <Alert>{statusError}</Alert>}
-      {canStartNew && <Alert tone="info">{status!.state === 'refunded' ? 'This payment was refunded, so its access has ended.' : `This checkout ${status!.state === 'failed' ? 'failed' : 'expired'}.`} You can start a new attempt.</Alert>}
+      {canStartNew && <Alert tone="info">{status!.state === 'fulfilled' ? 'Your previous subscription has ended. You can start a new subscription.'
+        : status!.state === 'refunded' ? 'This payment was refunded, so its access has ended. You can start a new attempt.'
+        : `This checkout ${status!.state === 'failed' ? 'failed' : 'expired'}. You can start a new attempt.`}</Alert>}
       {disputed && <Alert>This payment is disputed with the card issuer, so its access is paused. Contact support@macmint.co; don't start another payment while the dispute is open.</Alert>}
       {error && <Alert>{error}</Alert>}
       {configError ? <div><p className="text-sm text-slate-500 dark:text-slate-400">Purchase availability could not be checked.</p><button className="mt-2 text-sm underline" onClick={() => { setConfigError(false); setOffer(null); setConfigRevision(value => value + 1) }}>Check purchase availability again</button></div>
@@ -205,10 +198,12 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
         : <>
           {requestKey && <p className="text-sm text-slate-500 dark:text-slate-400">Resume your existing checkout. Review its saved price and payment details in Stripe before confirming.</p>}
           {hasOfferTerms && <>
-            <p className="text-lg font-semibold">{formattedPrice(displayedOffer)} <span className="text-sm font-normal uppercase">{displayedOffer.currency}</span></p>
-            <p>{displayedOffer.duration_days ? `${displayedOffer.duration_days} days of access` : 'Lifetime access'} · Up to {displayedOffer.max_devices} {displayedOffer.max_devices === 1 ? 'Mac' : 'Macs'}</p>
+            <p className="text-lg font-semibold">{displayedOffer.trial_days ? `${displayedOffer.trial_days} days free, then ` : ''}{formattedPrice(displayedOffer)}{displayedOffer.billing_mode === 'subscription' ? ` / ${displayedOffer.billing_interval}` : ''} <span className="text-sm font-normal uppercase">{displayedOffer.currency?.toUpperCase()}</span></p>
+            <p>{displayedOffer.billing_mode === 'subscription' ? 'Recurring subscription' : displayedOffer.duration_days ? `${displayedOffer.duration_days} days of access` : 'Lifetime access'} · Up to {displayedOffer.max_devices} {displayedOffer.max_devices === 1 ? 'Mac' : 'Macs'}</p>
+            {displayedOffer.billing_mode === 'subscription' && <p className="text-sm text-slate-500 dark:text-slate-400">Renews automatically each {displayedOffer.billing_interval}. Manage payment details or cancel renewal from your account. Cancellation keeps access until the paid period ends.</p>}
+            {Boolean(displayedOffer.trial_days) && <p className="text-sm text-slate-500 dark:text-slate-400">A payment method is required. Cancel before the trial ends to avoid the first charge. One free trial per account.</p>}
           </>}
-          <p className="text-sm text-slate-500 dark:text-slate-400">Review the final price and payment details in secure Stripe checkout before confirming. Access activates after payment confirmation.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Review the final price and payment details in secure Stripe checkout before confirming. {displayedOffer?.trial_days ? 'Your trial activates after Stripe confirms checkout.' : 'Access activates after payment confirmation.'}</p>
           {!verified && <p className="text-sm text-amber-700 dark:text-amber-300">Verify your account email before purchasing.</p>}
           <Button onClick={purchase} busy={busy} disabled={blocked}>{requestKey ? 'Resume checkout' : 'Continue to checkout'}</Button>
         </>}

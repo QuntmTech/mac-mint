@@ -35,9 +35,13 @@ struct FileThumbnail: View {
 @MainActor
 final class ThumbnailCache {
   static let shared = ThumbnailCache()
-  private let cache = PreviewImageCache(byteLimit: 16 * 1_024 * 1_024, countLimit: 96)
+  private let cache = PreviewImageCache(byteLimit: 8 * 1_024 * 1_024, countLimit: 48)
+  private var generation = UUID()
+
+  func removeAll() { generation = UUID(); cache.removeAll() }
 
   func thumbnail(for url: URL, size: CGFloat) async -> NSImage? {
+    let token = generation
     guard !Task.isCancelled, !FileSystem.isCloudPlaceholder(url) else { return nil }
     let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
     let key = "\(url.path)#\(Int(size))#\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)#\(values?.fileSize ?? 0)"
@@ -50,7 +54,7 @@ final class ThumbnailCache {
       try await generator.generateBestRepresentation(for: request).nsImage
     }, cancel: { generator.cancel(request) })
     guard let image = await work.image(), !Task.isCancelled else { return nil }
-    cache.insert(image, for: key)
+    if generation == token { cache.insert(image, for: key) }
     return image
   }
 }
