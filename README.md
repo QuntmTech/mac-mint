@@ -167,7 +167,8 @@ V2 replaces the basic utility-style presentation with a consumer-facing SwiftUI 
 
 ## Updates and releases
 
-- The app checks the published release feed (PocketBase `app_releases`, stable channel) at launch and daily. It shows a banner when a newer version exists, and a stronger one when the installed version is below `app_config.client.min_version`. Downloads open in the browser so Gatekeeper verifies them.
+- MacMint updates itself with Sparkle 2: Settings → Updates or MacMint → Check for Updates…, then Install. The archive is EdDSA-verified, replaced and relaunched. Stable releases come from Developer ID-signed, notarized tags. The owner can opt into developer builds of every `main` commit. See [`docs/UPDATES.md`](docs/UPDATES.md).
+- The PocketBase release feed (`app_releases`) and `app_config.client.min_version` still drive the "update required" banner. When Sparkle has the update, the banner installs it; otherwise it opens the download page.
 - Tagging `vX.Y.Z` runs the **Release** workflow, which builds, signs with Developer ID, notarizes, staples, and publishes a GitHub release. Without signing secrets it publishes an ad-hoc-signed **pre-release**. See [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Safety model
