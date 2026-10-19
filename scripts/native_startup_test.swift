@@ -393,12 +393,28 @@ private struct ResourceReport {
     rows.append(Row(scenario: scenario, metric: "CPU busiest 1 s", value: window.peak * 100, unit: "%", limit: nil))
   }
 
+  mutating func system(_ scenario: String, _ observed: [(name: String, percent: Double)]) {
+    for item in observed where item.percent >= 0.05 || item.name == "Finder" {
+      rows.append(Row(scenario: scenario, metric: "system: \(item.name) CPU", value: item.percent, unit: "%", limit: nil))
+    }
+  }
+
   mutating func memory(_ scenario: String, _ metric: String, _ value: Double, limit: Double? = nil) {
     rows.append(Row(scenario: scenario, metric: metric, value: value, unit: "MiB", limit: limit))
   }
 
   private static func format(_ value: Double, _ unit: String) -> String {
-    unit == "%" ? String(format: "%.2f%%", value) : String(format: "%.1f MiB", value)
+    switch unit {
+    case "%": return String(format: "%.2f%%", value)
+    case "MiB": return String(format: "%.1f MiB", value)
+    default: return String(format: "%.0f", value)
+    }
+  }
+
+  /// Sample counts the app records at hide and quit (`samples-*.json`), when it reports them.
+  mutating func samples(_ scenario: String, _ metric: String, _ value: Int?) {
+    guard let value else { return }
+    rows.append(Row(scenario: scenario, metric: metric, value: Double(value), unit: "count", limit: nil))
   }
 
   var lines: [String] {
@@ -421,6 +437,53 @@ private struct ResourceReport {
         + (row.limit.map { "≤ " + Self.format($0, row.unit) + (row.exceeded ? " **exceeded**" : "") } ?? "—") + " |\n"
     }
     return text
+  }
+}
+
+/// CPU used by Finder and per-user system agents while a scenario window runs, to show
+/// whether MacMint makes the system do work on its behalf. Root daemons are not readable.
+private struct SystemObserver {
+  static let names = ["Finder", "iconservicesagent", "com.apple.quicklook.ThumbnailsAgent", "QuickLookUIService",
+    "fileproviderd", "cloudd", "bird", "mds_stores", "deleted"]
+  private var starts: [(name: String, pid: pid_t, cpu: UInt64)] = []
+  private var startTime: UInt64 = 0
+
+  mutating func start() {
+    starts = Self.names.flatMap { name in
+      Self.pids(named: name).compactMap { pid in Self.ticks(pid).map { (name: name, pid: pid, cpu: $0) } }
+    }
+    startTime = mach_absolute_time()
+  }
+
+  /// Percent of one core per process name over the window.
+  func finish() -> [(name: String, percent: Double)] {
+    let elapsed = Double(mach_absolute_time() - startTime)
+    guard elapsed > 0 else { return [] }
+    var totals: [String: UInt64] = [:]
+    for entry in starts {
+      guard let now = Self.ticks(entry.pid), now >= entry.cpu else { continue }
+      totals[entry.name, default: 0] += now - entry.cpu
+    }
+    return Self.names.compactMap { name in totals[name].map { (name: name, percent: Double($0) / elapsed * 100) } }
+  }
+
+  private static func ticks(_ pid: pid_t) -> UInt64? {
+    var usage = rusage_info_v4()
+    let result = withUnsafeMutablePointer(to: &usage) { pointer in
+      pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(pid, RUSAGE_INFO_V4, $0) }
+    }
+    return result == 0 ? usage.ri_user_time &+ usage.ri_system_time : nil
+  }
+
+  private static func pids(named name: String) -> [pid_t] {
+    let command = Process(), output = Pipe()
+    command.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    command.arguments = ["-x", "-U", String(getuid()), name]
+    command.standardOutput = output; command.standardError = FileHandle.nullDevice
+    do { try command.run() } catch { return [] }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    command.waitUntilExit()
+    return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).compactMap { pid_t($0) }
   }
 }
 
@@ -562,47 +625,65 @@ extension NativeStartupTest {
     try withLaunchedApp(target, LaunchOptions(label: overview, extraArguments: ["--resource-probe", overviewFolder.path])) { app in
       try settle(app, label: overview, seconds: 10)
       logState(app, overview)
+      var system = SystemObserver(); system.start()
       let cpu = try measureCPU(app, label: overview, seconds: 30)
       let memory = try footprint(app.processIdentifier)
       fresh = memory
       report.cpu(overview, cpu, limit: ResourceBudgets.overviewIdleCPU)
+      report.system(overview, system.finish())
       report.memory(overview, "footprint, fresh launch", memory.currentMiB)
       logState(app, overview)
     }
+    report.samples(overview, "monitor samples taken", readSamples(overviewFolder, "quit")?.samples)
 
     let performance = "(b) live Performance view"
     let background = "(c) hidden in background"
     let performanceFolder = try fixture.launchFolder("performance")
+    var hiddenAt: (samples: Int, published: Int)?
     try withLaunchedApp(target, LaunchOptions(label: performance,
       extraArguments: ["--performance", "--resource-probe", performanceFolder.path])) { app in
       try settle(app, label: performance, seconds: 8)
       logState(app, performance)
+      var system = SystemObserver(); system.start()
       let cpu = try measureCPU(app, label: performance, seconds: 60)
       report.cpu(performance, cpu, limit: ResourceBudgets.performanceCPU)
+      report.system(performance, system.finish())
       report.memory(performance, "footprint after 60 s", try footprint(app.processIdentifier).currentMiB)
       logState(app, performance)
       if profile { profileCPU(app, name: "performance") }
       try hide(app, label: background)
-      try settle(app, label: background, seconds: 5)
+      _ = waitUntil(seconds: 1) { false }
+      hiddenAt = readSamples(performanceFolder, "hide")
+      try settle(app, label: background, seconds: 4)
+      system.start()
       let hidden = try measureCPU(app, label: background, seconds: 30)
       report.cpu(background, hidden, limit: ResourceBudgets.backgroundCPU)
+      report.system(background, system.finish())
       report.memory(background, "footprint after 35 s hidden", try footprint(app.processIdentifier).currentMiB)
       logState(app, background)
     }
+    let quitAt = readSamples(performanceFolder, "quit")
+    report.samples(performance, "monitor samples shown", hiddenAt?.published)
+    report.samples(background, "monitor samples taken hidden", hiddenAt.flatMap { hide in quitAt.map { $0.samples - hide.samples } })
+    report.samples(background, "monitor samples shown hidden", hiddenAt.flatMap { hide in quitAt.map { $0.published - hide.published } })
 
     let heavy = "(d) heavy session"
     let heavyFolder = try fixture.launchFolder("heavy", manifest: ["storage": fixture.storage.path, "photos": fixture.photos.path])
     try withLaunchedApp(target, LaunchOptions(label: heavy, extraArguments: ["--resource-probe", heavyFolder.path])) { app in
+      var system = SystemObserver(); system.start()
       let status = try waitForStatus(app, folder: heavyFolder, label: heavy, seconds: 300)
+      report.system(heavy + ", scans", system.finish())
       guard (status["storageItems"] ?? 0) >= fixture.storageFiles, status["photos"] == fixture.photoCount else {
         throw ProbeFailure(description: "\(heavy): the fixture was not fully exercised: \(status)")
       }
       log("\(heavy): mapped \(status["storageItems"] ?? 0) items into \(status["storageNodes"] ?? 0) tree nodes; scanned \(status["photos"] ?? 0) photos in \(status["similarGroups"] ?? 0) similar groups; back on Overview")
       try settle(app, label: heavy, seconds: 15)
       logState(app, heavy)
+      system.start()
       let cpu = try measureCPU(app, label: heavy + " on Overview", seconds: 30)
       let settled = try footprint(app.processIdentifier)
       report.cpu(heavy + ", Overview", cpu, limit: ResourceBudgets.overviewIdleCPU)
+      report.system(heavy + ", Overview", system.finish())
       report.memory(heavy, "footprint peak during session", settled.lifetimePeakMiB)
       report.memory(heavy, "footprint settled on Overview", settled.currentMiB, limit: ResourceBudgets.heavySettledFootprint)
       if profile { profileMemory(app, name: "heavy-settled") }
@@ -630,6 +711,13 @@ extension NativeStartupTest {
     if enforce, !exceeded.isEmpty {
       throw ProbeFailure(description: "Resource budgets exceeded: " + exceeded.map { "\($0.scenario) \($0.metric)" }.joined(separator: "; "))
     }
+  }
+
+  private static func readSamples(_ folder: URL, _ event: String) -> (samples: Int, published: Int)? {
+    guard let data = try? Data(contentsOf: folder.appendingPathComponent("samples-\(event).json")),
+      let counts = try? JSONDecoder().decode([String: Int].self, from: data),
+      let samples = counts["samples"], let published = counts["publishedSamples"] else { return nil }
+    return (samples, published)
   }
 
   @MainActor

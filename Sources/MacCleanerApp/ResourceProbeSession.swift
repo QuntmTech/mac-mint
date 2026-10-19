@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import MacCleanerCore
 
 /// `--resource-probe <folder>` is passed only by scripts/native_startup_test.swift.
@@ -27,16 +27,23 @@ enum ResourceProbeSession {
   }
 
   @MainActor private static var started = false
+  @MainActor private static var observers: [NSObjectProtocol] = []
 
   /// Runs the manifest's read-only scans as a person would (visible screen, same gates),
-  /// returns to Overview, then writes `status.json` for the probe.
+  /// returns to Overview, then writes `status.json` for the probe. Sample counts are written
+  /// when the app is hidden and when it quits, so the probe can check that hidden apps stop.
   @MainActor
   static func runIfRequested(_ model: AppViewModel) async {
     guard let folder, !started,
       let data = try? Data(contentsOf: folder.appendingPathComponent("manifest.json")),
-      let manifest = try? JSONDecoder().decode(Manifest.self, from: data),
-      manifest.storage != nil || manifest.photos != nil else { return }
+      let manifest = try? JSONDecoder().decode(Manifest.self, from: data) else { return }
     started = true
+    for (name, event) in [(NSApplication.didHideNotification, "hide"), (NSApplication.willTerminateNotification, "quit")] {
+      observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { @Sendable _ in
+        MainActor.assumeIsolated { writeSamples(event, to: folder) }
+      })
+    }
+    guard manifest.storage != nil || manifest.photos != nil else { return }
     for _ in 0..<600 where !(model.exclusionsReady && model.recoveryReady) {
       try? await Task.sleep(for: .milliseconds(100))
     }
@@ -62,6 +69,14 @@ enum ResourceProbeSession {
     model.selectedSection = .dashboard
     if let output = try? JSONSerialization.data(withJSONObject: status, options: [.sortedKeys]) {
       try? output.write(to: folder.appendingPathComponent("status.json"), options: .atomic)
+    }
+  }
+
+  @MainActor
+  private static func writeSamples(_ event: String, to folder: URL) {
+    let counts = ["samples": SystemMonitor.samples, "publishedSamples": SystemMonitor.publishedSamples]
+    if let data = try? JSONSerialization.data(withJSONObject: counts, options: [.sortedKeys]) {
+      try? data.write(to: folder.appendingPathComponent("samples-\(event).json"), options: .atomic)
     }
   }
 
