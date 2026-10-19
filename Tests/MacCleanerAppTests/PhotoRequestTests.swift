@@ -3,6 +3,21 @@ import XCTest
 @testable import MacCleanerApp
 
 final class PhotoRequestTests: XCTestCase {
+  func testDeletionRejectsChangedSelectedPhotosAndKeepersEvenWhenTheirIDsStillExist() {
+    let date = Date(timeIntervalSince1970: 1_800_000_000)
+    let expected = [PhotoDeletionPolicy.Snapshot(id: "copy", modified: date), .init(id: "keeper", modified: date)]
+    XCTAssertNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], expected: expected, observed: expected))
+    for changed in ["copy", "keeper"] {
+      let observed = expected.map { PhotoDeletionPolicy.Snapshot(id: $0.id,
+        modified: $0.id == changed ? date.addingTimeInterval(1) : date) }
+      XCTAssertTrue(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], expected: expected, observed: observed)?.contains("changed since") == true)
+    }
+    XCTAssertNotNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: ["keeper"], expected: [], observed: expected))
+    let unknown = [PhotoDeletionPolicy.Snapshot(id: "copy", modified: nil)]
+    XCTAssertNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: [], expected: unknown, observed: unknown))
+    XCTAssertNotNil(PhotoDeletionPolicy.problem(selected: ["copy"], keepers: [], expected: unknown,
+      observed: [.init(id: "copy", modified: date)]))
+  }
   func testLocalDegradedThumbnailSurvivesUnavailableLargerRepresentation() async {
     let bridge = PhotoThumbnailRequest(cancel: { _ in })
     let result: Data? = await withCheckedContinuation { continuation in

@@ -75,20 +75,23 @@ enum PhotoLibraryService {
 
   /// Asks Photos to delete the assets. Photos shows its own confirmation; deleted items stay
   /// in Recently Deleted. Returns false when the user cancels in that dialog.
-  static func delete(assetIDs: [String], protecting keeperIDs: [String] = []) async throws -> Bool {
-    let unique = Set(assetIDs)
-    let keepers = Set(keeperIDs)
+  static func delete(photos: [PhotoFingerprint], protecting keeperPhotos: [PhotoFingerprint] = []) async throws -> Bool {
+    let unique = Set(photos.compactMap(\.assetID))
+    let keepers = Set(keeperPhotos.compactMap(\.assetID))
+    let expected = (photos + keeperPhotos).compactMap { photo in
+      photo.assetID.map { PhotoDeletionPolicy.Snapshot(id: $0, modified: photo.modified) }
+    }
     guard !unique.isEmpty else { return false }
-    if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
-      available: availableIDs(unique.union(keepers))) {
+    if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers, expected: expected,
+      observed: snapshots(for: unique.union(keepers))) {
       throw NSError(domain: "MacMintPhotos", code: 1,
         userInfo: [NSLocalizedDescriptionKey: problem])
     }
     let validation = ResultBox<String>()
     do {
       try await PHPhotoLibrary.shared().performChanges {
-        if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers,
-          available: availableIDs(unique.union(keepers))) {
+        if let problem = PhotoDeletionPolicy.problem(selected: unique, keepers: keepers, expected: expected,
+          observed: snapshots(for: unique.union(keepers))) {
           validation.set(problem)
           return
         }
@@ -140,14 +143,30 @@ enum PhotoLibraryService {
     NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Photos.app"))
   }
 
-  private static func availableIDs(_ identifiers: Set<String>) -> Set<String> {
+  private static func snapshots(for identifiers: Set<String>) -> [PhotoDeletionPolicy.Snapshot] {
     let assets = PHAsset.fetchAssets(withLocalIdentifiers: Array(identifiers), options: nil)
-    return Set((0..<assets.count).map { assets.object(at: $0).localIdentifier })
+    return (0..<assets.count).map {
+      let asset = assets.object(at: $0)
+      return PhotoDeletionPolicy.Snapshot(id: asset.localIdentifier, modified: asset.modificationDate)
+    }
   }
 
 }
 
 enum PhotoDeletionPolicy {
+  struct Snapshot: Hashable, Sendable { let id: String; let modified: Date? }
+
+  static func problem(selected: Set<String>, keepers: Set<String>, expected: [Snapshot], observed: [Snapshot]) -> String? {
+    if let problem = problem(selected: selected, keepers: keepers, available: Set(observed.map(\.id))) { return problem }
+    let reviewed = Set(expected.map(\.id))
+    guard reviewed == selected.union(keepers) else { return "The reviewed photo metadata is incomplete. Rescan before deleting." }
+    let current = Dictionary(observed.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    guard expected.allSatisfy({ current[$0.id]?.modified == $0.modified }) else {
+      return "A selected photo or keeper changed since this scan. Rescan and review the updated photos before deleting."
+    }
+    return nil
+  }
+
   static func problem(selected: Set<String>, keepers: Set<String>, available: Set<String>) -> String? {
     guard selected.isDisjoint(with: keepers) else {
       return "The selection includes a photo you are keeping. Review the comparison before deleting."
