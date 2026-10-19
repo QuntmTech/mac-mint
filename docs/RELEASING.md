@@ -75,3 +75,16 @@ Nothing in the repository deploys itself. For each backend rollout:
 5. **Register the refund and dispute events** (`charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`) on the Stripe webhook endpoint and grant the restricted key Charges, Disputes and Invoices (including invoice payments) read access (see [STRIPE_SETUP.md](STRIPE_SETUP.md)). In the sandbox, refund a one-time purchase and a subscription invoice and check that the account's entitlement becomes inactive, and that a later renewal does not restore the held subscription until `POST /api/macmint/admin/billing/release-hold`.
 6. **Check AI limits.** After `1792109620`, the public `ai` record holds only `enabled` and `features`; budgets and model overrides are in the private `ai_limits` record (`daily_token_budget`, `daily_usd_budget`, `user_daily_usd_cap` (default 1.50), `models`). Allow at least 95 seconds of proxy read time for `/api/macmint/ai/review` and `/api/macmint/ai/organize`, which now wait up to 90 seconds for the provider. Desktop builds wait 100 seconds for these two requests.
 7. **Then production**, in the same order, after a fresh backup. Confirm `GET /api/crons` (superuser) lists `macmint_ai_stale_reservations` (hourly; flags, never frees) and `macmint_retention` (daily; site events older than 180 days, failed-redeem audit rows older than 90 days).
+
+## Installing a test build on a Mac in about a minute
+
+CI already builds, tests and packages every push on macOS 15 and 26, so a test Mac never needs to compile. With the GitHub CLI signed in (`brew install gh && gh auth login`):
+
+```bash
+./scripts/install_dev_build.sh                # latest green build of main
+./scripts/install_dev_build.sh my-branch      # latest green build of a branch
+./scripts/install_dev_build.sh --pr 42        # a pull request's branch
+./scripts/install_dev_build.sh --rollback     # put the previous copy back
+```
+
+The script picks the newest successful `macOS build` run, downloads the universal `macos-15` artifact (it runs on macOS 14 or later), checks its SHA-256 against CI's checksum and verifies the code signature. It then quits MacMint gracefully (it never force-quits), backs up the current app and `~/Library/Application Support/MacMint` to `~/MacMint-backups/<time>/` (it keeps the newest five), installs to `/Applications`, and relaunches. Artifacts expire after 14 days. The `install-script` CI job exercises install, reinstall and rollback on a disposable runner for every push.

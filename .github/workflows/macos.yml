@@ -104,3 +104,27 @@ jobs:
           path: .build/native-startup-diagnostics
           if-no-files-found: ignore
           retention-days: 14
+
+  install-script:
+    # Exercises scripts/install_dev_build.sh end to end on a disposable runner: download the
+    # latest green main build, install it twice (the second install backs up the first), roll back.
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install, reinstall and roll back
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install_dev_build.sh main --no-launch
+          codesign --verify --deep --strict /Applications/MacMint.app
+          FIRST=$(tail -1 "$HOME/MacMint-backups/installed.log" | awk '{print $2}')
+          ./scripts/install_dev_build.sh "$FIRST" --no-launch
+          test -d "$(ls -1dt "$HOME"/MacMint-backups/*/MacMint.app | head -1)"
+          ./scripts/install_dev_build.sh --rollback --no-launch
+          codesign --verify --deep --strict /Applications/MacMint.app
+          ./scripts/install_dev_build.sh --help | grep -q -- '--rollback'
