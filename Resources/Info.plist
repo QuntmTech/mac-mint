@@ -23,6 +23,13 @@
   <key>NSNetworkVolumesUsageDescription</key><string>MacMint reads selected network locations to map storage. Removal from external locations is not supported.</string>
   <key>NSRemovableVolumesUsageDescription</key><string>MacMint reads selected removable drives to map storage. Removal from external locations is not supported.</string>
   <key>NSAppDataUsageDescription</key><string>MacMint inspects app containers to measure storage and identify related data for your review. Removal requires your confirmation.</string>
+  <!-- Sparkle 2 updates (docs/UPDATES.md). The app picks the stable or developer feed at run
+       time; SUFeedURL is the stable default. build_app.sh stamps CFBundleVersion. -->
+  <key>SUFeedURL</key><string>https://github.com/QuntmTech/mac-mint/releases/latest/download/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>26Xmi1lVmgcxuH8fISWtnjnoam3w+bYQhJ/9X40k5Zw=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
+  <key>SUEnableSystemProfiling</key><false/>
   <key>NSAppBundlesUsageDescription</key><string>MacMint inspects installed apps and moves selected apps to Trash only after you confirm an uninstall.</string>
 </dict>
 </plist>

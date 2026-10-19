@@ -19,6 +19,10 @@ jobs:
       MACMINT_ARCHS: ${{ matrix.os == 'macos-15' && 'arm64 x86_64' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # CFBundleVersion is the commit count of HEAD, which Sparkle compares.
+          fetch-depth: 0
+          persist-credentials: false
       - name: Operating system and Swift version
         run: |
           sw_vers
@@ -33,6 +37,19 @@ jobs:
         run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+      - name: Embedded updater and version stamp
+        run: |
+          APP=dist/MacMint.app
+          PLIST="$APP/Contents/Info.plist"
+          [[ "$(plutil -extract CFBundleVersion raw "$PLIST")" == "$(git rev-list --count HEAD)" ]]
+          [[ "$(plutil -extract MacMintGitCommit raw "$PLIST")" == "$(git rev-parse HEAD)" ]]
+          [[ "$(plutil -extract CFBundleShortVersionString raw "$PLIST")" == "$(tr -d '[:space:]' < VERSION)" ]]
+          otool -L "$APP/Contents/MacOS/MacMint" | grep -F "@rpath/Sparkle.framework/"
+          [[ -d "$APP/Contents/Frameworks/Sparkle.framework" && ! -e "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" ]]
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for code in Versions/Current/Autoupdate Versions/Current/Updater.app .; do
+            codesign -dv "$APP/Contents/Frameworks/Sparkle.framework/$code" 2>&1 | grep -E "^(Identifier|Signature|TeamIdentifier)="
+          done
       - name: Normal startup, menu bar, idle CPU, and graceful Quit
         run: ./scripts/native_startup_test.sh dist/MacMint.app
         timeout-minutes: 4
@@ -89,7 +106,7 @@ jobs:
           ACTUAL=$(shasum -a 256 candidate/MacMint.zip | awk '{print $1}')
           [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]]
           ditto -x -k candidate/MacMint.zip candidate/extracted
-          codesign --verify --strict --verbose=2 candidate/extracted/MacMint.app
+          codesign --verify --deep --strict --verbose=2 candidate/extracted/MacMint.app
           ./scripts/smoke_test.sh candidate/extracted/MacMint.app
       - name: Verify downloaded drag-to-Applications installer
         run: ./scripts/verify_installer.sh candidate/MacMint.dmg
