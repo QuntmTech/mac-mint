@@ -9,11 +9,14 @@ struct PhotoReviewDeck: View {
   @State private var comparing: SimilarPhotoGroup?
   @State private var cloudPreview = false
   @State private var message: String?
+  @State private var previewID: String?
+  @FocusState private var keyboardFocus: Bool
 
   private var photos: [PhotoFingerprint] { model.allScannedPhotos }
   private var cursor: Int { model.photoReviewSession.cursor }
   private var busy: Bool { model.isWorking || model.isScanning || model.isPreparingPlan }
   private var current: PhotoFingerprint? { photos.indices.contains(cursor) ? photos[cursor] : nil }
+  private var previewReady: Bool { current != nil && previewID == current?.id }
   private var group: SimilarPhotoGroup? { current.flatMap { model.group(containing: $0) } }
   private var isKeeper: Bool { current.map { photo in group.map { model.keeper(of: $0).id == photo.id } ?? false } ?? false }
 
@@ -35,7 +38,11 @@ struct PhotoReviewDeck: View {
         .accessibilityLabel("Review progress")
       if let photo = current {
         GeometryReader { geometry in
-          PhotoThumbnail(photo: photo, side: min(600, max(100, geometry.size.width)), allowCloud: cloudPreview, fit: true)
+          PhotoThumbnail(photo: photo, side: min(600, max(100, geometry.size.width)), allowCloud: cloudPreview, fit: true,
+            onAvailability: { available in
+              if current?.id == photo.id { previewID = available ? photo.id : nil }
+            })
+            .id(photo.id)
             .frame(width: geometry.size.width, height: geometry.size.height)
             .clipped()
             .background(AppTheme.panel)
@@ -72,6 +79,9 @@ struct PhotoReviewDeck: View {
             if photo.isLibraryAsset && !cloudPreview {
               Button("Load cloud preview") { cloudPreview = true }.controlSize(.small)
             }
+            if photo.isLibraryAsset && !previewReady {
+              Button("Open Photos") { PhotoLibraryService.showInPhotos() }.controlSize(.small)
+            }
             if !photo.isLibraryAsset {
               Button("Reveal in Finder") { model.reveal(photo.url) }.controlSize(.small)
             }
@@ -91,6 +101,9 @@ struct PhotoReviewDeck: View {
     .padding(16)
     .safeAreaInset(edge: .bottom, spacing: 0) { controls }
     .focusable()
+    .focused($keyboardFocus)
+    .onAppear { keyboardFocus = true }
+    .onChange(of: current?.id) { _, _ in drag = 0; cloudPreview = false; keyboardFocus = true }
     .onKeyPress(.leftArrow) { guard !busy else { return .ignored }; decide(remove: true); return .handled }
     .onKeyPress(.rightArrow) { guard !busy else { return .ignored }; decide(remove: false); return .handled }
     .onKeyPress("z") { guard !busy else { return .ignored }; undo(); return .handled }
@@ -105,9 +118,9 @@ struct PhotoReviewDeck: View {
           .help("Undo the last review choice · Z")
         Spacer(minLength: 0)
         Button { decide(remove: true) } label: { Label("Queue removal", systemImage: "arrow.left") }
-          .disabled(current == nil || isKeeper || busy)
+          .disabled(current == nil || isKeeper || busy || !previewReady)
           .help(isKeeper ? "Choose another keeper in Compare first" : "Queue this photo for review · ←")
-        Button { decide(remove: false) } label: { Label("Keep", systemImage: "arrow.right") }
+        Button { decide(remove: false) } label: { Label(previewReady ? "Keep" : "Skip", systemImage: "arrow.right") }
           .buttonStyle(MintButtonStyle()).disabled(current == nil || busy)
       }
       Text("Swipe or use ← to queue, → to keep, and Z to undo. Review and confirm before removal.")
@@ -122,6 +135,7 @@ struct PhotoReviewDeck: View {
   }
 
   private func decide(remove: Bool) {
+    if remove && !previewReady { message = "Load a preview before queuing removal, or Skip to the next photo."; return }
     let before = cursor
     message = model.decidePhotoReview(removing: remove)
     if cursor != before { cloudPreview = false }

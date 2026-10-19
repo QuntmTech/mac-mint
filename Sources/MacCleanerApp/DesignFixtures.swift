@@ -24,6 +24,15 @@ func seedDesignFixtures(_ model: AppViewModel, root: URL) {
     AppRecord(url: root.appendingPathComponent("Applications/Example Notes.app"), name: "Example Notes", bundleIdentifier: "com.example.notes", version: "2.6", bundleSize: gib / 8, lastModified: Date(), lastUsed: Date().addingTimeInterval(-180 * 86400)),
   ]
   model.selectedApp = model.apps.first
+  model.appLeftovers = [
+    AppLeftover(url: root.appendingPathComponent("Library/Caches/com.example.editor"), size: gib / 8,
+      confidence: .high, reason: "Named with this app's exact bundle identifier."),
+    AppLeftover(url: root.appendingPathComponent("Library/Preferences/com.example.editor.plist"), size: 8192,
+      confidence: .high, reason: "Named with this app's exact bundle identifier."),
+    AppLeftover(url: root.appendingPathComponent("Library/Group Containers/group.example.editor"), size: gib / 16,
+      confidence: .medium, reason: "Other apps from the developer may use this container.", isShared: true),
+  ]
+  model.selectedLeftoverIDs = Set(model.appLeftovers.filter(\.isSuggested).map(\.id))
   model.devItems = [
     DevStorageItem(group: .xcode, tool: "Xcode", title: "ExampleApp build data", subtitle: "Last changed 32 days ago", url: root.appendingPathComponent("Library/Developer/Xcode/DerivedData/ExampleApp"), bytes: gib * 4, rebuild: .rebuildable, removal: .trash),
     DevStorageItem(group: .packageCaches, tool: "npm", title: "npm download cache", subtitle: "Packages download again when needed", url: root.appendingPathComponent(".npm/_cacache"), bytes: gib, rebuild: .redownload, removal: .trash),

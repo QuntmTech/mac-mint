@@ -77,8 +77,9 @@ function entitlementPayload(r) {
   const plan = String(r.get("plan") || "free")
   let status = String(r.get("status") || "active")
   const exp = parseDate(r.get("expires_at"))
+  const invalidExpiry = Boolean(String(r.get("expires_at") || "").trim()) && exp === null
   const lapsed = exp !== null && exp.getTime() <= Date.now()
-  if (plan === "pro" && status === "active" && lapsed) status = "expired"
+  if (plan === "pro" && status === "active" && (lapsed || invalidExpiry)) status = "expired"
   return {
     plan: plan,
     status: status,
@@ -87,6 +88,18 @@ function entitlementPayload(r) {
     max_devices: Number(r.get("max_devices") || 0),
     source: String(r.get("source") || "")
   }
+}
+
+// Never overwrite a redeemed/lifetime license when a subscription renews or ends.
+function effectiveEntitlement(app, userId, record) {
+  const base = entitlementPayload(record || ensureEntitlement(app, userId))
+  if (base.status === "revoked" || base.status === "suspended") return base
+  const recurring = require(`${__hooks}/macmint_billing.js`).access(app, userId)
+  if (!recurring) return base
+  if (!base.active) return recurring
+  return { ...base, expires_at: base.expires_at === null ? null :
+    new Date(Math.max(Date.parse(base.expires_at), Date.parse(recurring.expires_at))).toISOString(),
+    max_devices: Math.max(base.max_devices, recurring.max_devices) }
 }
 
 // Applies a redeemed license to an entitlement record (caller saves it).
@@ -119,7 +132,7 @@ function devices(app, userId) {
 function activateDevice(app, user, data) {
   let payload
   app.runInTransaction((tx) => {
-    const ent = entitlementPayload(ensureEntitlement(tx, user.id))
+    const ent = effectiveEntitlement(tx, user.id)
     if (!ent.active) throw { status: 402, error: "no_active_plan", message: "An active MacMint plan is required." }
     let device
     try { device = tx.findFirstRecordByFilter("devices", "user = {:u} && device_id = {:d}", { u: user.id, d: data.device_id }) } catch (_) {}
@@ -166,7 +179,8 @@ function mePayload(app, user) {
       name: String(user.get("name") || ""),
       verified: Boolean(user.get("verified"))
     },
-    entitlement: entitlementPayload(ent),
+    entitlement: effectiveEntitlement(app, user.id, ent),
+    billing: require(`${__hooks}/macmint_billing.js`).summary(app, user.id),
     devices: devices(app, user.id).map(devicePayload),
     server_time: new Date().toISOString()
   }
@@ -184,6 +198,7 @@ module.exports = {
   logEvent: logEvent,
   ensureEntitlement: ensureEntitlement,
   entitlementPayload: entitlementPayload,
+  effectiveEntitlement: effectiveEntitlement,
   applyLicense: applyLicense,
   devices: devices,
   devicePayload: devicePayload,

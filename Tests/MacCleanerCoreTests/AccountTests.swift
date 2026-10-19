@@ -182,6 +182,20 @@ final class AccountTests: XCTestCase {
       AccessPolicy.allowsOffline(CachedAccess(snapshot: lapsed, verifiedAt: now), now: now))
   }
 
+  func testMalformedExpiryAndContradictoryPlanCannotUnlockOffline() {
+    let now = Date()
+    for entitlement in [
+      Entitlement(plan: "pro", status: "active", active: true, expiresAt: "not a date", maxDevices: 3),
+      Entitlement(plan: "pro", status: "active", active: true, expiresAt: "", maxDevices: 3),
+      Entitlement(plan: "free", status: "active", active: true, maxDevices: 3),
+      Entitlement(plan: "pro", status: "revoked", active: true, maxDevices: 3),
+    ] {
+      let snapshot = AccountSnapshot(user: AccountUser(id: "u", email: "e"), entitlement: entitlement)
+      XCTAssertFalse(AccessPolicy.allowsOffline(CachedAccess(snapshot: snapshot, verifiedAt: now), now: now))
+      XCTAssertFalse(entitlement.isLifetime)
+    }
+  }
+
   func testCachedAccessRoundTripsThroughJSON() throws {
     let cached = CachedAccess(
       snapshot: AccountSnapshot(

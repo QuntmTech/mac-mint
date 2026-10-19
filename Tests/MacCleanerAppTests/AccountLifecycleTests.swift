@@ -562,26 +562,6 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertEqual(count, 5, "Without valid access every activation checks again")
   }
 
-  func testLateAIStatusAfterSignOutIsIgnored() async throws {
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    defer { try? FileManager.default.removeItem(at: folder) }
-    let fixture = AccountFixture(), tokens = TestTokens()
-    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
-      deviceInfo: device, tokenStorage: tokens.storage)
-    await store.signIn(email: "fixture@example.invalid", password: "fixture")
-    await store.refreshAIStatus()
-    XCTAssertTrue(store.aiAvailable)
-    await fixture.hold("app_config/records")
-    let refreshing = Task { await store.refreshAIStatus() }
-    try await waitUntilPaused(fixture)
-    await store.signOut()
-    XCTAssertFalse(store.aiAvailable)
-    await fixture.resumeVerification()
-    await refreshing.value
-    XCTAssertFalse(store.aiAvailable, "The late response belongs to the signed-out session")
-    XCTAssertFalse(store.aiStatus.enabled)
-  }
-
   func testRepeatedSubmitDoesNotLaunchOverlappingAuthentication() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -680,6 +660,51 @@ final class AccountLifecycleTests: XCTestCase {
       try await Task.sleep(for: .milliseconds(10))
     }
     XCTFail("The intended network boundary was not reached")
+  }
+
+  func testLateAIAvailabilityCannotRepublishAfterSignOut() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.hold("/records")
+    let refreshing = Task { await store.refreshAIStatus() }
+    try await waitUntilPaused(fixture)
+    await store.signOut()
+    await fixture.resumeVerification()
+    await refreshing.value
+    XCTAssertFalse(store.aiAvailable)
+    XCTAssertFalse(store.aiStatus.enabled)
+  }
+
+  func testCancelledOrReplacedSessionCannotSendAnAIRequestAfterAvailabilityCheck() async throws {
+    let previous = UserDefaults.standard.object(forKey: AppViewModel.aiEnabledKey)
+    defer { UserDefaults.standard.set(previous, forKey: AppViewModel.aiEnabledKey) }
+    UserDefaults.standard.set(true, forKey: AppViewModel.aiEnabledKey)
+    for cancel in [false, true] {
+      let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+      defer { try? FileManager.default.removeItem(at: folder) }
+      let fixture = AccountFixture(), tokens = TestTokens()
+      let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+        deviceInfo: device, tokenStorage: tokens.storage)
+      await store.signIn(email: "fixture@example.invalid", password: "fixture")
+      await fixture.hold("/records")
+      let request = Task { try await store.aiAsk(question: "Private old question", history: [],
+        context: AIContextBuilder.build(.init(homeDirectory: folder))) }
+      try await waitUntilPaused(fixture)
+      if cancel { request.cancel() }
+      else {
+        await store.signOut()
+        await store.signIn(email: "fixture@example.invalid", password: "fixture")
+      }
+      await fixture.resumeVerification()
+      do { _ = try await request.value; XCTFail("A stale request must not be sent") }
+      catch is CancellationError {} catch { XCTFail("Unexpected error: \(error)") }
+      let sent = await fixture.lastAsk
+      XCTAssertNil(sent)
+    }
   }
 
   func testAcceptedConsentSendsTheExactPreviewedRequestDespiteLaterChatChanges() async throws {

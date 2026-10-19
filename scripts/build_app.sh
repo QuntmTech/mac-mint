@@ -1,5 +1,6 @@
 #!/bin/bash
-# Builds dist/MacMint.app and dist/MacMint.zip.
+# Builds MacMint.app, ZIP and a drag-to-Applications DMG in dist/.
+# MACMINT_ARCHS="arm64 x86_64" builds a universal consumer binary; local default is native.
 #
 # Signing is chosen by environment:
 #   SIGN_IDENTITY   "Developer ID Application: Name (TEAMID)" → hardened-runtime Developer ID signature.
@@ -31,8 +32,22 @@ printf '▶ Validating Info.plist...\n'
 plutil -lint "$ROOT/Resources/Info.plist"
 
 printf '▶ Building MacMint release binary...\n'
-swift build -c release --product MacMint
-BIN="$(swift build -c release --show-bin-path)/MacMint"
+ARCHITECTURES=()
+read -r -a ARCHITECTURES <<< "${MACMINT_ARCHS:-$(uname -m)}"
+[[ ${#ARCHITECTURES[@]} -gt 0 ]] || { echo "At least one architecture is required." >&2; exit 1; }
+BIN_STAGE="$(mktemp -d "$ROOT/.build/package-bin.XXXXXX")"
+trap 'rm -rf "$BIN_STAGE"' EXIT
+BINARIES=()
+for ARCHITECTURE in "${ARCHITECTURES[@]}"; do
+  case "$ARCHITECTURE" in arm64|x86_64) ;; *) echo "Unsupported Mac architecture: $ARCHITECTURE" >&2; exit 1;; esac
+  swift build -c release --product MacMint --arch "$ARCHITECTURE"
+  BUILT_BIN="$(swift build -c release --show-bin-path --arch "$ARCHITECTURE")/MacMint"
+  cp "$BUILT_BIN" "$BIN_STAGE/MacMint-$ARCHITECTURE"
+  BINARIES+=("$BIN_STAGE/MacMint-$ARCHITECTURE")
+done
+BIN="$BIN_STAGE/MacMint"
+if [[ ${#BINARIES[@]} -eq 1 ]]; then cp "${BINARIES[0]}" "$BIN"; else lipo -create "${BINARIES[@]}" -output "$BIN"; fi
+lipo "$BIN" -verify_arch "${ARCHITECTURES[@]}"
 APP="$ROOT/dist/MacMint.app"
 ZIP="$ROOT/dist/MacMint.zip"
 CONTENTS="$APP/Contents"
@@ -58,21 +73,19 @@ codesign --verify --strict --verbose=2 "$APP"
 rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
-if [[ -n "${SIGN_IDENTITY:-}" ]] && [[ -n "${NOTARY_PROFILE:-}${APPLE_ID:-}" ]]; then
-  printf '▶ Notarizing...\n'
-  if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-    xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-  else
-    xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-      --password "$APPLE_APP_PASSWORD" --wait
-  fi
-  xcrun stapler staple "$APP"
-  xcrun stapler validate "$APP"
+NOTARIZED=0
+if [[ -n "${SIGN_IDENTITY:-}" ]] && { [[ -n "${NOTARY_PROFILE:-}" ]] || [[ -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_PASSWORD:-}" ]]; }; then
+  printf '▶ Notarizing app archive...\n'
+  "$ROOT/scripts/notarize.sh" "$ZIP" "$APP"
   spctl --assess --type execute --verbose=2 "$APP"
-  # Re-zip so the download carries the stapled ticket.
+  NOTARIZED=1
+  # Re-zip so the compatibility download carries the stapled app ticket.
   rm -f "$ZIP"
   ditto -c -k --keepParent "$APP" "$ZIP"
 fi
+[[ "${REQUIRE_NOTARIZATION:-0}" != "1" || "$NOTARIZED" == "1" ]] || { echo "Consumer app notarization is required." >&2; exit 1; }
+REQUIRE_NOTARIZATION="$NOTARIZED" "$ROOT/scripts/build_dmg.sh"
+EXPECTED_ARCHS="${ARCHITECTURES[*]}" REQUIRE_NOTARIZATION="$NOTARIZED" "$ROOT/scripts/verify_installer.sh" "$ROOT/dist/MacMint.dmg"
 
 shasum -a 256 "$ZIP" | awk '{print $1}' > "$ZIP.sha256"
 printf '✓ Built and verified: %s (sha256 %s)\n' "$APP" "$(cat "$ZIP.sha256")"

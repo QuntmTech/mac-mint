@@ -6,6 +6,8 @@ A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller, evolved from Mac Clean
 
 Local scanning, inspection, exclusions, History and Restore are available before sign-in. An active account and plan are required to start a paid removal. Existing redemption codes (`MINT-XXXX-XXXX-XXXX-XXXX`) remain supported. Configured Stripe Checkout grants purchased access to the account through verified webhooks; it remains closed until configuration and a validated consumer build are available. Accounts have a device limit.
 
+Recurring billing supports the approved **US$39.99/year, three-day trial, three-Mac** offer with owner-managed cancellation, payment recovery and verified trial/invoice access periods. Production checkout remains closed pending provider, email and consumer-release acceptance. See [public-readiness review](docs/PUBLIC_READINESS_REVIEW.md) and [Stripe setup](docs/STRIPE_SETUP.md).
+
 Purchase setup, pending-pricing configuration and verification gates are documented in [Stripe setup](docs/STRIPE_SETUP.md).
 
 See [startup and permissions](docs/PERMISSIONS_AND_STARTUP.md) for guided setup, access troubleshooting and normal-launch verification.
@@ -52,18 +54,18 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
   - LM Studio models are listed per model.
   - Hugging Face caches are listed as whole repositories (all revisions), honoring `HF_HOME` / `HF_HUB_CACHE`.
 - **Docker Desktop's disk image** is shown with `docker system prune` as the way to reclaim it.
-- Each item says whether it rebuilds, re-downloads, or needs review. Anything touched in the last 3 days is marked "In use" and never preselected.
+- Each item says whether it rebuilds, re-downloads, or needs review. Recently changed data is treated conservatively; activity evidence and modification dates are distinguished.
 
 ### Performance, menu bar, and reminders
 - **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
 - **Optional menu bar companion** with the same readings and quick actions. It only samples while it's open.
 - **Opt-in low-space alerts and weekly scan reminders:** at most once a day, never 10 pm–8 am, and they never clean anything automatically.
-- **First-run onboarding** with a Full Disk Access check, plus an optional "Open at login" setting (SMAppService).
+- **Resumable first-run setup** with installation guidance, optional permission instructions and same-account purchase connection. An optional "Open at login" setting uses SMAppService.
 - **Browser caches** for Chrome, Firefox, Edge, Brave, Arc, Vivaldi, Opera, and Safari. A browser's cache is skipped while that browser is open.
 
 ### Photos
 - **Similar shots**: 64-bit perceptual hashes grouped by Hamming distance; the sharpest (then largest) shot is the suggested keeper, which you can change with "Keep This One Instead". The kept shot can never be selected, and nothing is preselected.
-- **Blurry photos**: variance-of-Laplacian sharpness judged relative to the rest of the collection; **Screenshots** listed by size.
+- **Blurry photos**: variance-of-Laplacian sharpness judged relative to the rest of the collection; **Screenshots** use PhotoKit metadata for library assets and filename detection for folder files, with available byte sizes shown.
 - **Photos library** is analysed through PhotoKit thumbnails (local only, never downloads originals) and removed only through Photos itself: the system asks for confirmation and items stay in Recently Deleted for 30 days. Files inside `.photoslibrary` packages are never touched.
 - **Folders** use the normal review → Trash → Restore pipeline; the kept shot's state is recorded so a plan can't remove it too.
 
@@ -73,7 +75,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ### More system junk and the Trash
 - Mail attachments (review) and iPhone/iPad firmware `.ipsw` files (rebuildable), each with its own allowlist.
-- The Trash card shows what the Trash holds. **Empty Trash** is a separate, permanent action with its own warning (it can't be restored from History) and is performed by Finder.
+- The Trash card measures the home Trash. **Review Trash in Finder** opens Finder, where the user can inspect its full scope before permanently emptying it.
 
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.
@@ -208,9 +210,15 @@ Current V2 regression suite: **18 tests** covering:
 
 ## Requirements
 
-- macOS 14+
-- Swift 6 toolchain / Xcode command-line tools
+- macOS 14+ (Apple Silicon or Intel)
+- Swift 6 toolchain / Xcode command-line tools only when building from source
 - Full Disk Access is optional; without it, protected locations may be reported as scan issues rather than inspected.
+
+## Install a packaged release
+
+When a validated consumer download is available on your [MacMint account page](https://macmint.co/account), open `MacMint.dmg`, drag MacMint onto the Applications shortcut, then open MacMint from Applications and eject the image. No Terminal commands or Xcode are needed. The compatibility ZIP can instead be expanded and its app moved to Applications.
+
+Setup lets you explore locally or start Quick Scan. Permissions and account connection can wait; connect the same account as your website purchase when you want paid operations. A direct purchase does not need a separate redemption code. See [installation and setup](docs/INSTALLATION_AND_ONBOARDING.md) for the implementation and release acceptance gates.
 
 ## Run from source on macOS
 
@@ -228,10 +236,10 @@ The script now:
 
 1. runs the core regression suite;
 2. validates `Resources/Info.plist` with `plutil`;
-3. builds the release `MacCleaner` executable;
-4. constructs `dist/MacMint.app` and `dist/MacMint.zip`;
-5. ad-hoc signs it for local testing;
-6. verifies the code signature;
+3. builds the release `MacMint` executable (set `MACMINT_ARCHS="arm64 x86_64"` for a universal app);
+4. constructs `dist/MacMint.app`, `dist/MacMint.zip` and a drag-to-Applications `dist/MacMint.dmg`;
+5. ad-hoc signs a local preview, or uses the configured Developer ID and notarization credentials;
+6. verifies signatures, checksums, the disk image and an isolated app copy;
 7. opens the app unless `NO_OPEN=1` is set.
 
 ## Architecture

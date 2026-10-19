@@ -1,12 +1,22 @@
 # MacMint — start here for independent review
 
-Updated 2026-10-17, America/New_York. This is the entry point for Claude Code or another reviewer. The complete change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md); read its current-status section first, then the detailed subsystem sections.
+Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
+
+## Latest public-readiness and recurring billing extension — 2026-10-19
+
+Start with [public-readiness review](docs/PUBLIC_READINESS_REVIEW.md) and [Stripe setup](docs/STRIPE_SETUP.md) for this pass (paths are under `docs/` from the repository root). The owner approved **US$39.99/year with a three-day free trial**; the existing three-Mac allowance is retained. Checkout remains disabled until the intended Stripe business account, sandbox lifecycle, email delivery, deployment and signed consumer download pass acceptance.
+
+Recurring access now lives in private `billing_subscriptions`, independently of redeemed/one-time licenses. Read `macmint_billing.js`, the subscription migration and disposable subscription integration fixture. Review authoritative ownership, trial-only expiry, first-charge/renewal failures, absolute invoice periods, concurrent sync generations, terminal-state latching, portal cancellation and one-trial eligibility. `BillingCard` and `Checkout` expose these terms and owner-bound management without granting access from browser returns. Old one-time orders remain compatible. No live Stripe account setup or charge is claimed.
+
+Additional fixes reject malformed expiry as unlimited access, bind delayed AI availability/request continuations to their session, populate library screenshots from PhotoKit metadata, and block overlapping photo mutation. Source review also covers planner/executor/recovery, uninstaller, organization, process controls, preview caches, onboarding/permissions and release boundaries. The review document records the scope and remaining native/provider evidence; it is not a zero-bug or complete-public-launch certification.
 
 ## Goal and current progress
 
 Review a native Mac storage/cleanup app for everyday owners and developers, with particular attention to data safety, recovery, privacy, account boundaries, native usability and CPU/RAM use. The user requested an independent set of eyes on the implementation and subsequent refinements.
 
-The verified implementation is merged to `main` at `c0ade0ec66e2b600d50dcdf9dc3b0a8965af1423`. Later documentation commits may follow it. Source now includes the safety/recovery work, local inspection before sign-in, optional AI, preview-first organization, photo review deck, native UI redesign, Stripe readiness, startup correction, permission guidance, neutral themes and improved Performance view. The detailed handoff distinguishes implemented behavior from remaining release and native-test work.
+Review current `origin/main`; historical SHAs and counts below are checkpoints. The installation extension at `2c6013c` adds a universal-capable DMG pipeline, downloaded-image verification, current-copy installation guidance, restart-resumable setup, consistent Quick Scan dispatch after dismissal and same-account purchase instructions. Its [native checks](https://github.com/QuntmTech/mac-mint/actions/runs/39204402387) and [backend/website checks](https://github.com/QuntmTech/mac-mint/actions/runs/39204402359) identify the implementation head and final results. Documentation commits may follow. Apple signing credentials were absent; consumer publication and the actual quarantined installation/permission walkthrough remain open release gates.
+
+The earlier six-phase extension adds clearer app uninstall, timed manual slowdown, opt-in Auto Tame with saved exceptions and recovery intents, bulk photo selection, review-deck preview fixes, bounded image caches and native memory measurements. It retains the earlier safety/recovery work, local inspection before sign-in, optional AI, preview-first organization, Stripe readiness, permission guidance and neutral themes. That checklist distinguishes automated evidence from the actual user's iCloud-library and memory-profile checks.
 
 ## Get the repository
 
@@ -44,13 +54,13 @@ The shared Linux source path is `/home/qrkit/src/mac-mint`. `/home/qrkit/macmint
 | Photos | Folder files use filesystem review/Trash. Photo-library assets use PhotoKit confirmation and Recently Deleted. Deck swipes change selections; they do not immediately delete. |
 | AI and Organizer | Desktop requests go to authenticated PocketBase routes; the Anthropic key stays server-side. Explain/Review/Ask are advisory. Organizer previews proposed names/moves, then requires approval and local policy checks; it has its own durable Undo records. |
 | Account and purchase | `AccountStore` manages session/entitlement/offline grace. Hosted Stripe Checkout is fulfilled through verified, idempotent server handling; a browser return URL grants no access. Live pricing/setup is pending. |
-| Performance | A utility sampler uses visible-consumer leases and adaptive cadence. Rows cover regular apps' main processes; confirmed Quit/Force Quit recheck PID, birth identity and owner. Auto Tame, caps, GPU data and grouped helper totals are not implemented. |
+| Performance | A utility sampler uses visible-consumer leases and adaptive cadence. Main-process Quit/Force Quit and reversible background priority recheck identity/owner. Opt-in Auto Tame reuses sampling; exceptions persist and restoration is journaled. Hard CPU/RAM caps, GPU data and grouped helper totals remain unimplemented. |
 
 Source map: `Sources/MacCleanerCore` for portable policy/engines; `Sources/MacCleanerApp` for native UI/adapters/coordinators; `backend/pocketbase/pb_hooks` and `pb_migrations` for PocketBase/Goja; `web` for Vite/React account/checkout; `ChatGPT sites the homepage V1` for the separate homepage/demo. Read section 15 of the detailed handoff for exact review files and tests.
 
 ## Verification and build
 
-The implementation's [main native CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968758) and [backend/web CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968760) passed. Native evidence covers macOS 15 and 26, a 220-test suite with zero failures and expected skips, 113 rendered states, ordinary menu-bar-off/on startup, graceful Quit, and downloaded archive checks. These counts include shared core cases and repeated packaging runs; do not add them together as unique coverage.
+The previous delivery's [main native CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968758) and [backend/web CI](https://github.com/QuntmTech/mac-mint/actions/runs/39065968760) passed (220 tests, 113 rendered states). [PR #33 checks](https://github.com/QuntmTech/mac-mint/pull/33/checks) contain the latest expanded native suite, 119 rendered states, disposable-app priority test, 2,000-image memory gate and packaged RAM/CPU measurements, including an active Performance scene. Check the final head SHA and conclusions; the old counts are historical and repeated packaging runs are not additional unique coverage.
 
 On macOS 14+ with a Swift 6/Xcode toolchain:
 
@@ -83,4 +93,4 @@ The generated local app is `dist/MacMint.app`; this does not replace the user's 
 5. Before paid launch, complete pricing and intended Stripe account setup, staging payment/webhook/activation journeys, external email delivery, authenticated AI staging/canary, and Developer ID signing/notarization/Gatekeeper/update-feed validation. Source commits and existing keys do not prove these gates are complete.
 6. Return findings by severity with file/line, trigger, consequence, evidence, proposed correction and a meaningful verification method. Separate confirmed defects, hypotheses, untested paths and feature requests. Review first; preserve existing work and avoid unrelated rewrites or production changes.
 
-Keep the user's decisions: useful scanning before sign-in; recovery after expiry/sign-out; optional AI; explicit preview/approval for organization; Stripe only; neutral workspace backgrounds; no automatic process throttling or unsupported external-volume mutation claims. Do not put credentials into code, logs or this handoff.
+Keep the user's decisions: useful scanning before sign-in; recovery after expiry/sign-out; optional AI; explicit preview/approval for organization; Stripe only; neutral workspace backgrounds; opt-in reversible Auto Tame with never-slow exceptions. Do not claim hard CPU/RAM caps, automatic memory reclamation, complete helper-process coverage or unsupported external-volume mutation. Do not put credentials into code, logs or this handoff.

@@ -19,31 +19,41 @@ extension AccountStore {
 
   func refreshAIStatus() async {
     let generation = sessionGeneration
-    let status = await client.aiStatus()
+    let result = await client.aiStatus()
     // A response that arrives after sign-out (or a newer sign-in) must not re-enable AI.
-    guard generation == sessionGeneration else { return }
-    aiStatus = status
-    aiAvailable = status.enabled
+    guard !Task.isCancelled, generation == sessionGeneration else { return }
+    aiStatus = result
+    aiAvailable = aiStatus.enabled
+  }
+
+  private func refreshedAIToken(feature: String, separatelyConsented: Bool = false) async throws -> String {
+    let generation = sessionGeneration
+    try Task.checkCancellation()
+    await refreshAIStatus()
+    try Task.checkCancellation()
+    // Availability checking must never send an old user's payload under a newer session.
+    guard generation == sessionGeneration else { throw CancellationError() }
+    return try requireToken(feature: feature, separatelyConsented: separatelyConsented)
   }
 
   /// The organizer's frozen payload is approved separately on every request.
   func aiOrganize(_ request: AIOrganizationRequest) async throws -> AIOrganizationResponse {
-    await refreshAIStatus()
-    return try await client.organize(request, token: requireToken(feature: "organize", separatelyConsented: true))
+    let token = try await refreshedAIToken(feature: "organize", separatelyConsented: true)
+    return try await client.organize(request, token: token)
   }
 
   func aiExplain(_ request: AIExplainRequest) async throws -> AIExplainResponse {
-    await refreshAIStatus()
-    return try await client.explain(request, token: requireToken(feature: "explain"))
+    let token = try await refreshedAIToken(feature: "explain")
+    return try await client.explain(request, token: token)
   }
 
   func aiReview(_ request: AIReviewRequest) async throws -> AIReview {
-    await refreshAIStatus()
-    return try await client.review(request, token: requireToken(feature: "review"))
+    let token = try await refreshedAIToken(feature: "review")
+    return try await client.review(request, token: token)
   }
 
   func aiAsk(question: String, history: [AITurn], context: AIContext) async throws -> AIAnswer {
-    await refreshAIStatus()
-    return try await client.ask(question: question, history: history, context: context, token: requireToken(feature: "ask"))
+    let token = try await refreshedAIToken(feature: "ask")
+    return try await client.ask(question: question, history: history, context: context, token: token)
   }
 }
