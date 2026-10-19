@@ -3,7 +3,7 @@ Set POCKETBASE_BIN to PocketBase 0.40.5. Stripe responses below are local protoc
 """
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import concurrent.futures, hashlib, hmac, itertools, json, os, shutil, socket, sqlite3, subprocess, tempfile, threading, time, urllib.request, urllib.error, urllib.parse, uuid
+import base64, concurrent.futures, hashlib, hmac, itertools, json, os, shutil, socket, sqlite3, subprocess, tempfile, threading, time, urllib.error, urllib.parse, urllib.request, uuid
 
 root = Path(__file__).resolve().parents[2]
 pocketbase = Path(os.environ.get('POCKETBASE_BIN', root / '.build/pocketbase-bin/pocketbase')).resolve()
@@ -13,6 +13,18 @@ sessions = {}
 charges = {}
 disputes = {}
 provider_requests = []
+# Disposable Ed25519 seed for this run only; signatures are checked independently with Node's crypto.
+signing_seed = os.urandom(32)
+signing_key = 'mm-it-1:' + base64.b64encode(signing_seed).decode()
+VERIFY_JS = """const c=require('crypto'),[compact,seed]=process.argv.slice(1),[p,s]=compact.split('.')
+const key=c.createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(seed,'base64')]),format:'der',type:'pkcs8'})
+process.stdout.write(c.verify(null,Buffer.from(p,'base64url'),c.createPublicKey(key),Buffer.from(s,'base64url'))?'valid':'invalid')"""
+
+def verified_claims(compact):
+    result = subprocess.run(['node', '-e', VERIFY_JS, compact, base64.b64encode(signing_seed).decode()], capture_output=True, text=True)
+    assert result.stdout == 'valid', (result.stdout, result.stderr)
+    payload = compact.split('.')[0]
+    return json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
 
 class StripeFixture(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
@@ -81,6 +93,15 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
       r.set("sha256","b".repeat(64));r.set("download_url",e.requestInfo().body.url);r.set("validated",true);r.set("notarized",true);r.set("published",true)
       try{e.app.save(r);return e.json(200,{saved:true})}catch(err){return e.json(400,{saved:false})}
     })
+    routerAdd("POST","/__test/client-config",e=>{
+      let c;try{c=e.app.findFirstRecordByFilter("app_config","key='client'")}catch(_){c=new Record(e.app.findCollectionByNameOrId("app_config"));c.set("key","client")}
+      c.set("value",e.requestInfo().body);e.app.save(c);return e.json(200,{ok:true})
+    })
+    routerAdd("POST","/__test/license",e=>{
+      const r=new Record(e.app.findCollectionByNameOrId("licenses")),code=e.requestInfo().body.code
+      r.set("code",code);r.set("code_hint",code.slice(-4));r.set("plan","pro");r.set("duration_days",30);r.set("max_devices",1);r.set("status","available");r.set("source","manual")
+      e.app.save(r);return e.json(200,{ok:true})
+    })
     routerAdd("GET","/__test/auth-config",e=>{
       const users=e.app.findCollectionByNameOrId("users")
       return e.json(200,{subject:users.verificationTemplate.subject,resetSeconds:users.passwordResetToken.duration})
@@ -107,7 +128,8 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
         except urllib.error.HTTPError as error: return error.code, json.load(error)
     with (folder / 'server.log').open('w') as log:
         process = subprocess.Popen(base + ['serve', '--http', f'127.0.0.1:{port}'], stdout=log, stderr=log,
-            env={**os.environ, 'STRIPE_RESTRICTED_KEY': 'fixture-only', 'STRIPE_WEBHOOK_SECRET': 'fixture-signing-secret'})
+            env={**os.environ, 'STRIPE_RESTRICTED_KEY': 'fixture-only', 'STRIPE_WEBHOOK_SECRET': 'fixture-signing-secret',
+                'MACMINT_ENTITLEMENT_SIGNING_KEY': signing_key})
         try:
             for _ in range(100):
                 try:
@@ -142,15 +164,46 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert deliveries == [400] * 30, deliveries
             print('PASS: per-client 429 after redeem and sign-in bursts behind a trusted proxy header; other clients and webhooks unaffected')
             device_ids = [str(uuid.uuid4()) for _ in range(8)]
+            def timed_activation(identifier):
+                started = time.perf_counter(); result = call('/api/macmint/devices/activate', dict(device_id=identifier, name='Fixture'), token)
+                return result, (time.perf_counter() - started) * 1000
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-                results = list(pool.map(lambda identifier: call('/api/macmint/devices/activate', dict(device_id=identifier, name='Fixture'), token), device_ids))
+                timed_results = list(pool.map(timed_activation, device_ids))
+            results = [result for result, _ in timed_results]
+            cold_ms = next(ms for (status, _), ms in timed_results if status == 200)
             assert sum(status == 200 for status, _ in results) == 1, results
             assert sum(status == 409 for status, _ in results) == 7, results
             active = next(value['device']['device_id'] for status, value in results if status == 200)
+            user_id = auth['record']['id']
+            def timed(path, account_token=token):
+                started = time.perf_counter(); result = call(path, token=account_token)
+                return result, (time.perf_counter() - started) * 1000
+            activated = next(value for status, value in results if status == 200)
+            assert verified_claims(activated['entitlement_assertion'])['device_id'] == active
+            (status, plain), baseline_ms = timed('/api/macmint/me')
+            assert status == 200 and 'entitlement_assertion' not in plain, plain
+            (status, me), cached_ms = timed('/api/macmint/me?device_id=' + active)
+            assert status == 200 and me['entitlement_assertion'] == activated['entitlement_assertion'], me
+            claims = verified_claims(me['entitlement_assertion'])
+            assert claims['v'] == 1 and claims['kid'] == 'mm-it-1' and claims['user_id'] == user_id and claims['device_id'] == active, claims
+            assert claims['active'] is True and claims['plan'] == 'pro' and claims['expires_at'] is None, claims
+            assert claims['offline_until'] - claims['issued_at'] == 14 * 86400 and abs(claims['issued_at'] - time.time()) < 30, claims
+            assert call('/__test/client-config', dict(min_version='0.0.1', offline_grace_days=7))[0] == 200
+            (status, regraced), warm_ms = timed('/api/macmint/me?device_id=' + active)
+            seven = verified_claims(regraced['entitlement_assertion'])
+            assert seven['offline_until'] - seven['issued_at'] == 7 * 86400, seven
+            assert 'entitlement_assertion' not in call('/api/macmint/me?device_id=' + str(uuid.uuid4()), token=token)[1]
+            assert 'entitlement_assertion' not in call('/api/macmint/me?device_id=' + active, token=second_token)[1]
+            print(f'PASS: activation and /me return a verifiable device-bound assertion (Goja Ed25519 latency: /me without assertion {baseline_ms:.0f} ms, '
+                f'activation with first signature incl. key derivation {cold_ms:.0f} ms, /me re-signed with cached key {warm_ms:.0f} ms, /me reusing assertion {cached_ms:.0f} ms)')
             assert call('/api/macmint/devices/deactivate', dict(device_id=active), token)[0] == 200
+            assert 'entitlement_assertion' not in call('/api/macmint/me?device_id=' + active, token=token)[1]
             assert call('/api/macmint/devices/activate', dict(device_id=active), token)[0] == 409
-            assert call('/api/macmint/devices/activate', dict(device_id=active, reactivate=True), token)[0] == 200
-            print('PASS: concurrent activation respects last slot; removed device requires explicit reactivation')
+            status, refused = call('/api/macmint/devices/activate', dict(device_id=active, reactivate=False), token)
+            assert status == 409 and refused['error'] == 'device_deactivated' and 'entitlement_assertion' not in refused, refused
+            status, reactivated = call('/api/macmint/devices/activate', dict(device_id=active, reactivate=True), token)
+            assert status == 200 and verified_claims(reactivated['entitlement_assertion'])['device_id'] == active, reactivated
+            print('PASS: concurrent activation respects last slot; removed device gets no assertion and requires explicit reactivation')
             request_key = str(uuid.uuid4())
             saved_offer = dict(amount_minor=1900, currency='usd', plan='pro', duration_days=365, max_devices=3)
             def checkout_status(key, account_token=token):
@@ -337,6 +390,16 @@ with tempfile.TemporaryDirectory(prefix='pb-integration-', dir=root / '.build') 
             assert [row[0] for row in db.execute("SELECT id FROM audit_log WHERE event='redeem_failed' ORDER BY id")] == failure_ids[1:]
             assert db.execute("SELECT COUNT(*) FROM audit_log WHERE event != 'redeem_failed'").fetchone()[0] == kept_evidence
             print('PASS: daily retention prunes old site events and failed-redeem audit rows, keeping recent rows and payment evidence')
+            redeem_code = 'MINTREDEEMFIXTURE1'
+            assert call('/__test/license', dict(code=redeem_code))[0] == 200
+            status, redeemed = call('/api/macmint/redeem', dict(code=redeem_code, device_id=active), token)
+            assert status == 200 and redeemed['redeemed'] is True, redeemed
+            redeemed_claims = verified_claims(redeemed['entitlement_assertion'])
+            assert redeemed_claims['device_id'] == active and redeemed_claims['active'] is True, redeemed_claims
+            assert redeemed_claims['expires_at'] == (int(time.mktime(time.strptime(redeemed['entitlement']['expires_at'][:19], '%Y-%m-%dT%H:%M:%S'))) - time.timezone
+                if redeemed['entitlement']['expires_at'] else None), (redeemed_claims, redeemed['entitlement'])
+            assert 'entitlement_assertion' not in call('/api/macmint/redeem', dict(code=redeem_code), token)[1]
+            print('PASS: redemption returns a device-bound assertion only when this device is named')
             db.close()
             print('PASS: real raw-body HMAC, unpaid -> paid fulfillment, 8 duplicate concurrent webhooks grant one license')
             print('PASS: migrations preserve pre-existing collection IDs and reapply cleanly')

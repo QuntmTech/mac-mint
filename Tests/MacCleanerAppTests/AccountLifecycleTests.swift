@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import MacCleanerCore
 import XCTest
@@ -29,6 +30,25 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertFalse(store.isUnlocked)
   }
 
+  func testLapsedAccessIsReportedAndCheckAgainVerifies() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), clock = TestClock(), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertFalse(store.accessLapsed)
+    clock.advance(14 * 86_400 + 1)
+    XCTAssertEqual(store.phase, .active(offline: false))
+    XCTAssertFalse(store.isUnlocked)
+    XCTAssertTrue(store.accessLapsed, "Still .active, but the sheet must offer Check Again")
+    await store.retry()
+    let checks = await fixture.verifications
+    XCTAssertEqual(checks, 1)
+    XCTAssertTrue(store.isUnlocked)
+    XCTAssertFalse(store.accessLapsed)
+  }
+
   func testForegroundVerificationDoesNotReactivateRemovedDevice() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -39,15 +59,181 @@ final class AccountLifecycleTests: XCTestCase {
     await fixture.removeDevice()
     await store.refreshAccess()
     XCTAssertFalse(store.isUnlocked)
-    let firstCount = await fixture.activations
-    XCTAssertEqual(firstCount, 1)
+    XCTAssertEqual(store.phase, .deviceRemoved)
+    let firstFlags = await fixture.reactivateFlags
+    XCTAssertEqual(firstFlags, [true, false], "The background check asked without reactivating and was refused")
     await store.signIn(email: "fixture@example.invalid", password: "fixture")
     XCTAssertTrue(store.isUnlocked)
-    let secondCount = await fixture.activations
-    XCTAssertEqual(secondCount, 2)
+    let secondFlags = await fixture.reactivateFlags
+    XCTAssertEqual(secondFlags, [true, false, true])
     await store.signOut()
     XCTAssertFalse(store.isUnlocked)
     XCTAssertNil(tokens.value)
+  }
+
+  func testBackgroundChecksNeverReactivateButExplicitActionsMay() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier)
+    }
+    let first = store()
+    await first.signIn(email: "fixture@example.invalid", password: "fixture")
+    var flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true], "Signing in is an explicit activation")
+
+    // Removed through the website: launch and foreground checks ask without reactivating.
+    await fixture.deactivateThisMac()
+    await first.refreshAccess()
+    XCTAssertEqual(first.phase, .deviceRemoved)
+    XCTAssertFalse(first.isUnlocked)
+    XCTAssertNil(evidence.load(), "A definitive removal discards offline evidence")
+    let relaunched = store()
+    await relaunched.start()
+    XCTAssertEqual(relaunched.phase, .deviceRemoved)
+    flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true, false, false])
+
+    // Each explicit action on this Mac may bring it back; the server still enforces the limit.
+    await relaunched.activateThisMac()
+    XCTAssertTrue(relaunched.isUnlocked)
+    XCTAssertEqual(relaunched.infoMessage, "This Mac is activated.")
+    for action in ["purchase", "redeem"] {
+      await fixture.deactivateThisMac()
+      await relaunched.refreshAccess(force: true)
+      XCTAssertEqual(relaunched.phase, .deviceRemoved, action)
+      if action == "purchase" { await relaunched.checkPurchase() } else { await relaunched.redeem(code: "MINT-FIXTURE-CODE") }
+      XCTAssertTrue(relaunched.isUnlocked, action)
+    }
+    flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true, false, false, true, false, true, false, true])
+  }
+
+  func testBackgroundCheckRegistersAMacThatNeverHadADeviceRow() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.forgetThisMac()
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .active(offline: false))
+    XCTAssertTrue(store.isUnlocked)
+    let flags = await fixture.reactivateFlags
+    XCTAssertEqual(flags, [true, false], "Registration from a background check never asks to reactivate")
+  }
+
+  func testACancelledCheckNeverLeavesTheSpinner() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store(_ verifier: CryptoKitEntitlementVerifier) -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: verifier)
+    }
+    // A cancelled first activation after sign-in.
+    await fixture.cancelNext("/activate")
+    let signingIn = store(signing.verifier)
+    await signingIn.signIn(email: "fixture@example.invalid", password: "fixture")
+    if case .failed = signingIn.phase {} else { XCTFail("Expected a retry, not \(signingIn.phase)") }
+    await signingIn.retry()
+    XCTAssertTrue(signingIn.isUnlocked)
+
+    // A cancelled launch check with valid signed evidence uses it.
+    await fixture.cancelNext("/me")
+    let withEvidence = store(signing.verifier)
+    await withEvidence.start()
+    XCTAssertEqual(withEvidence.phase, .active(offline: true))
+    XCTAssertTrue(withEvidence.isUnlocked)
+
+    // Without usable evidence it offers a retry.
+    await fixture.cancelNext("/me")
+    let withoutEvidence = store(SigningFixture().verifier)
+    await withoutEvidence.start()
+    XCTAssertNotEqual(withoutEvidence.phase, .checking)
+    if case .failed = withoutEvidence.phase {} else { XCTFail("Expected a retry, not \(withoutEvidence.phase)") }
+  }
+
+  func testQuietNetworkFailureSwitchesToTheSignedOfflineWindow() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    await fixture.offlineGrace(days: 3)
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.goOffline()
+    clock.advance(86_400)
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .active(offline: true))
+    XCTAssertTrue(store.isUnlocked)
+
+    // Online again, then offline past the signed window while this run's 14-day window remains.
+    await fixture.goOnline()
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .active(offline: false))
+    await fixture.goOffline()
+    clock.advance(3 * 86_400 + 1)
+    XCTAssertTrue(store.isUnlocked, "Still online by this run's last check")
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .active(offline: true))
+    XCTAssertFalse(store.isUnlocked, "The server's 3-day window ends offline access, not the 14-day session window")
+    XCTAssertTrue(store.accessLapsed)
+  }
+
+  func testOnlineAssertionReanchorsTheClockMark() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let server = TestClock(), local = TestClock(), signing = SigningFixture()
+    local.advance(2 * 86_400)  // This Mac's clock runs two days ahead.
+    let fixture = AccountFixture(signing: signing, now: { server.now }), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier, now: { local.now })
+    }
+    let running = store()
+    await running.signIn(email: "fixture@example.invalid", password: "fixture")
+    let record = try XCTUnwrap(evidence.load().flatMap(OfflineEntitlementRecord.decode))
+    XCTAssertEqual(record.highWater.timeIntervalSince1970, server.now.timeIntervalSince1970.rounded(.down), accuracy: 1)
+    // The clock is corrected; offline access must survive it, in this run and after a restart.
+    local.advance(-2 * 86_400 + 3600)
+    await fixture.goOffline()
+    await running.refreshAccess()
+    XCTAssertEqual(running.phase, .active(offline: true))
+    XCTAssertTrue(running.isUnlocked)
+    let corrected = store()
+    await corrected.start()
+    XCTAssertTrue(corrected.isUnlocked)
+  }
+
+  func testOfflineForegroundChecksAreNotThrottled() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.goOffline()
+    for _ in 0..<3 { await store.refreshAccess() }
+    var attempts = await fixture.verificationAttempts
+    XCTAssertEqual(attempts, 3, "Every activation while offline tries the server again")
+    XCTAssertTrue(store.isOffline)
+    await fixture.goOnline()
+    await store.refreshAccess()
+    XCTAssertEqual(store.phase, .active(offline: false))
+    await store.refreshAccess()
+    attempts = await fixture.verificationAttempts
+    XCTAssertEqual(attempts, 4, "Back online, the interval applies again")
   }
 
   func testLateVerificationCannotRestoreAccessAfterSignOut() async throws {
@@ -72,6 +258,19 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertNil(tokens.value)
     XCTAssertFalse(store.isUnlocked)
     XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("account.json").path))
+  }
+
+  func testSignOutDiscardsOfflineEvidence() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, entitlementStorage: evidence, verifier: signing.verifier)
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertNotNil(evidence.load())
+    await store.signOut()
+    XCTAssertNil(evidence.load())
   }
 
   func testDelayedAuthenticationAndActivationCannotUndoSignOut() async throws {
@@ -125,11 +324,10 @@ final class AccountLifecycleTests: XCTestCase {
   func testVerifiedAccessSurvivesCacheWriteFailureAndReportsIt() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
-    // A file where the support directory should be guarantees failure even as root.
-    try Data().write(to: folder)
-    let fixture = AccountFixture(), tokens = TestTokens()
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let failing = OfflineEntitlementStorage(load: { nil }, save: { _ in false }, delete: {})
     let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
-      deviceInfo: device, tokenStorage: tokens.storage)
+      deviceInfo: device, tokenStorage: tokens.storage, entitlementStorage: failing, verifier: signing.verifier)
     await store.signIn(email: "fixture@example.invalid", password: "fixture")
     XCTAssertTrue(store.isUnlocked)
     XCTAssertTrue(store.infoMessage?.contains("offline access could not be saved") == true)
@@ -142,18 +340,250 @@ final class AccountLifecycleTests: XCTestCase {
   func testOfflineCacheIsBoundToTheStoredSession() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
-    let fixture = AccountFixture(), tokens = TestTokens()
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
     let client = AccountClient(transport: { try await fixture.respond($0) })
-    let first = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
-    await first.signIn(email: "fixture@example.invalid", password: "fixture")
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier)
+    }
+    await store().signIn(email: "fixture@example.invalid", password: "fixture")
     await fixture.goOffline()
-    let restarted = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
+    let restarted = store()
     await restarted.start()
     XCTAssertTrue(restarted.isUnlocked)
+    XCTAssertTrue(restarted.isOffline)
+    XCTAssertEqual(restarted.snapshot?.user.email, "fixture@example.invalid")
     tokens.value = "another-account-token"
-    let different = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage)
+    let different = store()
     await different.start()
     XCTAssertFalse(different.isUnlocked)
+    XCTAssertNil(evidence.load(), "Evidence for another session is discarded")
+  }
+
+  func testSignedEvidenceUnlocksOfflineAfterRestartOnlyUntilItsWindowEnds() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier, now: { clock.now })
+    }
+    await store().signIn(email: "fixture@example.invalid", password: "fixture")
+    let saved = try XCTUnwrap(evidence.load().flatMap(OfflineEntitlementRecord.decode))
+    XCTAssertEqual(saved.userId, "fixture")
+    XCTAssertNil(saved.snapshot?.entitlementAssertion, "The display copy is not evidence")
+    await fixture.goOffline()
+    clock.advance(14 * 86_400 - 2)
+    let restarted = store()
+    await restarted.start()
+    XCTAssertEqual(restarted.phase, .active(offline: true))
+    XCTAssertTrue(restarted.isUnlocked)
+    clock.advance(3)
+    XCTAssertFalse(restarted.isUnlocked)
+    let later = store()
+    await later.start()
+    XCTAssertFalse(later.isUnlocked)
+    if case .failed = later.phase {} else { XCTFail("Ended offline window must not unlock: \(later.phase)") }
+  }
+
+  func testEditedEvidenceAndOldAccountCacheNeverUnlockOffline() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier)
+    }
+    await store().signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.goOffline()
+    // Stretch the signed window by editing the stored payload; the signature no longer matches.
+    let record = try XCTUnwrap(evidence.load().flatMap(OfflineEntitlementRecord.decode))
+    let parts = record.assertion.split(separator: ".").map(String.init)
+    var claims = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(Base64URL.decode(parts[0]))) as? [String: Any])
+    claims["offline_until"] = 4_000_000_000
+    let edited = Base64URL.encode(try JSONSerialization.data(withJSONObject: claims, options: [.sortedKeys])) + "." + parts[1]
+    XCTAssertTrue(evidence.save(try OfflineEntitlementRecord(token: "fixture-token", userId: "fixture", assertion: edited,
+      highWater: record.highWater, snapshot: record.snapshot).encoded()))
+    let tampered = store()
+    await tampered.start()
+    XCTAssertFalse(tampered.isUnlocked)
+    XCTAssertNil(evidence.load())
+
+    // The previous release's plain-JSON cache, edited to look fresh and lifetime, is ignored and removed.
+    let fingerprint = OfflineEntitlementRecord.fingerprint("fixture-token")
+    let legacy = """
+      {"tokenFingerprint":"\(fingerprint)","access":{"verifiedAt":"\(ISO8601DateFormatter().string(from: Date()))",
+       "snapshot":{"user":{"id":"fixture","email":"fixture@example.invalid"},"devices":[],
+       "entitlement":{"plan":"pro","status":"active","active":true,"maxDevices":3}}}}
+      """
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data(legacy.utf8).write(to: folder.appendingPathComponent("account.json"))
+    let legacyRestart = store()
+    await legacyRestart.start()
+    XCTAssertFalse(legacyRestart.isUnlocked)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("account.json").path))
+  }
+
+  func testWindingTheClockBackBelowTheHighWaterMarkLocksOfflineAccess() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier, now: { clock.now })
+    }
+    let first = store()
+    await first.signIn(email: "fixture@example.invalid", password: "fixture")
+    await fixture.goOffline()
+    clock.advance(10 * 86_400)
+    await first.refreshAccess()
+    XCTAssertTrue(first.isUnlocked)
+    clock.advance(-6 * 86_400)
+    XCTAssertFalse(first.isUnlocked, "A running app notices the rollback")
+    let restarted = store()
+    await restarted.start()
+    XCTAssertFalse(restarted.isUnlocked, "The persisted mark survives a restart")
+    clock.advance(6 * 86_400)
+    let corrected = store()
+    await corrected.start()
+    XCTAssertTrue(corrected.isUnlocked)
+  }
+
+  func testStoredEvidenceIsDroppedWhenTheServerStopsVouching() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier)
+    }
+    let running = store()
+    await running.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertNotNil(evidence.load())
+    await fixture.stopVouching()
+    await running.refreshAccess(force: true)
+    XCTAssertEqual(running.phase, .active(offline: false), "Online access continues")
+    XCTAssertTrue(running.isUnlocked)
+    XCTAssertNil(evidence.load(), "Earlier evidence must not outlive the server's newer answer")
+    await fixture.goOffline()
+    let restarted = store()
+    await restarted.start()
+    XCTAssertFalse(restarted.isUnlocked)
+  }
+
+  func testLegacyServerUnlocksOnlineButLeavesNothingForAnOfflineRestart() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens(), evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    let first = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+      entitlementStorage: evidence, verifier: SigningFixture().verifier)
+    await first.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertEqual(first.phase, .active(offline: false))
+    XCTAssertTrue(first.isUnlocked)
+    XCTAssertNil(evidence.load())
+    await fixture.goOffline()
+    let restarted = AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+      entitlementStorage: evidence, verifier: SigningFixture().verifier)
+    await restarted.start()
+    XCTAssertFalse(restarted.isUnlocked)
+  }
+
+  func testAnAssertionThatFailsVerificationIsRejectedOnline() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    await fixture.forgeAssertions(true)
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertFalse(store.isUnlocked)
+    if case .failed = store.phase {} else { XCTFail("A bad signature must not unlock: \(store.phase)") }
+    await fixture.forgeAssertions(false)
+    await store.retry()
+    XCTAssertTrue(store.isUnlocked)
+    await fixture.forgeAssertions(true)
+    clock.advance(AccountStore.minimumRefreshInterval + 1)
+    let before = await fixture.verifications
+    await store.refreshAccess()
+    let after = await fixture.verifications
+    XCTAssertEqual(after, before + 1)
+    XCTAssertTrue(store.isUnlocked, "A quiet check keeps verified access; only definitive answers remove it")
+  }
+
+  func testTransientFailuresDuringQuietChecksKeepPaidAccess() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    for (index, status) in [429, 408, 404, 403, 503].enumerated() {
+      await fixture.failVerification(status: status)
+      clock.advance(AccountStore.minimumRefreshInterval + 1)
+      await store.refreshAccess()
+      let checks = await fixture.verifications
+      XCTAssertEqual(checks, index + 1, "\(status) must actually reach the server")
+      XCTAssertTrue(store.isUnlocked, "\(status)")
+      XCTAssertEqual(store.phase, .active(offline: false), "\(status)")
+    }
+    await fixture.failVerification(status: 429)
+    await store.retry()
+    XCTAssertEqual(store.phase, .active(offline: true), "An explicit retry falls back to signed evidence")
+    XCTAssertTrue(store.isUnlocked)
+    await fixture.failVerification(status: nil)
+    await fixture.cancelNextVerification()
+    await store.refreshAccess(force: true)
+    XCTAssertEqual(store.phase, .active(offline: true), "Cancellation changes nothing")
+    await fixture.failVerification(status: 401)
+    await store.refreshAccess(force: true)
+    XCTAssertEqual(store.phase, .signedOut, "An expired session still signs out")
+  }
+
+  func testForegroundChecksAreThrottledOnlyWhileAccessIsValid() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let clock = TestClock(), signing = SigningFixture()
+    let fixture = AccountFixture(signing: signing, now: { clock.now }), tokens = TestTokens()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { try await fixture.respond($0) }),
+      deviceInfo: device, tokenStorage: tokens.storage, verifier: signing.verifier, now: { clock.now })
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    func checks() async -> Int { await fixture.verifications }
+    await store.refreshAccess()
+    var count = await checks()
+    XCTAssertEqual(count, 1)
+    await store.refreshAccess()
+    clock.advance(AccountStore.minimumRefreshInterval - 60)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 1, "App activations within the interval reuse the last check")
+    clock.advance(120)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 2)
+    await store.refreshAccess(force: true)
+    count = await checks()
+    XCTAssertEqual(count, 3)
+    await fixture.deactivateThisMac()
+    clock.advance(AccountStore.minimumRefreshInterval + 1)
+    await store.refreshAccess()
+    XCTAssertFalse(store.isUnlocked)
+    await store.refreshAccess()
+    count = await checks()
+    XCTAssertEqual(count, 5, "Without valid access every activation checks again")
   }
 
   func testRepeatedSubmitDoesNotLaunchOverlappingAuthentication() async throws {
@@ -386,6 +816,25 @@ final class AccountLifecycleTests: XCTestCase {
   }
 }
 
+/// Disposable Ed25519 key standing in for the server's; the production key never appears in tests.
+private struct SigningFixture: Sendable {
+  let raw = Curve25519.Signing.PrivateKey().rawRepresentation
+
+  var verifier: CryptoKitEntitlementVerifier {
+    CryptoKitEntitlementVerifier(keys: ["fixture-kid": try! Curve25519.Signing.PrivateKey(rawRepresentation: raw).publicKey.rawRepresentation])
+  }
+
+  func assertion(user: String, device: String, issuedAt: Date, graceDays: Int = 14, forged: Bool = false) throws -> String {
+    let issued = Int(issuedAt.timeIntervalSince1970)
+    let claims: [String: Any] = ["v": 1, "kid": "fixture-kid", "user_id": user, "device_id": device, "plan": "pro",
+      "active": true, "expires_at": NSNull(), "issued_at": issued, "offline_until": issued + graceDays * 86_400]
+    let message = try JSONSerialization.data(withJSONObject: claims, options: [.sortedKeys])
+    let signature = forged ? Data(repeating: 7, count: 64)
+      : try Curve25519.Signing.PrivateKey(rawRepresentation: raw).signature(for: message)
+    return Base64URL.encode(message) + "." + Base64URL.encode(signature)
+  }
+}
+
 @MainActor
 private final class TestTokens {
   var value: String?
@@ -407,13 +856,42 @@ private actor AccountFixture {
   private var planActive = true
   var activations = 0
   var authentications = 0
+  var verifications = 0
+  /// Every /me attempt, including ones that fail offline.
+  var verificationAttempts = 0
+  var reactivateFlags: [Bool] = []
   var lastAsk: Data?
   private var pauseSuffix: String?
   private var pending: CheckedContinuation<Void, Never>?
   private var nextVerificationBody: Data?
+  private let signing: SigningFixture?
+  private let now: @Sendable () -> Date
+  private var forged = false
+  private var verificationStatus: Int?
+  private var cancelSuffix: String?
+  private var deactivated = false
+  private var graceDays = 14
+  private var vouching = true
+  init(signing: SigningFixture? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
+    self.signing = signing
+    self.now = now
+  }
   var isPaused: Bool { pending != nil }
+  func forgeAssertions(_ value: Bool) { forged = value }
+  func failVerification(status: Int?) { verificationStatus = status }
+  func cancelNextVerification() { cancelNext("/me") }
+  func cancelNext(_ suffix: String) { cancelSuffix = suffix }
+  func offlineGrace(days: Int) { graceDays = days }
+  /// The server keeps answering "active" online but stops issuing offline assertions
+  /// (for example a past_due subscription).
+  func stopVouching() { vouching = false }
+  /// A Mac that never had a device row (not a removal): background checks may register it.
+  func forgetThisMac() { removed = true; deactivated = false }
+  /// Removal through the website: the server keeps a tombstone and requires explicit reactivation.
+  func deactivateThisMac() { removed = true; deactivated = true }
   func goOffline() { offline = true }
-  func removeDevice() { removed = true }
+  func goOnline() { offline = false }
+  func removeDevice() { deactivateThisMac() }
   func removePlan() { planActive = false; removed = true }
   func completePurchase() { planActive = true }
   func holdNextVerification() { hold("/me") }
@@ -424,8 +902,17 @@ private actor AccountFixture {
   func hold(_ suffix: String) { pauseSuffix = suffix }
   func resumeVerification() { pending?.resume(); pending = nil }
   func respond(_ request: URLRequest) async throws -> (Data, URLResponse) {
-    if offline { throw URLError(.notConnectedToInternet) }
     let path = request.url!.path
+    if path.hasSuffix("/me") { verificationAttempts += 1 }
+    if offline { throw URLError(.notConnectedToInternet) }
+    if let suffix = cancelSuffix, path.hasSuffix(suffix) { cancelSuffix = nil; throw URLError(.cancelled) }
+    if path.hasSuffix("/me") {
+      verifications += 1
+      if let status = verificationStatus {
+        let data = try JSONSerialization.data(withJSONObject: ["error": status == 401 ? "unauthorized" : "fixture_\(status)", "message": "Fixture \(status)"])
+        return (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+      }
+    }
     let frozenBody = path.hasSuffix("/me") ? nextVerificationBody : nil
     if frozenBody != nil { nextVerificationBody = nil }
     if path.hasSuffix("auth-with-password") { authentications += 1 }
@@ -447,13 +934,26 @@ private actor AccountFixture {
     } else if !path.hasSuffix("deactivate") {
       if path.hasSuffix("activate") {
         activations += 1
+        let fields = request.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        let reactivate = fields["reactivate"] as? Bool == true
+        reactivateFlags.append(reactivate)
         if !planActive {
           let data = try JSONSerialization.data(withJSONObject: ["error": "no_active_plan", "message": "No active plan."])
           return (data, HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!)
         }
+        if deactivated && !reactivate {
+          let data = try JSONSerialization.data(withJSONObject: ["error": "device_deactivated", "message": "This Mac was removed from your account."])
+          return (data, HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil, headerFields: nil)!)
+        }
         removed = false
+        deactivated = false
       }
       body = snapshotBody
+      let namesThisMac = path.hasSuffix("activate") || request.url?.query?.contains("device_id=native-integration-device") == true
+      if let signing, vouching, namesThisMac, planActive, !removed {
+        body["entitlement_assertion"] = try signing.assertion(
+          user: "fixture", device: "native-integration-device", issuedAt: now(), graceDays: graceDays, forged: forged)
+      }
     }
     return (try JSONSerialization.data(withJSONObject: body), HTTPURLResponse(url: request.url!,
       statusCode: 200, httpVersion: nil, headerFields: nil)!)

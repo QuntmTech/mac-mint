@@ -78,6 +78,82 @@ final class AccountTests: XCTestCase {
     }
   }
 
+  func testActivationReactivatesOnlyWhenExplicitlyRequested() async throws {
+    let device = DeviceInfo(deviceId: "ABCDEF0123456789", name: "n", model: "m", osVersion: "o", appVersion: "v")
+    for (explicit, expected) in [(nil, false), (false, false), (true, true)] as [(Bool?, Bool)] {
+      let box = RequestBox()
+      let client = client(status: 200, json: meJSON, capture: box)
+      if let explicit {
+        _ = try await client.activate(device, token: "t", reactivate: explicit)
+      } else {
+        _ = try await client.activate(device, token: "t")
+      }
+      let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(box.request?.httpBody)) as? [String: Any])
+      XCTAssertEqual(body["reactivate"] as? Bool, expected)
+      XCTAssertEqual(body["device_id"] as? String, "ABCDEF0123456789")
+    }
+    let json = #"{"error":"device_deactivated","message":"This Mac was removed from your account."}"#
+    do {
+      _ = try await client(status: 409, json: json).activate(device, token: "t")
+      XCTFail("expected error")
+    } catch let error as AccountAPIError {
+      XCTAssertEqual(error.code, "device_deactivated")
+      XCTAssertFalse(error.isTransient)
+    }
+  }
+
+  func testVerificationAndRedemptionNameThisMacForAnAssertion() async throws {
+    let box = RequestBox()
+    _ = try await client(status: 200, json: meJSON, capture: box).me(token: "t", deviceId: "ABCDEF0123456789")
+    XCTAssertEqual(box.request?.url?.path, "/api/macmint/me")
+    XCTAssertEqual(box.request?.url?.query, "device_id=ABCDEF0123456789")
+    XCTAssertEqual(box.request?.cachePolicy, .reloadIgnoringLocalCacheData)
+    _ = try await client(status: 200, json: meJSON, capture: box).me(token: "t")
+    XCTAssertNil(box.request?.url?.query)
+    _ = try await client(status: 200, json: meJSON, capture: box).redeem(code: "MINT-1", token: "t", deviceId: "ABCDEF0123456789")
+    let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(box.request?.httpBody)) as? [String: String])
+    XCTAssertEqual(body, ["code": "MINT-1", "device_id": "ABCDEF0123456789"])
+  }
+
+  func testTransportFailuresAreClassifiedWithoutMakingCancellationOrTLSOfflineEligible() async {
+    let cases: [(Error, String)] = [
+      (CancellationError(), "cancelled"), (URLError(.cancelled), "cancelled"),
+      (URLError(.serverCertificateUntrusted), "tls"), (URLError(.secureConnectionFailed), "tls"),
+      (URLError(.serverCertificateHasUnknownRoot), "tls"), (URLError(.notConnectedToInternet), "network"),
+      (URLError(.timedOut), "network"), (NSError(domain: "other", code: 1), "network"),
+    ]
+    for (thrown, code) in cases {
+      let failing = AccountClient(baseURL: base) { _ in throw thrown }
+      do {
+        _ = try await failing.me(token: "t")
+        XCTFail("expected error")
+      } catch let error as AccountAPIError {
+        XCTAssertEqual(error.code, code, "\(thrown)")
+        XCTAssertEqual(error.isNetwork, code == "network")
+        XCTAssertEqual(error.isCancellation, code == "cancelled")
+        XCTAssertEqual(error.isSecureConnectionFailure, code == "tls")
+        XCTAssertEqual(error.isTransient, code == "network")
+      } catch {
+        XCTFail("unexpected \(error)")
+      }
+    }
+    for status in [404, 408, 425, 429, 500, 502, 503] {
+      XCTAssertTrue(AccountClient.apiError(status: status, data: Data()).isTransient, "\(status)")
+    }
+    for status in [400, 401, 402, 403, 409] {
+      XCTAssertFalse(AccountClient.apiError(status: status, data: Data()).isTransient, "\(status)")
+    }
+  }
+
+  func testAccountSessionNeverCachesAuthorizedResponses() {
+    let configuration = AccountClient.sessionConfiguration()
+    XCTAssertNil(configuration.urlCache)
+    XCTAssertEqual(configuration.requestCachePolicy, .reloadIgnoringLocalCacheData)
+    XCTAssertNil(configuration.httpCookieStorage)
+    XCTAssertFalse(configuration.httpShouldSetCookies)
+    XCTAssertEqual(configuration.timeoutIntervalForResource, AccountClient.resourceTimeout)
+  }
+
   func testOfflineGraceAllowsRecentActiveAccessOnly() {
     let now = Date()
     let active = Entitlement(plan: "pro", status: "active", active: true, maxDevices: 3)

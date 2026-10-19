@@ -20,6 +20,7 @@ extension AccountStore {
   func refreshAIStatus() async {
     let generation = sessionGeneration
     let result = await client.aiStatus()
+    // A response that arrives after sign-out (or a newer sign-in) must not re-enable AI.
     guard !Task.isCancelled, generation == sessionGeneration else { return }
     aiStatus = result
     aiAvailable = aiStatus.enabled
