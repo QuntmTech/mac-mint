@@ -106,16 +106,18 @@ extension AppViewModel {
 
   /// Drops the deep levels of the map while they aren't on screen. Totals, the visible trail
   /// and selected items stay; a pruned folder is mapped again when it is opened.
-  func compactStorageMap() {
-    guard let scan = storageScan, !(isScanning && operationTitle == "Storage") else { return }
+  @discardableResult
+  func compactStorageMap() -> Bool {
+    guard let scan = storageScan, !(isScanning && operationTitle == "Storage") else { return false }
     let root = scan.root.id
     var expanding = Set<String>()
     for path in selectedStoragePaths { expanding.formUnion(StorageNode.ancestors(of: path, within: root)) }
     if let path = storagePath { expanding.insert(path); expanding.formUnion(StorageNode.ancestors(of: path, within: root)) }
     let compact = scan.root.compacted(levels: 2, expanding: expanding)
-    guard !compact.pruned.isEmpty else { return }
+    guard !compact.pruned.isEmpty else { return false }
     storagePrunedFolders.formUnion(compact.pruned)
     storageScan = StorageScan(root: compact.node, coverage: scan.coverage, duration: scan.duration)
+    return true
   }
 
   func remapStorageFolder(_ node: StorageNode) {

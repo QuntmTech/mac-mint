@@ -660,6 +660,7 @@ final class PerformanceIconCache {
   static let shared = PerformanceIconCache()
   private let cache = PreviewImageCache(byteLimit: 2 * 1024 * 1024, countLimit: 64)
   private init() {}
+  var count: Int { cache.count }
   func removeAll() { cache.removeAll() }
   func icon(for app: NSRunningApplication) -> NSImage? {
     let key = app.bundleURL?.path ?? app.bundleIdentifier ?? String(app.processIdentifier)

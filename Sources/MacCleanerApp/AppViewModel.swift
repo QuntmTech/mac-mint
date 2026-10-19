@@ -228,7 +228,7 @@ final class AppViewModel: ObservableObject {
       recoveryReady = true
     }
     // Background release keeps selections, the queue, History and recovery state.
-    MemoryRelief.shared.register { [weak self] in self?.compactStorageMap() }
+    MemoryRelief.shared.register { [weak self] in self?.compactStorageMap() ?? false }
   }
 
   var selectedCleanupBytes: Int64 {

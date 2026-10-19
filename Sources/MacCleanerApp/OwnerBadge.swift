@@ -12,6 +12,7 @@ enum OwnerDirectory {
 
   private static var cache: [String: Owner?] = [:]
 
+  static var count: Int { cache.count }
   static func removeAll() { cache.removeAll() }
 
   static func owner(for hint: OwnerHint?) -> Owner? {

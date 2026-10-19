@@ -107,8 +107,10 @@ final class AppEfficiencyTests: XCTestCase {
 
   func testBackgroundReleaseWaitsThenPurgesCompactsAndRelieves() async throws {
     let counts = Box((purge: 0, compact: 0, relieve: 0))
-    let relief = MemoryRelief(delay: 0.05, purge: { counts.value.purge += 1 }, relieve: { counts.value.relieve += 1 })
-    relief.register { counts.value.compact += 1 }
+    let held = Box(true)
+    let relief = MemoryRelief(delay: 0.05, purge: { counts.value.purge += 1; return held.value },
+      relieve: { counts.value.relieve += 1 })
+    relief.register { counts.value.compact += 1; return false }
     relief.foregroundChanged(false); relief.foregroundChanged(true)
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(relief.releases, 0, "Returning before the delay keeps caches warm")
@@ -116,6 +118,10 @@ final class AppEfficiencyTests: XCTestCase {
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(relief.releases, 1)
     XCTAssertEqual(counts.value.purge, 1); XCTAssertEqual(counts.value.compact, 1); XCTAssertEqual(counts.value.relieve, 1)
+    held.value = false
+    relief.release()
+    XCTAssertEqual(relief.releases, 2)
+    XCTAssertEqual(counts.value.relieve, 1, "Nothing dropped, so the allocator walk is skipped")
   }
 
   func testMemoryReleaseKeepsSelectionsQueueAndHistory() throws {

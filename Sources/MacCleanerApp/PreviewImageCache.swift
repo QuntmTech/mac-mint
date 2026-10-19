@@ -69,9 +69,14 @@ enum PreviewCaches {
   static let photos = PreviewImageCache(byteLimit: 8 * 1_024 * 1_024, countLimit: 32)
   /// Memory pressure, closing the window and time in the background all release previews.
   static func startMemoryPressureHandling() { MemoryRelief.shared.start() }
-  static func release() {
+  /// Returns whether anything was held.
+  @discardableResult
+  static func release() -> Bool {
+    let held = photos.count + ThumbnailCache.shared.count + PerformanceIconCache.shared.count + FileIcons.count
+      + OwnerDirectory.count > 0
     photos.removeAll(); ThumbnailCache.shared.removeAll(); PerformanceIconCache.shared.removeAll()
     FileIcons.removeAll(); OwnerDirectory.removeAll()
+    return held
   }
 }
 

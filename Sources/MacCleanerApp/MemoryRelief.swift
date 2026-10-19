@@ -13,15 +13,15 @@ final class MemoryRelief {
 
   private var pressureSource: DispatchSourceMemoryPressure?
   private var pending: Task<Void, Never>?
-  private var compactions: [UUID: @MainActor () -> Void] = [:]
+  private var compactions: [UUID: @MainActor () -> Bool] = [:]
   private var closeObserver: NSObjectProtocol?
-  private let purge: @MainActor () -> Void
+  private let purge: @MainActor () -> Bool
   private let relieve: @MainActor () -> Void
   private let delay: TimeInterval
   private(set) var releases = 0
 
   init(delay: TimeInterval = MemoryRelief.backgroundDelay,
-    purge: @escaping @MainActor () -> Void = { PreviewCaches.release() },
+    purge: @escaping @MainActor () -> Bool = { PreviewCaches.release() },
     relieve: @escaping @MainActor () -> Void = { _ = malloc_zone_pressure_relief(nil, 0) }) {
     self.delay = delay; self.purge = purge; self.relieve = relieve
   }
@@ -46,9 +46,10 @@ final class MemoryRelief {
     }
   }
 
-  /// Registers work that drops recomputable state; returns a token for `unregister`.
+  /// Registers work that drops recomputable state and reports whether it dropped anything;
+  /// returns a token for `unregister`.
   @discardableResult
-  func register(_ compaction: @escaping @MainActor () -> Void) -> UUID {
+  func register(_ compaction: @escaping @MainActor () -> Bool) -> UUID {
     let id = UUID()
     compactions[id] = compaction
     return id
@@ -78,9 +79,11 @@ final class MemoryRelief {
 
   func release() {
     pending?.cancel(); pending = nil
-    purge()
-    for compaction in compactions.values { compaction() }
+    var freed = purge()
+    for compaction in compactions.values where compaction() { freed = true }
     releases += 1
-    relieve()
+    // Scans and screen changes already hand pages back; a release with nothing to drop
+    // skips the allocator walk, which is itself measurable CPU in the background.
+    if freed { relieve() }
   }
 }
