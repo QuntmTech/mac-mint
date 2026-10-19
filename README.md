@@ -6,6 +6,8 @@ A native **Swift 6 + SwiftUI** macOS cleaner/uninstaller, evolved from Mac Clean
 
 Local scanning, inspection, exclusions, History and Restore are available before sign-in. An active account and plan are required to start a paid removal. Existing redemption codes (`MINT-XXXX-XXXX-XXXX-XXXX`) remain supported. Configured Stripe Checkout grants purchased access to the account through verified webhooks; it remains closed until configuration and a validated consumer build are available. Accounts have a device limit.
 
+Recurring billing supports the approved **US$39.99/year, three-day trial, three-Mac** offer with owner-managed cancellation, payment recovery and verified trial/invoice access periods. Production checkout remains closed pending provider, email and consumer-release acceptance. See [public-readiness review](docs/PUBLIC_READINESS_REVIEW.md) and [Stripe setup](docs/STRIPE_SETUP.md).
+
 Purchase setup, pending-pricing configuration and verification gates are documented in [Stripe setup](docs/STRIPE_SETUP.md).
 
 See [startup and permissions](docs/PERMISSIONS_AND_STARTUP.md) for guided setup, access troubleshooting and normal-launch verification.
@@ -52,7 +54,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
   - LM Studio models are listed per model.
   - Hugging Face caches are listed as whole repositories (all revisions), honoring `HF_HOME` / `HF_HUB_CACHE`.
 - **Docker Desktop's disk image** is shown with `docker system prune` as the way to reclaim it.
-- Each item says whether it rebuilds, re-downloads, or needs review. Anything touched in the last 3 days is marked "In use" and never preselected.
+- Each item says whether it rebuilds, re-downloads, or needs review. Recently changed data is treated conservatively; activity evidence and modification dates are distinguished.
 
 ### Performance, menu bar, and reminders
 - **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
@@ -63,7 +65,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ### Photos
 - **Similar shots**: 64-bit perceptual hashes grouped by Hamming distance; the sharpest (then largest) shot is the suggested keeper, which you can change with "Keep This One Instead". The kept shot can never be selected, and nothing is preselected.
-- **Blurry photos**: variance-of-Laplacian sharpness judged relative to the rest of the collection; **Screenshots** listed by size.
+- **Blurry photos**: variance-of-Laplacian sharpness judged relative to the rest of the collection; **Screenshots** use PhotoKit metadata for library assets and filename detection for folder files, with available byte sizes shown.
 - **Photos library** is analysed through PhotoKit thumbnails (local only, never downloads originals) and removed only through Photos itself: the system asks for confirmation and items stay in Recently Deleted for 30 days. Files inside `.photoslibrary` packages are never touched.
 - **Folders** use the normal review → Trash → Restore pipeline; the kept shot's state is recorded so a plan can't remove it too.
 
@@ -73,7 +75,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ### More system junk and the Trash
 - Mail attachments (review) and iPhone/iPad firmware `.ipsw` files (rebuildable), each with its own allowlist.
-- The Trash card shows what the Trash holds. **Empty Trash** is a separate, permanent action with its own warning (it can't be restored from History) and is performed by Finder.
+- The Trash card measures the home Trash. **Review Trash in Finder** opens Finder, where the user can inspect its full scope before permanently emptying it.
 
 ### Cleaner
 - User caches, logs, browser caches, developer junk, diagnostics, device backups, and old installers.

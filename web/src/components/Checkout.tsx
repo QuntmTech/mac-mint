@@ -143,6 +143,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
         } else setAttention(true)
       }
       if (code === 'checkout_attention') setAttention(true)
+      if (code === 'account_restricted') setAttention(true)
       if (code === 'plan_exists') { setAttention(true); await onRefresh() }
       setCompleted(code === 'checkout_complete')
       setError(errorMessage(err, 'Checkout could not be opened. Retry to resume the same payment session.'))
@@ -190,7 +191,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
         : <>
           {requestKey && <p className="text-sm text-slate-500 dark:text-slate-400">Resume your existing checkout. Review its saved price and payment details in Stripe before confirming.</p>}
           {hasOfferTerms && <>
-            <p className="text-lg font-semibold">{displayedOffer.trial_days ? `${displayedOffer.trial_days} days free, then ` : ''}{formattedPrice(displayedOffer)}{displayedOffer.billing_mode === 'subscription' ? ` / ${displayedOffer.billing_interval}` : ''} <span className="text-sm font-normal uppercase">{displayedOffer.currency}</span></p>
+            <p className="text-lg font-semibold">{displayedOffer.trial_days ? `${displayedOffer.trial_days} days free, then ` : ''}{formattedPrice(displayedOffer)}{displayedOffer.billing_mode === 'subscription' ? ` / ${displayedOffer.billing_interval}` : ''} <span className="text-sm font-normal uppercase">{displayedOffer.currency?.toUpperCase()}</span></p>
             <p>{displayedOffer.billing_mode === 'subscription' ? 'Recurring subscription' : displayedOffer.duration_days ? `${displayedOffer.duration_days} days of access` : 'Lifetime access'} · Up to {displayedOffer.max_devices} {displayedOffer.max_devices === 1 ? 'Mac' : 'Macs'}</p>
             {displayedOffer.billing_mode === 'subscription' && <p className="text-sm text-slate-500 dark:text-slate-400">Renews automatically each {displayedOffer.billing_interval}. Manage payment details or cancel renewal from your account. Cancellation keeps access until the paid period ends.</p>}
             {Boolean(displayedOffer.trial_days) && <p className="text-sm text-slate-500 dark:text-slate-400">A payment method is required. Cancel before the trial ends to avoid the first charge. One free trial per account.</p>}

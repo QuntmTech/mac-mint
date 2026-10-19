@@ -187,6 +187,15 @@ test('malformed license expiry cannot turn into unlimited account access', () =>
   assert.equal(lib.entitlementPayload(ent).active, false)
   assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false)
 })
+test('revoked and suspended accounts cannot open or resume a payable subscription', () => {
+  for (const status of ['revoked', 'suspended']) {
+    const f = fixture(), ent = lib.ensureEntitlement(f.app, 'user1')
+    ent.set('plan', 'pro'); ent.set('status', status)
+    assert.throws(() => payments.checkout(f.app, { id: 'user1', get: () => 'buyer@example.invalid' }, 'fixture-request'),
+      error => error.code === 'account_restricted')
+    assert.equal(f.requests.length, 0)
+  }
+})
 
 function trialFixture() {
   const f = fixture()

@@ -34,11 +34,12 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  ok(text(home.toJSON()).includes('Inspect locally before sign-in'),'Local inspection before sign-in is disclosed');
  ok(home.root.findAllByType('a').some(n=>n.props.href==='/login'),'Sign-in uses the same-origin account route');
  ok(!text(home.toJSON()).includes('Other cleaners'),'No unsupported competitor comparison');
- const intervals=new Map();let intervalID=0;
+ const intervals=new Map();let intervalID=0,fakeNow=0;
+ const originalNow=performance.now;Object.defineProperty(performance,'now',{value:()=>fakeNow,configurable:true});
  const originalSetInterval=global.setInterval,originalClearInterval=global.clearInterval;
  global.setInterval=callback=>{const id=++intervalID;intervals.set(id,callback);return id;};
  global.clearInterval=id=>intervals.delete(id);
- async function finishScan(){await act(async()=>{for(let tick=0;tick<20;tick++)for(const callback of [...intervals.values()])callback();});}
+ async function finishScan(){await act(async()=>{for(let tick=0;tick<20;tick++){fakeNow+=120;for(const callback of [...intervals.values()])callback();}});}
  let availabilityClicks=0;
  const prod=await mount(ProductDemo,{onAvailability:()=>availabilityClicks++});
  ok(prod.root.findAll(n=>n.props.className==='cleanup-row').length===0,'Demo starts with a clear scan action, not fabricated completed results');
@@ -93,9 +94,13 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  await act(async()=>controlled.update(React.createElement(ProductDemo,{module:'apps'})));
  ok(intervals.size===0&&text(controlled.toJSON()).includes('Demo scan cancelled'),'External module shortcuts cancel hidden scans');
  await act(async()=>controlled.update(React.createElement(ProductDemo,{module:'overview'})));
- await click(button(controlled,'Run Quick Scan'));await act(async()=>controlled.unmount());
+ await click(button(controlled,'Run Quick Scan'));
+ await act(async()=>{fakeNow+=5000;for(const callback of [...intervals.values()])callback();});
+ ok(intervals.size===0&&text(controlled.toJSON()).includes('Review 6.4 GB'),'Delayed browser callbacks catch up to elapsed scan time');
+ await click(button(controlled,'Scan again'));await act(async()=>controlled.unmount());
  ok(intervals.size===0,'Unmount releases an active scan timer');
  global.setInterval=originalSetInterval;global.clearInterval=originalClearInterval;
+ Object.defineProperty(performance,'now',{value:originalNow,configurable:true});
  const dup=await mount(DuplicateDemo);await click(button(dup,'Verify example files'));await click(button(dup,'Select extra copies'));const files=dup.root.findAllByType('button').filter(n=>n.props.className?.includes('duplicate-file'));await click(files[0]);ok(text(dup.toJSON()).includes('At least one copy must remain'),'Final-copy protection enforced');ok(files.filter(n=>n.props['aria-pressed']).length===2,'Only two copies selected');await click(button(dup,'Demo Trash'));ok(text(dup.toJSON()).includes('One copy remains'),'Duplicate cleanup leaves a keeper');
  const large=await mount(LargeFilesDemo);const select=large.root.findByType('select');await act(async()=>select.props.onChange({target:{value:'5'}}));ok(large.root.findAll(n=>n.props.className==='file-row').length===1,'5 GB threshold filters files');await click(large.root.findAllByType('button').find(n=>n.props['aria-label']==='Review Weekend-film.mov'));ok(text(large.toJSON()).includes('This only changes the example'),'Large file removal requires review');await click(button(large,'Move to demo Trash'));ok(text(large.toJSON()).includes('No example files match'),'Reviewed file is removed from example');
  const uninstall=await mount(UninstallerDemo);await click(button(uninstall,'Orbit Notes'));ok(text(uninstall.toJSON()).includes('0.98 GB'),'Uninstaller total follows app and selected related files');await click(button(uninstall,'Review uninstall'));await click(button(uninstall,'Confirm demo uninstall'));ok(text(uninstall.toJSON()).includes('Example app moved to Trash'),'Uninstaller confirmation works');

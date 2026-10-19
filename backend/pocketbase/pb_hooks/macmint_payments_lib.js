@@ -149,6 +149,10 @@ function orderForRequest(app, user, key, cfg) {
 function checkout(app, user, key) {
   const cfg = configuration(app)
   if (!cfg) throw Error("Checkout is not open yet.")
+  if (billingMode(cfg) === "subscription") {
+    const access = require(`${__hooks}/macmint_lib.js`).effectiveEntitlement(app, user.id)
+    if (["revoked", "suspended"].indexOf(access.status) >= 0) throw { code: "account_restricted" }
+  }
   const client = new StripeClient(app)
   const order = orderForRequest(app, user, key, cfg)
   if (order.get("state") === "fulfilled") throw { code: "checkout_complete" }

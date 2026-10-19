@@ -15,6 +15,7 @@ routerAdd("POST", "/api/macmint/checkout", e => {
   if (!payments.validRequestKey(key)) return e.json(400, { error: "bad_request", message: "Missing checkout request ID." })
   try { return e.json(200, { url: payments.checkout(e.app, e.auth, key) }) }
   catch (error) {
+    if (error.code === "account_restricted") return e.json(403, { error: "account_restricted", message: "Purchases are unavailable for this account. Contact support@macmint.co before starting a subscription." })
     if (error.code === "plan_exists") return e.json(409, { error: "plan_exists", message: "Your account already has access or a subscription to manage. Refresh your account or open billing instead of paying again." })
     if (error.code === "checkout_in_progress") return e.json(409, { error: "checkout_in_progress", request_key: error.request_key, message: "Another checkout is open for your account. Resume that checkout instead of starting a second payment." })
     if (error.code === "checkout_attention") return e.json(409, { error: "checkout_attention", message: "Your earlier checkout attempts need to be checked before starting another payment. Contact support; do not pay again." })

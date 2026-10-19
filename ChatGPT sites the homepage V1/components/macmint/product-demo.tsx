@@ -92,9 +92,10 @@ export function ProductDemo({ module, onModuleChange, onAvailability }: DemoProp
     if (timer.current !== null) return;
     setProgress(0);
     setStatus("Demo scan running. Checking example cleanup locations…");
-    let value = 0;
+    const started = performance.now();
     timer.current = setInterval(() => {
-      value += 5;
+      // Delayed/throttled callbacks should catch up rather than extend the animation.
+      const value = Math.min(100, Math.floor((performance.now() - started) / 24));
       if (value >= 100) {
         clearInterval(timer.current!);
         timer.current = null;

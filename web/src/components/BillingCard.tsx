@@ -20,7 +20,9 @@ export function BillingCard({ subscription, userId, onRefresh }: { subscription:
       const response = await pb.send<{ url: string }>('/api/macmint/billing/portal', { method: 'POST' })
       if (!alive.current || pb.authStore.record?.id !== userId) return
       const destination = new URL(response.url)
-      if (destination.origin !== 'https://billing.stripe.com' || destination.username || destination.password) throw Error('Billing address could not be verified.')
+      if (destination.origin !== 'https://billing.stripe.com' || destination.username || destination.password) {
+        setError('Billing address could not be verified. Retry or contact support@macmint.co.'); return
+      }
       window.location.assign(destination.href)
     } catch (err) {
       if (alive.current && pb.authStore.record?.id === userId) setError(errorMessage(err, 'Billing could not be opened. Retry or contact support@macmint.co.'))

@@ -377,7 +377,7 @@ struct AccountSettingsCard: View {
       if entitlement.source == "subscription_trial" { return "Trial ends \(expiry.formatted(date: .abbreviated, time: .omitted))" }
       return "Pro • Access until \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
-    return "Pro • Lifetime"
+    return entitlement.isLifetime ? "Pro • Lifetime" : "Refresh account to verify expiry"
   }
 }
 

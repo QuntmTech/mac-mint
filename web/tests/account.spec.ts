@@ -494,7 +494,7 @@ test('annual trial shows the first charge, automatic renewal, cancellation and M
   expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
 })
 
-test('trial account has a bounded end date and owner billing management in light and dark modes', async ({ page }) => {
+test('trial account has a bounded end date and owner billing management in light and dark modes', async ({ page }, testInfo) => {
   const state = await backend(page, true)
   state.active = true; state.subscription = { ...subscriptionFixture }
   await page.emulateMedia({ colorScheme: 'dark' })
@@ -504,7 +504,11 @@ test('trial account has a bounded end date and owner billing management in light
   await expect(billing).toContainText(/free trial.*ends/)
   await expect(billing).toContainText('billing starts at $39.99 per year')
   await expect(page.getByText('Lifetime access', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('subscription-dark.png'), fullPage: true })
   await page.emulateMedia({ colorScheme: 'light' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('subscription-light-phone.png'), fullPage: true })
   await page.getByRole('button', { name: 'Manage billing or cancel' }).click()
   await expect(page).toHaveURL(state.portalURL)
   expect(state.portalRequests).toBe(1); expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
