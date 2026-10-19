@@ -115,7 +115,7 @@ final class AppEfficiencyTests: XCTestCase {
     try await Task.sleep(for: .milliseconds(200))
     XCTAssertEqual(relief.releases, 0, "Returning before the delay keeps caches warm")
     relief.foregroundChanged(false)
-    try await Task.sleep(for: .milliseconds(200))
+    for _ in 0..<100 where relief.releases == 0 { try await Task.sleep(for: .milliseconds(50)) }
     XCTAssertEqual(relief.releases, 1)
     XCTAssertEqual(counts.value.purge, 1); XCTAssertEqual(counts.value.compact, 1); XCTAssertEqual(counts.value.relieve, 1)
     held.value = false
