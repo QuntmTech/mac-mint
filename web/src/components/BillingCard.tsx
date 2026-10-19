@@ -35,6 +35,7 @@ export function BillingCard({ subscription, userId, onRefresh }: { subscription:
       : subscription.cancel_at_period_end ? <p>Renewal is canceled.{date ? ` Access ends ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}.` : ' Refresh your account to check the access end date.'}</p>
       : trial ? <p>Your free trial{date ? ` ends ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}` : ' is active'}. After the trial, billing starts at {formattedPrice(subscription)} per {subscription.billing_interval}. Cancel before it ends to avoid the first charge.</p>
       : <p>Renews automatically each {subscription.billing_interval}.{date ? ` Paid through ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}.` : ''}</p>}
+    {subscription.access_held && !ended && <Alert>Access for this subscription is paused after a refund or payment dispute. Contact support@macmint.co; renewals don't restore it automatically, and don't start another subscription.</Alert>}
     {needsPayment && <Alert>Payment needs attention. Open billing to update your payment method or review your invoice. Do not start another subscription.</Alert>}
     {error && <Alert>{error}</Alert>}
     <div className="flex flex-wrap gap-3">

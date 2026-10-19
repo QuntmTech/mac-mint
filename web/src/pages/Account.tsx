@@ -49,6 +49,8 @@ const planSummary = (entitlement: Entitlement) => {
 const PlanCard = ({ account, checkoutResult, onRefresh }: { account: AccountSnapshot; checkoutResult: string | null; onRefresh: () => Promise<void> }) => {
   const plan = planSummary(account.entitlement)
   const limit = Math.max(account.entitlement.max_devices, account.entitlement.active ? 1 : 0)
+  const subscription = account.billing?.subscription
+  const heldSubscription = Boolean(subscription?.access_held) && !['canceled', 'incomplete_expired'].includes(subscription?.status ?? '')
   return (
     <Card title="Plan">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -65,7 +67,8 @@ const PlanCard = ({ account, checkoutResult, onRefresh }: { account: AccountSnap
           </p>
         )}
       </div>
-      <Checkout key={account.user.id} userId={account.user.id} verified={account.user.verified} hasPlan={account.entitlement.active} returnState={checkoutResult} onRefresh={onRefresh} />
+      {/* An ongoing subscription held after a refund or dispute cannot be replaced by a new payment. */}
+      <Checkout key={account.user.id} userId={account.user.id} verified={account.user.verified} hasPlan={account.entitlement.active || heldSubscription} returnState={checkoutResult} onRefresh={onRefresh} />
       {account.billing?.subscription && <BillingCard key={'billing-' + account.user.id} subscription={account.billing.subscription} userId={account.user.id} onRefresh={onRefresh} />}
     </Card>
   )

@@ -4,6 +4,8 @@ export type Subscription = {
   cancel_at_period_end: boolean; cancel_at: string | null; trial_through: string | null; trial_days: number;
   billing_mode: 'subscription'; billing_interval: 'month' | 'year'; billing_interval_count: number;
   amount_minor: number; currency: string; duration_days: number; max_devices: number
+  // Access paused by a refund, chargeback or operator hold until support releases it.
+  access_held?: boolean
 }
 // Stripe's minor-unit conventions differ from ISO/Intl for a few currencies.
 const zeroDecimal = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'])

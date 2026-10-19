@@ -51,7 +51,7 @@ function fixture() {
       if (collection === 'app_config') { const row = new Row(collection); row.set('value', JSON.stringify(config)); return row }
       if (collection === 'app_releases') return new Row(collection)
       if (collection === 'app_secrets') { const row = new Row(collection); row.set('value', 'synthetic-fixture'); return row }
-      const row = rows.find(row => row.collection === collection && (!args.u || row.get('user') === args.u) && (!args.k || row.get('request_key') === args.k))
+      const row = rows.find(row => row.collection === collection && (!args.u || row.get('user') === args.u) && (!args.k || row.get('request_key') === args.k) && (!args.p || row.get('payment_intent') === args.p))
       if (!row) throw Error('Not found'); return row
     },
     save(row) { if (!row.id) { row.id = 'row' + rows.length; row.set('created', new Date().toISOString()); rows.push(row) } },
@@ -256,4 +256,92 @@ test('trial cancellation cannot reset eligibility and provider trials cannot exc
   assert.throws(() => payments.fulfill(another.app, { id: another.session.id }), /Unconfigured trial/)
   assert.equal(lib.effectiveEntitlement(another.app, 'user1').active, false)
   for (const trial_days of [-1, 1.5, 31]) assert.equal(payments.validConfiguration({ ...another.config, trial_days }), false)
+})
+
+// Charges and disputes on subscription invoices map through Stripe's InvoicePayment.
+function reversalRoutes(f, objects) {
+  const base = global.$http.send
+  global.$http = { send: request => {
+    const url = new URL(request.url), resource = url.pathname.replace('/v1/', '')
+    if (resource.startsWith('charges/')) return { statusCode: 200, json: copy(objects.charge) }
+    if (resource.startsWith('disputes/')) return { statusCode: 200, json: copy(objects.dispute) }
+    if (resource === 'invoice_payments') {
+      const intent = url.searchParams.get('payment[payment_intent]')
+      assert.equal(url.searchParams.get('payment[type]'), 'payment_intent')
+      return { statusCode: 200, json: { data: intent === 'pi_invoice' ? [{ id: 'inpay_fixture', invoice: f.invoice.id, payment: { type: 'payment_intent', payment_intent: intent } }] : [] } }
+    }
+    if (resource === 'checkout/sessions' && url.searchParams.get('payment_intent')) return { statusCode: 200, json: { data: [] } }
+    return base(request)
+  } }
+}
+const refund = (amount, refunded) => ({ id: 'ch_invoice', payment_intent: 'pi_invoice', amount: 1900, amount_refunded: amount, refunded, livemode: false })
+const row = f => f.rows.find(r => r.collection === 'billing_subscriptions')
+
+test('a full refund of a subscription invoice holds its access; replays and renewals cannot restore it', () => {
+  const f = fixture(); payments.fulfill(f.app, { id: f.session.id })
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, true)
+  reversalRoutes(f, { charge: refund(1900, true) })
+  assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }).result, 'held')
+  assert.deepEqual([row(f).get('access_hold'), row(f).get('hold_reference'), row(f).get('refunded_minor')], ['refunded', 'ch_invoice', 1900])
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false)
+  assert.equal(billing.summary(f.app, 'user1').subscription.access_held, true)
+  assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }).result, 'unchanged')
+  f.subscription.items.data[0].current_period_end += 30 * 86400; f.invoice.lines.data[0].period.end += 30 * 86400
+  billing.event(f.app, 'invoice.paid', { id: f.invoice.id })
+  payments.fulfill(f.app, { id: f.session.id })
+  assert.equal(row(f).get('access_hold'), 'refunded')
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false, 'a renewal must not silently restore access')
+  assert.equal(f.rows.filter(r => r.collection === 'licenses').length, 0)
+  const released = payments.releaseSubscriptionHold(f.app, { subscription: 'sub_fixture', reason: 'fixture' })
+  assert.deepEqual([released.released, released.previous_hold, released.entitlement.active], [true, 'refunded', true])
+  assert.equal(payments.releaseSubscriptionHold(f.app, { order: f.order.id }).released, false)
+})
+
+test('partial subscription refunds and dispute inquiries are review-only; a chargeback holds access', () => {
+  const f = fixture(); payments.fulfill(f.app, { id: f.session.id })
+  reversalRoutes(f, { charge: refund(500, false) })
+  assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }).result, 'review')
+  assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }).result, 'unchanged')
+  assert.deepEqual([row(f).get('attention'), row(f).get('refunded_minor'), row(f).get('access_hold')], ['partial_refund', 500, undefined])
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, true)
+  const dispute = { id: 'dp_invoice', charge: 'ch_invoice', payment_intent: 'pi_invoice', livemode: false, status: 'warning_needs_response' }
+  reversalRoutes(f, { dispute })
+  assert.equal(payments.reverse(f.app, 'charge.dispute.created', { id: 'dp_invoice' }).result, 'review')
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, true)
+  dispute.status = 'needs_response'
+  assert.equal(payments.reverse(f.app, 'charge.dispute.updated', { id: 'dp_invoice' }).result, 'held')
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false)
+  dispute.status = 'won'
+  assert.equal(payments.reverse(f.app, 'charge.dispute.updated', { id: 'dp_invoice' }).result, 'ignored')
+  assert.equal(row(f).get('access_hold'), 'disputed', 'a won dispute is released by an operator, not automatically')
+})
+
+test('reversals of other products are ignored and mismatched invoice ownership fails for retry', () => {
+  const f = fixture(); payments.fulfill(f.app, { id: f.session.id })
+  reversalRoutes(f, { charge: { ...refund(1900, true), payment_intent: 'pi_other' } })
+  assert.equal(payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }).result, 'ignored')
+  f.invoice.customer = 'cus_attacker'
+  reversalRoutes(f, { charge: refund(1900, true) })
+  assert.throws(() => payments.reverse(f.app, 'charge.refunded', { id: 'ch_invoice' }), /Subscription invoice mismatch/)
+  assert.equal(row(f).get('access_hold'), undefined)
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, true)
+})
+
+test('superuser revoke and reconcile handle subscription orders without minting or freeing access', () => {
+  const f = fixture(); payments.fulfill(f.app, { id: f.session.id })
+  const held = payments.revokeLicense(f.app, { order: f.order.id, reason: 'fixture' })
+  assert.deepEqual([held.subscription, held.already_held, held.hold, held.entitlement.active], ['sub_fixture', false, 'operator', false])
+  assert.equal(payments.revokeLicense(f.app, { subscription: 'sub_fixture' }).already_held, true)
+  const reconciled = payments.reconcileOrder(f.app, { order: f.order.id })
+  assert.deepEqual([reconciled.state, reconciled.subscription_status, reconciled.access_held], ['fulfilled', 'active', true])
+  assert.equal(lib.effectiveEntitlement(f.app, 'user1').active, false)
+  assert.throws(() => payments.revokeLicense(f.app, { subscription: 'sub_unknown' }), e => e.code === 'not_found')
+  assert.equal(f.rows.filter(r => r.collection === 'licenses').length, 0)
+})
+
+test('refund recompute leaves revoked or suspended account restrictions in place', () => {
+  const f = fixture()
+  const ent = lib.ensureEntitlement(f.app, 'user1'); ent.set('status', 'revoked'); f.app.save(ent)
+  assert.equal(payments.recomputeEntitlement(f.app, 'user1').status, 'revoked')
+  assert.ok(f.rows.some(r => r.collection === 'audit_log' && r.get('event') === 'entitlement_review'))
 })

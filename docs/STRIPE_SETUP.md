@@ -50,7 +50,7 @@ Use the intended business account and a separate general Stripe sandbox. Store a
 - `STRIPE_RESTRICTED_KEY`, or private `app_secrets.name = stripe_restricted_key`.
 - `STRIPE_WEBHOOK_SECRET`, or private `app_secrets.name = stripe_webhook_secret`.
 
-The adapter needs Checkout Sessions create/read (including line items/list by subscription), Prices read, Subscriptions read, Invoices read, Billing Portal Configurations read and Billing Portal Sessions create. Verify actual restricted-key permissions in the isolated sandbox. No publishable key or Stripe.js is required. Never commit values or paste them into chat. [Stripe key handling](https://docs.stripe.com/keys), [sandboxes](https://docs.stripe.com/sandboxes).
+The adapter needs Checkout Sessions create/read (including line items, and listing by subscription and by payment intent), Prices read, Subscriptions read, Invoices read (including invoice payments, which map a refunded or disputed subscription charge to its invoice), Charges read, Disputes read, Billing Portal Configurations read and Billing Portal Sessions create. Verify actual restricted-key permissions in the isolated sandbox. No publishable key or Stripe.js is required. Never commit values or paste them into chat. [Stripe key handling](https://docs.stripe.com/keys), [sandboxes](https://docs.stripe.com/sandboxes).
 
 PocketBase Goja cannot load Stripe's Node SDK, so the server-only REST adapter pins `2026-08-26.dahlia`. It uses invoice `parent.subscription_details.subscription`, line `pricing.price_details.price`, and subscription-item `current_period_end`. Verify these shapes against the pinned provider API during real sandbox acceptance; protocol fixtures do not certify real credentials or API compatibility.
 
@@ -65,6 +65,9 @@ checkout.session.completed
 checkout.session.async_payment_succeeded
 checkout.session.async_payment_failed
 checkout.session.expired
+charge.refunded
+charge.dispute.created
+charge.dispute.updated
 customer.subscription.created
 customer.subscription.updated
 customer.subscription.deleted
@@ -80,6 +83,14 @@ invoice.marked_uncollectible
 
 The handler verifies the raw-body HMAC and timestamp, retrieves authoritative objects, and returns retryable 503 on synchronization failure. Provider calls occur outside database transactions. Original Checkout ownership, mode, customer, Price, amount, currency, quantity, cadence and invoice period are validated before updating access. [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks), [trial behavior](https://docs.stripe.com/billing/subscriptions/trials).
 
+Refunds and disputes are handled the same way: the signed event is a trigger, and the server retrieves the Charge or Dispute and maps its payment intent.
+
+- **One-time orders** (payment intent recorded at fulfillment; older orders are found through their Checkout Session): one transaction marks the order `refunded` or `disputed`, revokes its license and recomputes the entitlement from the user's remaining licenses. When none remain, the entitlement becomes the plain free state, not `revoked`: `revoked`/`suspended` stay reserved for operator account restrictions, which also block subscriptions. A refunded order permits a new purchase attempt; a disputed one does not.
+- **Subscription invoices** (payment intent → InvoicePayment → invoice → subscription, which must be MacMint's and owned by the same customer and mode): one transaction sets `access_hold` (`refunded` or `disputed`) on that `billing_subscriptions` row. Held subscriptions grant no access. Status syncs and renewal invoices keep updating the row but never clear the hold, so a later renewal cannot silently restore access. While the subscription stays ongoing, the account cannot start a second subscription.
+- In both cases replays change nothing, a later success or renewal event cannot restore access, and a partial refund only sets `attention = partial_refund` for operator review. A dispute *inquiry* (`warning_needs_response` / `warning_under_review`) withdraws no funds and only sets `attention = dispute_inquiry`. A formal chargeback (`needs_response`, `under_review`, `lost`) revokes or holds, including an inquiry that escalates and arrives as `charge.dispute.updated`. A dispute first seen as won or closed is ignored. Operator-set (`manual`) or restricted entitlements are not rewritten; an `entitlement_review` audit row is written instead. Payments of other products are acknowledged and ignored.
+
+**Operator re-grant.** Nothing restores access automatically, including a won dispute. For a subscription, resolve the case in Stripe (cancel the subscription if access should end), then call `POST /api/macmint/admin/billing/release-hold` with `{ "order": "<order id>" }` or `{ "subscription": "sub_…" }` and a `"reason"`; the release is audited. For a one-time purchase, mint a replacement license (`POST /api/macmint/admin/licenses`) and have the customer redeem it.
+
 Endpoints:
 
 - `GET /api/macmint/checkout/config`: public offer or `enabled:false`; authenticated users get their trial eligibility. No-store.
@@ -87,7 +98,13 @@ Endpoints:
 - `POST /api/macmint/billing/portal`: authenticated owner-bound customer; ignores browser customer/return URLs. Works while checkout is disabled.
 - `GET /api/macmint/admin/commerce/readiness`: superuser-only reason codes, no configuration/secrets/object IDs. Local prerequisites alone are not launch evidence.
 
-An unresolved old order or an uncertain create response outside the safe idempotency window requires operator reconciliation against Stripe. Preserve its row/request identity. Confirm actual provider state before permitting a replacement; never delete the evidence or grant access from a return URL. Refunds/disputes require an explicit operator policy and provider reconciliation; this implementation does not invent automatic refund or revocation rules.
+Superuser recovery routes:
+
+- `POST /api/macmint/admin/checkout/reconcile` with `{ "order": "<order id>" }`: applies Stripe's authoritative state through the normal code paths. A one-time order's Checkout Session goes paid → fulfilled once, expired → expired. A subscription order with a bound subscription is resynchronized from its subscription and latest invoice (holds survive). An unbound subscription order is bound through its session. Open sessions and complete-but-unpaid asynchronous payments are reported, not changed; resend the missing Stripe event instead. An order that never recorded a session takes `"session": "cs_..."` (found by its `macmint_order` metadata; the session must carry that order ID), or, only after checking Stripe and at least 25 hours after creation, `"confirm_expired_without_session": true`.
+- `POST /api/macmint/admin/licenses/revoke` with `{ "license": "<id>" }`, `{ "code": "MINT-…" }`, `{ "order": "<order id>" }` or `{ "subscription": "sub_…" }`, optional `"reason"`: revokes a license and recomputes the owner's entitlement, or places an `operator` hold on a subscription order. Idempotent.
+- `POST /api/macmint/admin/billing/release-hold`: the subscription re-grant described above.
+
+An unresolved old order or an uncertain create response outside the safe idempotency window requires operator reconciliation against Stripe. Preserve its row/request identity. Confirm actual provider state before permitting a replacement; never delete the evidence or grant access from a return URL. Refunds and disputes follow the rules above; anything flagged for review needs an operator decision against Stripe.
 
 ## Verification before sales
 
@@ -114,5 +131,7 @@ python3 backend/scripts/probe-stripe-sandbox.py --run-test-objects --report .bui
 ```
 
 This command creates test products, a Price, portal configuration, customer, payment method and subscription. It pays only a test invoice, cancels its subscription and expires its unused Checkout; it leaves test product/Price evidence. It rejects live/unrestricted key prefixes and never prints credentials or hosted-session URLs. It is explicitly opt-in and never part of ordinary CI.
+
+In the sandbox, also prove one-time and subscription-invoice full refunds → access revoked/held, partial refund → flagged only, dispute inquiry → flagged only, chargeback → revoked/held, a renewal after a chargeback → still held, and the operator release.
 
 Before live checkout, prove external verification/reset email delivery and a validated Developer ID-signed, notarized, stapled stable download with a real Gatekeeper/permission walkthrough. Stripe is installed/enabled in this session but exposes no account tools; the live backend currently lacks these billing routes/migrations and has SMTP disabled. No live Price, subscription, charge or production billing configuration was created by this review. Consider Stripe Tax after confirming registration requirements; automatic tax remains disabled pending that setup and separate validation.
