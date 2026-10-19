@@ -23,6 +23,9 @@ function access(app, userId) {
   const now = Date.now()
   let result = null
   for (const row of rows(app, userId, " && terminal = false")) {
+    // A refund, dispute or operator hold suspends this subscription's access. Renewals
+    // and status syncs never clear the hold; only the superuser release route does.
+    if (String(row.get("access_hold") || "")) continue
     const trial = row.get("status") === "trialing"
     if (!trial && ["active", "past_due"].indexOf(row.get("status")) < 0) continue
     const end = millis(row.get(trial ? "trial_through" : "paid_through"))
@@ -187,7 +190,7 @@ function summary(app, userId) {
   return { subscription: { status: row.get("status"), paid_through: row.get("paid_through") || null,
     trial_through: row.get("trial_through") || null,
     current_period_end: row.get("current_period_end") || null, cancel_at_period_end: row.get("cancel_at_period_end") === true,
-    cancel_at: row.get("cancel_at") || null, ...payments().publicOffer({ billing_mode: "subscription",
+    cancel_at: row.get("cancel_at") || null, access_held: !!String(row.get("access_hold") || ""), ...payments().publicOffer({ billing_mode: "subscription",
       billing_interval: order.get("billing_interval"), billing_interval_count: order.get("billing_interval_count"),
       trial_days: order.get("trial_days") || 0,
       amount_minor: order.get("amount_minor"), currency: order.get("currency"), plan: "pro", duration_days: 0, max_devices: order.get("max_devices") }) } }
@@ -213,4 +216,4 @@ function verifyPortalConfiguration(client, configuration, livemode) {
       !cfg.features.payment_method_update || !cfg.features.payment_method_update.enabled ||
       (cfg.features.subscription_update && cfg.features.subscription_update.enabled)) throw Error("Billing portal configuration needs attention")
 }
-module.exports = { trialUsed, hasOngoing, canRepurchase, customer, access, sync, fulfill, event, summary, portal, paidPeriod, verifyPortalConfiguration }
+module.exports = { trialUsed, hasOngoing, canRepurchase, customer, access, sync, fulfill, event, summary, portal, paidPeriod, verifyPortalConfiguration, known, invoiceSubscription }

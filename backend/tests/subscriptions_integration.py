@@ -22,6 +22,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[2]
 PB = Path(os.environ.get('POCKETBASE_BIN', ROOT / '.build/pocketbase-bin/pocketbase')).resolve()
 sessions, subscriptions, invoices, requests = {}, {}, {}, []
+charges, disputes, invoice_payments = {}, {}, {}
 portal_valid = True
 provider_fails = False
 now = int(time.time())
@@ -44,8 +45,18 @@ class Provider(BaseHTTPRequestHandler):
         if provider_fails: return self.respond(dict(error='fixture upstream unavailable'), 503)
         path = urllib.parse.urlparse(self.path)
         if path.path.startswith('/v1/prices/'): return self.respond(price)
+        query = urllib.parse.parse_qs(path.query)
+        if path.path.startswith('/v1/charges/'): return self.respond(charges[path.path.rsplit('/', 1)[-1]])
+        if path.path.startswith('/v1/disputes/'): return self.respond(disputes[path.path.rsplit('/', 1)[-1]])
+        if path.path == '/v1/invoice_payments':
+            intent = query['payment[payment_intent]'][0]
+            assert query['payment[type]'] == ['payment_intent']
+            found = [dict(id='inpay_' + intent, invoice=invoice_payments[intent], payment=dict(type='payment_intent', payment_intent=intent))] if intent in invoice_payments else []
+            return self.respond(dict(data=found, has_more=False))
+        if path.path == '/v1/checkout/sessions' and 'payment_intent' in query:
+            return self.respond(dict(data=[], has_more=False))  # Subscription sessions carry no payment intent.
         if path.path == '/v1/checkout/sessions':
-            identifier = urllib.parse.parse_qs(path.query)['subscription'][0]
+            identifier = query['subscription'][0]
             return self.respond(dict(data=[value for value in sessions.values() if value.get('subscription') == identifier], has_more=False))
         if path.path.startswith('/v1/billing_portal/configurations/'):
             return self.respond(dict(id='bpc_fixture', active=True, livemode=False, features=dict(
@@ -81,11 +92,12 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
     client = folder / 'hooks/macmint_payments_lib.js'
     client.write_text(client.read_text().replace('https://api.stripe.com/v1/', f'http://127.0.0.1:{provider.server_port}/v1/'))
     (folder / 'migrations/1792109600_fixture.js').write_text('''migrate(app=>{
+      const su=new Record(app.findCollectionByNameOrId("_superusers"));su.set("email","operator@example.invalid");su.setPassword("operator-password-123");app.save(su)
       for(const email of ["buyer@example.invalid","other@example.invalid"]){const u=new Record(app.findCollectionByNameOrId("users"));u.set("email",email);u.setPassword("fixture-password-123");u.set("verified",true);app.save(u)}
       const config=new Record(app.findCollectionByNameOrId("app_config"));config.set("key","commerce");config.set("value",{
         enabled:true,livemode:false,price_id:"price_recurring",amount_minor:1900,currency:"usd",plan:"pro",duration_days:0,max_devices:3,
         billing_mode:"subscription",billing_interval:"month",billing_interval_count:1,portal_configuration_id:"bpc_fixture",web_origin:"https://staging.macmint.test"});app.save(config)
-      const release=new Record(app.findCollectionByNameOrId("app_releases"));for(const [k,v] of Object.entries({version:"0.0.1",channel:"stable",sha256:"a".repeat(64),download_url:"https://example.invalid/fixture.dmg",validated:true,notarized:true,published:true}))release.set(k,v);app.save(release)
+      const release=new Record(app.findCollectionByNameOrId("app_releases"));for(const [k,v] of Object.entries({version:"0.0.1",channel:"stable",sha256:"a".repeat(64),download_url:"https://github.com/QuntmTech/mac-mint/releases/download/v0.0.1/MacMint.dmg",validated:true,notarized:true,published:true}))release.set(k,v);app.save(release)
     },()=>{})''')
     (folder / 'hooks/fixture.pb.js').write_text('''routerAdd("POST","/__test/settings",e=>{
       const data=e.requestInfo().body,lib=require(`${__hooks}/macmint_lib.js`)
@@ -255,6 +267,43 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             trial_invoice['lines']['data'][0]['period'].update(start=now + 3 * 86400, end=now + 368 * 86400)
             assert webhook('invoice.paid', trial_invoice['id'])[0] == 200
             assert call('/api/macmint/me', token=other)[1]['entitlement']['source'] == 'subscription'
+            # Refunds and disputes on a subscription invoice map through Stripe's InvoicePayment.
+            admin = call('/api/collections/_superusers/auth-with-password', dict(identity='operator@example.invalid', password='operator-password-123'))[1]['token']
+            def other_account(): return call('/api/macmint/me', token=other)[1]
+            invoice_payments['pi_trial_paid'] = trial_invoice['id']
+            charges['ch_partial'] = dict(id='ch_partial', object='charge', payment_intent='pi_trial_paid', amount=3999, amount_refunded=1000, refunded=False, livemode=False)
+            for _ in range(2): assert webhook('charge.refunded', 'ch_partial')[0] == 200
+            assert other_account()['entitlement']['active'] is True and other_account()['billing']['subscription']['access_held'] is False
+            disputes['dp_trial_paid'] = dict(id='dp_trial_paid', object='dispute', charge='ch_partial', payment_intent='pi_trial_paid', livemode=False, status='warning_needs_response')
+            assert webhook('charge.dispute.created', 'dp_trial_paid')[0] == 200
+            assert other_account()['entitlement']['active'] is True
+            disputes['dp_trial_paid']['status'] = 'needs_response'
+            for _ in range(2): assert webhook('charge.dispute.updated', 'dp_trial_paid')[0] == 200
+            held = other_account()
+            assert held['entitlement']['active'] is False and held['billing']['subscription']['access_held'] is True, held
+            trial_sub['items']['data'][0]['current_period_end'] += 365 * 86400
+            trial_invoice['lines']['data'][0]['period']['end'] += 365 * 86400
+            assert webhook('invoice.paid', trial_invoice['id'])[0] == 200
+            assert other_account()['entitlement']['active'] is False, 'a renewal must not silently restore disputed access'
+            subscription_row = call('/api/collections/billing_subscriptions/records?filter=' + urllib.parse.quote(f"subscription_id='{trial_sub['id']}'"), token=admin)[1]['items'][0]
+            assert (subscription_row['access_hold'], subscription_row['hold_reference']) == ('disputed', 'dp_trial_paid')
+            trial_order = subscription_row['order']
+            status, reconciled = call('/api/macmint/admin/checkout/reconcile', dict(order=trial_order), admin)
+            assert status == 200 and reconciled['access_held'] is True and other_account()['entitlement']['active'] is False, reconciled
+            assert call('/api/macmint/admin/billing/release-hold', dict(order=trial_order), other)[0] in (401, 403)
+            status, released = call('/api/macmint/admin/billing/release-hold', dict(order=trial_order, reason='dispute won'), admin)
+            assert status == 200 and released['released'] is True and released['entitlement']['active'] is True, released
+            charges['ch_full'] = dict(id='ch_full', object='charge', payment_intent='pi_trial_paid', amount=3999, amount_refunded=3999, refunded=True, livemode=False)
+            assert webhook('charge.refunded', 'ch_full')[0] == 200
+            assert other_account()['entitlement']['active'] is False
+            assert call('/api/macmint/admin/billing/release-hold', dict(subscription=trial_sub['id']), admin)[1]['previous_hold'] == 'refunded'
+            status, revoked = call('/api/macmint/admin/licenses/revoke', dict(order=trial_order, reason='fixture'), admin)
+            assert status == 200 and revoked['hold'] == 'operator' and other_account()['entitlement']['active'] is False, revoked
+            assert call('/api/macmint/admin/billing/release-hold', dict(order=trial_order), admin)[1]['released'] is True
+            assert other_account()['entitlement']['active'] is True
+            charges['ch_unrelated'] = dict(id='ch_unrelated', object='charge', payment_intent='pi_unrelated', amount=100, amount_refunded=100, refunded=True, livemode=False)
+            assert webhook('charge.refunded', 'ch_unrelated')[0] == 200
+            print('PASS: subscription refund and chargeback hold access transactionally, survive renewal and reconcile, and need an operator release; partial refunds and inquiries are review-only')
             trial_sub['status'] = 'canceled'
             assert webhook('customer.subscription.deleted', trial_sub['id'])[0] == 200
             assert call('/api/macmint/checkout', dict(request_key=str(uuid.uuid4())), other)[0] == 200

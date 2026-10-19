@@ -58,6 +58,14 @@ routerAdd("POST", "/api/macmint/stripe/webhook", e => {
   let event
   try { event = JSON.parse(raw) } catch (_) { return e.json(400, { error: "bad_event" }) }
   if (!event || typeof event !== "object" || Array.isArray(event) || typeof event.type !== "string") return e.json(400, { error: "bad_event" })
+  // Refunds and disputes revoke the order's license, or hold a subscription's access, and
+  // recompute access. Charges are not tagged with the order, so the handler maps their
+  // payment intent back to a checkout order or a subscription invoice.
+  if (["charge.refunded", "charge.dispute.created", "charge.dispute.updated"].indexOf(event.type) >= 0) {
+    try { payments.reverse(e.app, event.type, event.data && event.data.object) }
+    catch (_) { return e.json(503, { error: "reversal_pending" }) }
+    return e.json(200, { received: true })
+  }
   if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed",
     "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required", "invoice.finalization_failed", "invoice.voided", "invoice.marked_uncollectible"].indexOf(event.type) >= 0) {
     try { require(`${__hooks}/macmint_billing.js`).event(e.app, event.type, event.data && event.data.object) }
@@ -77,14 +85,56 @@ routerAdd("POST", "/api/macmint/stripe/webhook", e => {
   return e.json(200, { received: true })
 }, $apis.bodyLimit(1048576))
 
-// Public feed records must refer to validated, notarized consumer artifacts.
+routerAdd("POST", "/api/macmint/admin/licenses/revoke", e => {
+  const lib = require(`${__hooks}/macmint_lib.js`)
+  lib.noStore(e)
+  const data = lib.body(e)
+  const ref = { license: lib.clean(data.license, 40), code: lib.clean(data.code, 80), order: lib.clean(data.order, 40),
+    subscription: lib.clean(data.subscription, 200), reason: lib.clean(data.reason, 200) }
+  if (!ref.license && !ref.code && !ref.order && !ref.subscription) return e.json(400, { error: "bad_request", message: "Provide a license, code, order or subscription." })
+  try { return e.json(200, require(`${__hooks}/macmint_payments_lib.js`).revokeLicense(e.app, ref)) }
+  catch (error) {
+    if (error.code === "not_found") return e.json(404, { error: "not_found", message: "No matching license or bound subscription." })
+    return e.json(503, { error: "revoke_failed", message: "Access could not be revoked. Nothing was changed." })
+  }
+}, $apis.requireSuperuserAuth())
+
+// Re-grants a subscription held after a refund, dispute or operator revocation.
+routerAdd("POST", "/api/macmint/admin/billing/release-hold", e => {
+  const lib = require(`${__hooks}/macmint_lib.js`)
+  lib.noStore(e)
+  const data = lib.body(e)
+  const ref = { order: lib.clean(data.order, 40), subscription: lib.clean(data.subscription, 200), reason: lib.clean(data.reason, 200) }
+  if (!ref.order && !ref.subscription) return e.json(400, { error: "bad_request", message: "Provide an order or subscription." })
+  try { return e.json(200, require(`${__hooks}/macmint_payments_lib.js`).releaseSubscriptionHold(e.app, ref)) }
+  catch (error) {
+    if (error.code === "not_found") return e.json(404, { error: "not_found", message: "No matching bound subscription." })
+    return e.json(503, { error: "release_failed", message: "The hold could not be released. Nothing was changed." })
+  }
+}, $apis.requireSuperuserAuth())
+
+// Applies Stripe's authoritative session state to a stuck order (missing terminal webhook
+// or checkout_attention). `session` is only used when the order never recorded one.
+routerAdd("POST", "/api/macmint/admin/checkout/reconcile", e => {
+  const lib = require(`${__hooks}/macmint_lib.js`)
+  lib.noStore(e)
+  const data = lib.body(e)
+  const ref = { order: lib.clean(data.order, 40), session: lib.clean(data.session, 200), confirm_expired_without_session: data.confirm_expired_without_session === true }
+  if (!ref.order) return e.json(400, { error: "bad_request", message: "Provide an order." })
+  try { return e.json(200, require(`${__hooks}/macmint_payments_lib.js`).reconcileOrder(e.app, ref)) }
+  catch (error) {
+    if (error.code === "not_found") return e.json(404, { error: "not_found", message: "No matching order." })
+    if (["session_unknown", "too_recent", "session_mismatch", "bad_request", "conflict"].indexOf(error.code) >= 0) return e.json(409, { error: error.code })
+    return e.json(503, { error: "reconcile_failed", message: "Stripe state could not be applied. Nothing was changed." })
+  }
+}, $apis.requireSuperuserAuth())
+
+// Public feed records must refer to validated, notarized consumer artifacts on a trusted host.
 onRecordCreate(e => {
-  if (e.record.get("published") && (!e.record.get("validated") || !e.record.get("notarized") ||
-    !/^[a-f0-9]{64}$/.test(String(e.record.get("sha256"))) || !/^https:\/\//.test(String(e.record.get("download_url"))))) throw Error("Validate and notarize the release before publishing it.")
+  if (!require(`${__hooks}/macmint_payments_lib.js`).publishableRelease(e.record)) throw Error("Validate and notarize the release, and use a trusted HTTPS download URL, before publishing it.")
   e.next()
 }, "app_releases")
 onRecordUpdate(e => {
-  if (e.record.get("published") && (!e.record.get("validated") || !e.record.get("notarized") ||
-    !/^[a-f0-9]{64}$/.test(String(e.record.get("sha256"))) || !/^https:\/\//.test(String(e.record.get("download_url"))))) throw Error("Validate and notarize the release before publishing it.")
+  if (!require(`${__hooks}/macmint_payments_lib.js`).publishableRelease(e.record)) throw Error("Validate and notarize the release, and use a trusted HTTPS download URL, before publishing it.")
   e.next()
 }, "app_releases")

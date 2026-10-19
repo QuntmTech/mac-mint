@@ -5,9 +5,11 @@ import { pb, errorMessage } from '../lib/pb'
 
 import { formattedPrice, validOfferTerms, type Offer } from '../lib/offers'
 
-type OrderStatus = { state: 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'not_found'; can_start_new: boolean; offer?: Omit<Offer, 'enabled'> }
-const terminalStates = new Set(['failed', 'expired'])
-const restartableStates = new Set(['failed', 'expired', 'fulfilled'])
+type OrderStatus = { state: 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'refunded' | 'disputed' | 'not_found'; can_start_new: boolean; offer?: Omit<Offer, 'enabled'> }
+// Attempts a new purchase may replace: verified failures, refunds, and a fulfilled
+// subscription order once its subscription has ended. A disputed payment blocks a new one.
+const restartableStates = new Set(['failed', 'expired', 'refunded', 'fulfilled'])
+const finalStates = new Set(['fulfilled', 'failed', 'expired', 'refunded', 'disputed'])
 
 export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: {
   userId: string; verified: boolean; hasPlan: boolean; returnState: string | null; onRefresh: () => Promise<void>
@@ -35,7 +37,8 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
   const statusGeneration = useRef(0)
   const purchaseInFlight = useRef(false)
   const shouldPoll = returnState === 'processing' || completed
-  const processing = (shouldPoll || status?.state === 'fulfilled') && !status?.can_start_new
+  const reversed = status?.state === 'refunded' || status?.state === 'disputed'
+  const processing = ((shouldPoll && !reversed) || status?.state === 'fulfilled') && !status?.can_start_new
 
   const invalidateStatus = useCallback(() => { statusGeneration.current++ }, [])
   const close = useCallback(() => { alive.current = false; invalidateStatus() }, [invalidateStatus])
@@ -63,7 +66,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
     setStatusError(null)
     try {
       const result = await pb.send<OrderStatus>('/api/macmint/checkout/status', { method: 'GET', query: { request_key: key } })
-      if (!['created', 'pending', 'fulfilled', 'failed', 'expired', 'not_found'].includes(result.state) ||
+      if (!['created', 'pending', 'fulfilled', 'failed', 'expired', 'refunded', 'disputed', 'not_found'].includes(result.state) ||
           typeof result.can_start_new !== 'boolean' || (result.can_start_new && !restartableStates.has(result.state))) throw Error('Invalid checkout status')
       if (!alive.current || generation !== statusGeneration.current || pb.authStore.record?.id !== userId) return null
       setStatus(result)
@@ -91,7 +94,7 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
       const result = await checkStatus()
       running = false
       if (!active) return
-      if (result?.state === 'fulfilled' || (result && terminalStates.has(result.state))) { finished = true; return }
+      if (result && finalStates.has(result.state)) { finished = true; return }
       if (shouldPoll && attempts < 6) timer = setTimeout(check, 3000)
       else if (shouldPoll) setAutomaticChecksFinished(true)
     }
@@ -169,7 +172,8 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
   if (hasPlan && returnState !== 'processing' && returnState !== 'cancelled') return null
   const canStartNew = status?.can_start_new === true && restartableStates.has(status.state)
   const checkingExisting = Boolean(requestKey && !status && !statusError)
-  const blocked = !verified || processing || hasPlan || canStartNew || checkingExisting || storageError || attention
+  const disputed = status?.state === 'disputed'
+  const blocked = !verified || processing || hasPlan || canStartNew || checkingExisting || storageError || attention || disputed
   const displayedOffer = requestKey ? status?.offer : offer
   const hasOfferTerms = displayedOffer && validOfferTerms(displayedOffer)
 
@@ -183,7 +187,10 @@ export const Checkout = ({ userId, verified, hasPlan, returnState, onRefresh }: 
       {returnState === 'cancelled' && !processing && <Alert tone="info">Checkout was closed. Resume the same checkout below. No access is granted until payment is confirmed.</Alert>}
       {storageError && <Alert>Checkout needs browser session storage to resume safely. Allow storage for this site and reload before purchasing.</Alert>}
       {statusError && <Alert>{statusError}</Alert>}
-      {canStartNew && <Alert tone="info">{status!.state === 'fulfilled' ? 'Your previous subscription has ended. You can start a new subscription.' : `This checkout ${status!.state === 'failed' ? 'failed' : 'expired'}. You can start a new attempt.`}</Alert>}
+      {canStartNew && <Alert tone="info">{status!.state === 'fulfilled' ? 'Your previous subscription has ended. You can start a new subscription.'
+        : status!.state === 'refunded' ? 'This payment was refunded, so its access has ended. You can start a new attempt.'
+        : `This checkout ${status!.state === 'failed' ? 'failed' : 'expired'}. You can start a new attempt.`}</Alert>}
+      {disputed && <Alert>This payment is disputed with the card issuer, so its access is paused. Contact support@macmint.co; don't start another payment while the dispute is open.</Alert>}
       {error && <Alert>{error}</Alert>}
       {configError ? <div><p className="text-sm text-slate-500 dark:text-slate-400">Purchase availability could not be checked.</p><button className="mt-2 text-sm underline" onClick={() => { setConfigError(false); setOffer(null); setConfigRevision(value => value + 1) }}>Check purchase availability again</button></div>
         : !offer ? <p role="status" className="text-sm text-slate-500 dark:text-slate-400">Checking purchase availability…</p>
