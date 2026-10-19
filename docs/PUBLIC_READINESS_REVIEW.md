@@ -25,6 +25,7 @@ US$39.99 per year, three-day free trial, payment method collected, one trial per
 | Photo mutation could overlap a scan through a controller call | UI controls were disabled, but the library-removal controller lacked scan/preparation guards. | Both review and removal refuse overlapping work while retaining selections; native controller regression without real PhotoKit deletion. |
 | Restricted accounts could pay for unusable recurring access | Revoked/suspended base access deliberately blocks subscriptions, but a new/resumed checkout could still collect money. | Reject subscription checkout before any provider call and give a support action. Unit regressions cover both statuses. Existing customers can still open billing. |
 | Demo scan duration grew when timer callbacks were delayed | Progress counted callbacks, so busy/throttled browsers stretched a short illustrative scan. | Compute progress from elapsed monotonic time; a delayed-callback interaction regression proves catch-up without extra timers. |
+| Whole-item inventories traversed excluded descendants | Downloads and Removed Apps sized an ancestor even with an excluded child; Cleaner retained a separate literal path comparison. | Skip whole-item ancestors containing exclusions before sizing, skip excluded roots before enumeration, and use the shared volume/alias-aware matcher. Scanner regressions retain eligible siblings and avoid excluded-root access errors. |
 
 ## Review map and preserved boundaries
 
@@ -49,6 +50,6 @@ No production billing mutation, real charge, refund, email delivery, consumer re
 
 ## Validation and delivery
 
-Local portable core: **183 tests passed**, zero failures. Backend: **52 Node tests passed**, plus disposable PocketBase transaction/migration/webhook, authenticated AI/local SMTP, and recurring/trial/portal integration checks. Installer notarization failure checks: **4 passed**. Homepage interaction checks: **50 passed**. Website build and lint passed. Native source parse, workflow lint and whitespace checks passed.
+Local portable core: **185 tests passed**, zero failures. Backend: **52 Node tests passed**, plus disposable PocketBase transaction/migration/webhook, authenticated AI/local SMTP, and recurring/trial/portal integration checks. Installer notarization failure checks: **4 passed**. Homepage interaction checks: **50 passed**. Website build and lint passed. Native source parse, workflow lint and whitespace checks passed.
 
 The initial browser run exposed two new assertion/copy mismatches, a generic billing-address error and delayed mobile demo progress; these were corrected. Final browser and native CI results will be recorded after the implementation head passes. See [Stripe setup](STRIPE_SETUP.md) for real-account acceptance and the still-closed approved offer.

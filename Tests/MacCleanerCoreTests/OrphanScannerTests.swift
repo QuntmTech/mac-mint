@@ -63,6 +63,18 @@ final class OrphanScannerTests: XCTestCase {
     XCTAssertTrue(OrphanScanner.isProtected("com.apple.mail"))
   }
 
+  func testExcludedLibraryRootsAndDescendantsAreNotMeasuredOrOfferedAsWholeOrphans() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let excluded = try write(home, "Library/Caches/com.gone.editor/keep.db")
+    let included = try write(home, "Library/Caches/com.other.app/data.db").deletingLastPathComponent()
+    let report = await scanner(home, apps: []).scan(ignoredPaths: [excluded.path])
+    XCTAssertEqual(report.value.map(\.url), [included])
+    let preferences = try write(home, "Library/Preferences")
+    let blocked = await scanner(home, apps: []).scan(ignoredPaths: [preferences.path])
+    XCTAssertFalse(blocked.issues.contains { $0.path == preferences.path })
+  }
+
   func testOrphanItemsPassTheAppLeftoverSafetyRule() async throws {
     let home = makeTempDirectory()
     defer { try? fm.removeItem(at: home) }
