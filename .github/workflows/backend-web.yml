@@ -10,6 +10,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Installer notarization failure checks
+        run: python3 -m unittest discover -s tests -p 'test_notarization.py'
       - name: Backend unit checks
         run: node --test backend/tests/*.test.cjs
       - name: Install pinned PocketBase test runtime

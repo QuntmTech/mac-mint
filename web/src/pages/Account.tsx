@@ -1,3 +1,4 @@
+import { InstallationSteps } from '../components/InstallationSteps'
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom'
 import { Alert, Button, Field } from '../components/Form'
@@ -158,6 +159,7 @@ const RedeemCard = ({ initialCode, onRedeemed, hasPlan }: {
 const DownloadCard = ({ release }: { release: Release | null }) => (
   <Card title="Download MacMint">
     {release?.download_url ? (
+      <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p className="font-medium">Version {release.version}</p>
@@ -174,6 +176,8 @@ const DownloadCard = ({ release }: { release: Release | null }) => (
         >
           Download for Mac
         </a>
+      </div>
+      <InstallationSteps downloadUrl={release.download_url} />
       </div>
     ) : (
       <p className="text-sm text-slate-500 dark:text-slate-400">

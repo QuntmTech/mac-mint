@@ -1,20 +1,27 @@
 import AppKit
+import MacCleanerCore
 import SwiftUI
 
 /// Explain optional access before the user chooses a scan. Reading status never
 /// requests permission; Photos and notifications ask when their features are used.
 struct OnboardingView: View {
-  @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var care: CareService
+  @EnvironmentObject private var account: AccountStore
   @Environment(\.dismiss) private var dismiss
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
   @AppStorage(CareService.Keys.lowSpaceAlerts) private var lowSpaceAlerts = false
-  @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @StateObject private var permissions = PermissionsService()
   @State private var step: Int
+  @State private var showingAccount = false
+  private let progress: SetupProgressStore
+  private let onFinish: (Bool) -> Void
 
-  init(initialStep: Int = 0) {
-    _step = State(initialValue: min(max(initialStep, 0), 2))
+  init(initialStep: Int? = nil, defaults: UserDefaults = .standard, onFinish: @escaping (Bool) -> Void = { _ in }) {
+    let progress = SetupProgressStore(defaults: defaults)
+    self.progress = progress
+    self.onFinish = onFinish
+    // Intentional one-time seed; navigation owns its state for this presentation.
+    _step = State(initialValue: min(max(initialStep ?? progress.initialStep, 0), 2))
   }
 
   var body: some View {
@@ -30,9 +37,10 @@ struct OnboardingView: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(28)
       }
+      .id(step)
       Divider()
       HStack(spacing: 12) {
-        Text("Step \(step + 1) of 3").font(.caption).foregroundStyle(.secondary)
+        Text("\(["Welcome", "Access", "Ready"][step]) · Step \(step + 1) of 3").font(.caption).foregroundStyle(.secondary)
         Spacer()
         if step > 0 { Button("Back") { step -= 1 } }
         Button(step == 2 ? "Open Workspace" : "Set Up Later") { finish(startScan: false) }
@@ -47,6 +55,11 @@ struct OnboardingView: View {
     .frame(width: 640, height: 600)
     .background(AppTheme.canvas)
     .onExitCommand { finish(startScan: false) }
+    .onChange(of: step) { _, next in
+      guard !SmokeTest.isRequested else { return }
+      progress.record(step: next)
+    }
+    .sheet(isPresented: $showingAccount) { AccountAccessSheet() }
     .task {
       await permissions.refresh()
       await care.refreshAuthorization()
@@ -65,10 +78,12 @@ struct OnboardingView: View {
       Text("Welcome to MacMint").font(.system(size: 27, weight: .semibold))
       Text("Understand your storage, review what can go, and keep recovery close.")
         .font(.title3).foregroundStyle(.secondary)
+      InstallationGuide()
       point("magnifyingglass", "Start with a local scan", "Inspect results before signing in. You choose when to scan; useful inspection and History remain available without an account.")
       point("checklist", "Review before removal", "Personal files need your decision. Nothing is removed when you grant permission or run a scan.")
       point("arrow.uturn.backward.circle.fill", "Know your recovery path", "File removals use Trash receipts. Restore while items remain there; Photos manages its own Recently Deleted recovery.")
-      point("sparkles", "Choose optional AI", "AI starts only when requested, after consent. Preview the information to be sent before enabling it.")
+      Text("Optional AI needs separate consent. You can preview what would be sent before enabling it.")
+        .font(.caption).foregroundStyle(.secondary)
     }
   }
 
@@ -90,8 +105,25 @@ struct OnboardingView: View {
 
   private var helpers: some View {
     VStack(alignment: .leading, spacing: 18) {
-      Text("Choose your helpers").font(.title2.bold())
-      Text("These are optional. You can change them any time in Settings.").foregroundStyle(.secondary)
+      Text("Ready for your first scan").font(.title2.bold())
+      Text("Scanning does not remove files. Review the results and keep anything you need.").foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 9) {
+        Label(account.isUnlocked ? "This Mac is activated" : "Already purchased MacMint?",
+          systemImage: account.isUnlocked ? "checkmark.seal.fill" : "person.crop.circle")
+          .font(.headline)
+        if account.isUnlocked {
+          Text("Your account is connected. You still review and confirm each removal.")
+            .font(.callout).foregroundStyle(.secondary)
+        } else {
+          Text("Use the same account as your website purchase. Connect now or when you review a paid operation. Local scans and recovery work without signing in.")
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          Button("Connect My Account") { showingAccount = true }
+            .buttonStyle(MintButtonStyle(prominent: false))
+        }
+      }
+      Divider()
+      Text("Optional helpers").font(.headline)
+      Text("Off unless you choose them. Change these any time in Settings.").font(.callout).foregroundStyle(.secondary)
       Toggle(isOn: $showMenuBar) {
         VStack(alignment: .leading, spacing: 3) {
           Text("Show MacMint in the menu bar")
@@ -136,11 +168,8 @@ struct OnboardingView: View {
   }
 
   private func finish(startScan: Bool) {
-    onboardingDone = true
+    progress.complete()
+    onFinish(startScan)
     dismiss()
-    if startScan {
-      model.selectedSection = .dashboard
-      model.runSmartScan()
-    }
   }
 }

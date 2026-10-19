@@ -15,6 +15,7 @@ async function backend(page: Page, signedIn = false, verified = true) {
     configFails: false, configWait: Promise.resolve(), checkoutWait: Promise.resolve(),
     status: 'pending' as 'created' | 'pending' | 'fulfilled' | 'failed' | 'expired' | 'not_found',
     statusCanStartNew: false, statusFails: false, statusRequests: [] as string[],
+    releases: [] as Record<string, unknown>[],
     active: false, accountRequests: 0,
     checkoutRequests: [] as { request_key: string }[], analytics: 0, unexpected: [] as string[] }
   if (signedIn) await page.addInitScript(auth => {
@@ -42,7 +43,7 @@ async function backend(page: Page, signedIn = false, verified = true) {
       return respond({ user: redeemUser, entitlement: { plan: 'pro', active: true, status: 'active', expires_at: null,
         max_devices: 3, source: 'manual' }, devices: [], server_time: new Date().toISOString(), redeemed: true })
     }
-    if (path.includes('/app_releases/records')) return respond({ page: 1, perPage: 1, totalItems: 0, totalPages: 0, items: [] })
+    if (path.includes('/app_releases/records')) return respond({ page: 1, perPage: 1, totalItems: state.releases.length, totalPages: state.releases.length ? 1 : 0, items: state.releases })
     if (path === '/api/macmint/checkout/config') {
       await state.configWait
       return state.configFails ? respond({ message: 'temporarily unavailable' }, 503) : respond(state.offer)
@@ -445,3 +446,24 @@ test('payment polling pauses while hidden and resumes with its original finite r
   expect(state.statusRequests).toHaveLength(6)
   expect(state.checkoutRequests).toHaveLength(0); expect(state.unexpected).toEqual([])
 })
+
+for (const format of ['dmg', 'zip']) {
+  test(`a purchased account gets ${format} installation and same-account activation instructions`, async ({ page }) => {
+    const state = await backend(page, true)
+    state.active = true
+    const url = `https://github.com/QuntmTech/mac-mint/releases/download/v0.9.0/MacMint.${format}?download=1`
+    state.releases = [{ id: 'releasefixture', version: '0.9.0', build: 9, min_os: '14.0', download_url: url,
+      sha256: 'a'.repeat(64), size_bytes: 1024, notes: 'Validated fixture', published_at: new Date().toISOString() }]
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/account')
+    await expect(page.getByRole('link', { name: 'Download for Mac', exact: true })).toHaveAttribute('href', url)
+    const guide = page.getByRole('region', { name: 'Install MacMint', exact: true })
+    await expect(guide.getByRole('listitem')).toHaveCount(3)
+    await expect(guide).toContainText(format === 'dmg' ? 'Open MacMint.dmg' : 'Expand MacMint.zip')
+    await expect(guide).toContainText('Drag MacMint to Applications')
+    await expect(guide).toContainText('A direct website purchase does not need a redemption code.')
+    expect(state.checkoutRequests).toEqual([])
+    expect(state.unexpected).toEqual([])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  })
+}

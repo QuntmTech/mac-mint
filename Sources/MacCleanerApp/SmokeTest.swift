@@ -178,9 +178,11 @@ enum SmokeTest {
       model.selectedPhotoIDs = photoSelection
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
-      render(prefix + "-Onboarding", OnboardingView(), width: 720, height: 660)
+      render(prefix + "-Onboarding", OnboardingView(initialStep: 0), width: 720, height: 660)
       render(prefix + "-Onboarding-access", OnboardingView(initialStep: 1), width: 720, height: 660)
       render(prefix + "-Onboarding-helpers", OnboardingView(initialStep: 2), width: 720, height: 660)
+      render(prefix + "-Install-from-image", InstallationGuide(bundleURL: URL(fileURLWithPath: "/Volumes/MacMint/MacMint.app"), location: .readOnlyVolume), width: 640, height: 250)
+      render(prefix + "-Install-ready", InstallationGuide(bundleURL: URL(fileURLWithPath: "/Applications/MacMint.app"), location: .installed), width: 640, height: 180)
       render(prefix + "-Access-help", PermissionHelpSheet(), width: 720, height: 660)
       render(prefix + "-Scan-issues", ScanIssueSheet(issues: [ScanIssue(area: "Downloads", message: "Access to this location was denied. Review Files & Folders settings before rescanning.")]), width: 720, height: 540)
     }

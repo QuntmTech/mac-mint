@@ -400,5 +400,6 @@ struct AccountAccessSheet: View {
     }
     .frame(width: 560, height: 560)
     .onChange(of: account.isUnlocked) { _, unlocked in if unlocked { dismiss() } }
+    .onExitCommand { dismiss() }
   }
 }
