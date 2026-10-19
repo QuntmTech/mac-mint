@@ -79,6 +79,14 @@ test.beforeEach(({ page }) => {
 })
 test.afterEach(({ page }) => { expect(errors.get(page)).toEqual([]) })
 
+test('signed-in users can return to the public homepage after an account redirect', async ({ page }) => {
+  const state = await backend(page, true)
+  await page.goto('/login?next=' + encodeURIComponent('/?source=account-return#features'))
+  await expect(page).toHaveURL('http://127.0.0.1:4173/?source=account-return#features')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(/Put your Mac back.*mint condition/)
+  expect(state.unexpected).toEqual([])
+})
+
 test('signed-out routing, reset privacy and mobile layout work without analytics', async ({ page }) => {
   const state = await backend(page)
   await page.goto('/account')

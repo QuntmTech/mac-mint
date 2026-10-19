@@ -36,6 +36,10 @@ jobs:
         working-directory: web
       - run: npm run build && npm run lint
         working-directory: web
+      - run: npm ci
+        working-directory: ChatGPT sites the homepage V1
+      - name: Assemble the main homepage and account routes
+        run: bash web/scripts/build-homepage.sh
       - run: npx playwright install --with-deps chromium
         working-directory: web
       - run: npx playwright test

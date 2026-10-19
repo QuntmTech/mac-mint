@@ -32,7 +32,7 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  ok(!text(home.toJSON()).includes('No cloud account'),'No obsolete no-account promise');
  ok(!text(home.toJSON()).includes('No network calls'),'No obsolete no-network promise');
  ok(text(home.toJSON()).includes('Inspect locally before sign-in'),'Local inspection before sign-in is disclosed');
- ok(home.root.findAllByType('a').some(n=>n.props.href==='https://macmint.co/login'),'Sign-in uses the established account route');
+ ok(home.root.findAllByType('a').some(n=>n.props.href==='/login'),'Sign-in uses the same-origin account route');
  ok(!text(home.toJSON()).includes('Other cleaners'),'No unsupported competitor comparison');
  const prod=await mount(ProductDemo);await click(button(prod,'Run Quick Scan'));ok(text(prod.toJSON()).includes('Scanning…'),'Scan starts');await click(button(prod,'Cancel'));ok(text(prod.toJSON()).includes('Demo scan cancelled'),'Scan cancels');
  const picker=prod.root.findAllByType('select').find(n=>n.props['aria-label']==='Choose a product demo');
