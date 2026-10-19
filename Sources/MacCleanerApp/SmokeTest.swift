@@ -1,5 +1,6 @@
 import AppKit
 import MacCleanerCore
+import Sparkle
 import SwiftUI
 
 /// `MacMint --smoke-test`: builds the real view models and renders every screen offscreen,
@@ -21,6 +22,7 @@ enum SmokeTest {
     let monitor = SystemMonitor()
     let care = CareService()
     let updates = UpdateService()
+    let updater = UpdaterController(startingUpdater: false)
     let appUpdates = AppUpdatesStore()
     monitor.sample()
     // Normal windows refresh these summaries asynchronously; offscreen renders need them now.
@@ -28,6 +30,24 @@ enum SmokeTest {
 
     var failures: [String] = []
     var rendered = 0
+    // The packaged updater, without network: Sparkle loads from Contents/Frameworks without
+    // XPC services, the public key is set and both channel feeds are trusted.
+    if Bundle.main.bundleURL.pathExtension == "app" {
+      let frameworks = Bundle.main.bundleURL.appendingPathComponent("Contents/Frameworks").resolvingSymlinksInPath().path + "/"
+      let sparkle = Bundle(for: SPUUpdater.self).bundleURL.resolvingSymlinksInPath()
+      if !sparkle.path.hasPrefix(frameworks) { failures.append("Embedded Sparkle.framework") }
+      if FileManager.default.fileExists(atPath: sparkle.appendingPathComponent("Versions/Current/XPCServices").path) {
+        failures.append("Unused Sparkle XPC services")
+      }
+      let key = Bundle.main.object(forInfoDictionaryKey: "SUPublicEDKey") as? String
+      if key.flatMap({ Data(base64Encoded: $0) })?.count != 32 { failures.append("Sparkle public key") }
+      if UpdateChannel.allCases.contains(where: { UpdaterController.feedURLString(for: $0) == nil }) {
+        failures.append("Update feeds")
+      }
+      if UpdaterController.current.build == nil || UpdaterController.current.commit == nil {
+        failures.append("Stamped build number and commit")
+      }
+    }
     // Exercise real app selection coordination without moving or reading user files.
     let a = LargeFile(url: support.appendingPathComponent("keep.bin"), size: 4096, modifiedAt: nil, accessedAt: nil)
     let b = LargeFile(url: support.appendingPathComponent("copy.bin"), size: 4096, modifiedAt: nil, accessedAt: nil)
@@ -74,7 +94,7 @@ enum SmokeTest {
           MainActor.assumeIsolated { layoutProbe.frames = frames }
         }
         .environmentObject(model).environmentObject(account).environmentObject(monitor)
-        .environmentObject(care).environmentObject(updates).environmentObject(appUpdates)
+        .environmentObject(care).environmentObject(updates).environmentObject(updater).environmentObject(appUpdates)
         .environment(\.colorScheme, scheme).tint(AppTheme.accent)
         .frame(width: width, height: height).background(AppTheme.canvas)
       autoreleasepool {
@@ -184,6 +204,13 @@ enum SmokeTest {
       model.selectedPhotoIDs = photoSelection
       model.refreshQueueSummaryNow()
       render(prefix + "-Final-review", PlanReviewSheet(plan: review), width: 720, height: 640)
+      model.selectedSection = .settings
+      let update = UpdaterController.Update(version: "0.9.0", build: "1000")
+      updater.showPreview(available: update, reminder: update, waitingForWork: false)
+      render(prefix + "-Update-available", RootView(), width: 980, height: 660)
+      updater.showPreview(available: update, reminder: nil, waitingForWork: true)
+      render(prefix + "-Update-waiting", RootView(), width: 980, height: 660)
+      updater.showPreview(available: nil, reminder: nil, waitingForWork: false)
       render(prefix + "-Menu-bar", MenuBarView(), width: 320, height: 400)
       render(prefix + "-Onboarding", OnboardingView(initialStep: 0), width: 720, height: 660)
       render(prefix + "-Onboarding-access", OnboardingView(initialStep: 1), width: 720, height: 660)

@@ -17,7 +17,7 @@ struct SettingsView: View {
 
         HelpersSettingsCard()
 
-        AboutSettingsCard()
+        UpdatesSettingsCard()
 
         SurfaceCard {
           VStack(alignment: .leading, spacing: 12) {
@@ -182,56 +182,5 @@ struct HelpersSettingsCard: View {
     }
     .onChange(of: lowSpaceAlerts) { _, enabled in if enabled { Task { await care.requestAuthorization() } } }
     .onChange(of: scanReminders) { _, enabled in if enabled { Task { await care.requestAuthorization() } } }
-  }
-}
-
-struct AboutSettingsCard: View {
-  @EnvironmentObject private var updates: UpdateService
-  @State private var checking = false
-
-  var body: some View {
-    SurfaceCard {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack {
-          Label("About MacMint", systemImage: "info.circle").font(.headline)
-          Spacer()
-          Text("Version \(UpdateService.currentVersion)").foregroundStyle(.secondary)
-        }
-        HStack {
-          if let error = updates.checkError {
-            Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
-          } else if updates.lastChecked == nil {
-            Text("Not checked").foregroundStyle(.secondary)
-          } else { switch updates.status {
-          case .current:
-            Label("You're up to date", systemImage: "checkmark.circle.fill").foregroundStyle(AppTheme.accentText)
-          case .available(let release):
-            Label("Version \(release.version) is available", systemImage: "arrow.down.circle.fill")
-              .foregroundStyle(AppTheme.accentText)
-            Button("Download") { updates.openDownload(release) }.controlSize(.small)
-          case .required(let release, let minimum):
-            Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
-              .foregroundStyle(AppTheme.warning)
-            Button("Download") { updates.openDownload(release) }.controlSize(.small)
-          }
-          }
-          Spacer()
-          Button(checking ? "Checking…" : "Check Now") {
-            checking = true
-            Task {
-              await updates.check()
-              checking = false
-            }
-          }
-          .disabled(checking)
-        }
-        .font(.callout)
-        if let date = updates.lastChecked {
-          Text("Last checked \(date.formatted(.relative(presentation: .named)))")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      }
-    }
   }
 }
