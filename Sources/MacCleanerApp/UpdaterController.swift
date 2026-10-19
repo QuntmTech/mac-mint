@@ -73,7 +73,7 @@ final class UpdaterController: NSObject, ObservableObject {
     lastCheck = updater.lastUpdateCheckDate
     guard startingUpdater else { return }
     do {
-      try updater.startUpdater()
+      try updater.start()
     } catch {
       startError = "Updates are unavailable in this copy of MacMint. Download the current version from macmint.co."
       NSLog("MacMint updater did not start: %@", String(describing: error))
