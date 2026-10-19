@@ -145,4 +145,27 @@ final class RestoreDurabilityTests: XCTestCase {
     XCTAssertTrue(fm.fileExists(atPath: receipt.trashPath!))
     XCTAssertFalse(fm.fileExists(atPath: library.path))
   }
+
+  func testResettingUnreadableHistoryPreservesItsBytesAndAllowsNewCommits() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("history.json")
+    let damaged = Data("{not json".utf8)
+    try damaged.write(to: url)
+    let history = HistoryStore(url: url)
+    let entry = HistoryEntry(action: "Cleanup", paths: ["/x"], bytes: 1, notes: "")
+    do { try await history.append(entry); XCTFail("a damaged store must not be overwritten implicitly") } catch {}
+
+    let backup = try await history.resetPreservingDamaged()
+    XCTAssertEqual(try Data(contentsOf: XCTUnwrap(backup)), damaged)
+    try await history.append(entry)
+    let loaded = try await history.loadChecked()
+    XCTAssertEqual(loaded.map(\.id), [entry.id])
+
+    let readable = try await history.resetPreservingDamaged()
+    XCTAssertNil(readable, "a readable history is never reset")
+    let kept = try await history.loadChecked()
+    XCTAssertEqual(kept.map(\.id), [entry.id])
+  }
 }

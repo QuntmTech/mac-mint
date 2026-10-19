@@ -5,6 +5,7 @@ struct HistoryView: View {
   @EnvironmentObject private var model: AppViewModel
   @State private var showOrganization = false
   @State private var expanded: Set<UUID> = []
+  @State private var confirmingHistoryReset = false
 
   private var totalBytes: Int64 { model.history.reduce(0) { $0 + $1.bytes } }
 
@@ -22,8 +23,19 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 8) {
           Label("Recovery needs attention (\(model.recoveryWarnings.count))", systemImage: "exclamationmark.triangle")
           ForEach(model.recoveryWarnings) { Text($0.message).font(.caption) }
-          Button("Show Recovery Files") { model.reveal(AppPaths.supportDirectory) }
+          HStack {
+            Button("Show Recovery Files") { model.reveal(AppPaths.supportDirectory) }
+            if model.recoveryReady, !model.historyReadable {
+              Button("Reset History…") { confirmingHistoryReset = true }
+                .help("Starts a new History so cleanup can continue. The unreadable file is kept beside it.")
+            }
+          }
         }.padding(16).foregroundStyle(AppTheme.warning)
+        .confirmationDialog("Reset History?", isPresented: $confirmingHistoryReset) {
+          Button("Reset History", role: .destructive) { model.resetDamagedHistory() }
+        } message: {
+          Text("The unreadable History file is kept as a backup. Restore receipts it contained can't be used from MacMint, but Finder's Put Back still works for items in the Trash.")
+        }
       }
 
       if model.history.isEmpty {

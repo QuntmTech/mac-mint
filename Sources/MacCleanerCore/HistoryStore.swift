@@ -88,6 +88,21 @@ public actor HistoryStore {
     try persist(items)
   }
 
+  /// Explicit recovery for an unreadable store: preserves its bytes beside it, then starts a new
+  /// History. Returns the backup location, or nil when the store was readable and left untouched.
+  @discardableResult
+  public func resetPreservingDamaged() throws -> URL? {
+    do {
+      _ = try loadChecked()
+      return nil
+    } catch {
+      let backup = url.appendingPathExtension("preserved-" + UUID().uuidString)
+      try FileManager.default.copyItem(at: url, to: backup)
+      try persist([])
+      return backup
+    }
+  }
+
   /// Records that some of an entry's items were restored from the Trash.
   public func markRestored(entryID: UUID, originalPaths: [String]) throws {
     try markRestored(entryID: entryID, locations: Dictionary(originalPaths.map { ($0, $0) }, uniquingKeysWith: { a, _ in a }))
