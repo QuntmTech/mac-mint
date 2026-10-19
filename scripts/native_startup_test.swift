@@ -74,12 +74,13 @@ private struct Footprint {
 
 @main
 private struct NativeStartupTest {
-  // The ordinary hidden launches remain a broad feedback-loop detector: eight seconds of
-  // settling precede a ten-second cumulative CPU measurement. The resource scenarios
-  // below carry the real budgets.
+  // Ordinary hidden launches (onboarding showing, menu bar off/on): eight seconds of
+  // settling precede a ten-second cumulative CPU measurement. They measured 0.1-0.5% of a
+  // core; 2% leaves room for the end of launch work while still catching a busy loop.
+  // The resource scenarios below carry the detailed budgets.
   private static let settleSeconds: TimeInterval = 8
   private static let sampleSeconds: TimeInterval = 10
-  private static let maximumAverageCores = 0.85
+  private static let maximumAverageCores = 0.02
 
   @MainActor
   static func main() {
@@ -133,10 +134,10 @@ private struct NativeStartupTest {
       let cpu = try measureCPU(app, label: label, seconds: sampleSeconds)
       let memory = try footprint(app.processIdentifier)
       log(String(format: "%@: settled physical footprint %.1f MiB", label, memory.currentMiB))
-      log(String(format: "%@: idle CPU %.1f%% of one core over %.1fs (limit %.0f%%)", label, cpu.average * 100,
+      log(String(format: "%@: idle CPU %.2f%% of one core over %.1fs (limit %.1f%%)", label, cpu.average * 100,
         cpu.seconds, maximumAverageCores * 100))
       guard cpu.average <= maximumAverageCores else {
-        throw ProbeFailure(description: "\(label): sustained idle CPU suggests a launch/scene feedback loop.")
+        throw ProbeFailure(description: "\(label): idle CPU after launch is above budget (a feedback loop or polling).")
       }
     }
   }
@@ -381,15 +382,20 @@ private struct NativeStartupTest {
 
 // MARK: - Resource scenarios
 
+/// Calibrated from macOS 15 and 26 CI runs after the efficiency work (see docs/PERFORMANCE_UX.md).
 private struct ResourceBudgets {
-  // Percent of one core, averaged over the measured window.
+  // Percent of one core, averaged over the measured window. Measured: Overview 0.01-0.05%,
+  // live Performance 0.59-0.92%, hidden 0.03-0.13%.
   static let overviewIdleCPU = 0.5
   static let performanceCPU = 2.0
   static let backgroundCPU = 0.2
-  // MiB of phys_footprint.
-  static let heavySettledFootprint: Double? = nil
-  /// After 30 s hidden, a heavy session must return to near a fresh launch.
-  static let backgroundReleaseOverFresh: Double? = 15
+  // MiB of phys_footprint. Measured 53-66 MiB settled (150-158 MiB before) and +17 to +28 MiB
+  // over a fresh launch once hidden: the rest is framework state from the screens used and
+  // allocator pages macOS keeps (xzone malloc on macOS 26), not MacMint caches.
+  static let heavySettledFootprint: Double? = 85
+  static let backgroundReleaseOverFresh: Double? = 35
+  /// A live Performance view must actually sample (about every 4 s); hidden apps must not.
+  static let minimumLiveSamples = 5.0
 }
 
 private struct ResourceReport {
@@ -399,7 +405,12 @@ private struct ResourceReport {
     let value: Double
     let unit: String
     let limit: Double?
-    var exceeded: Bool { limit.map { value > $0 } ?? false }
+    var minimum: Double? = nil
+    var exceeded: Bool { (limit.map { value > $0 } ?? false) || (minimum.map { value < $0 } ?? false) }
+    var budget: String? {
+      if let limit { return "≤ " + ResourceReport.format(limit, unit) }
+      return minimum.map { "≥ " + ResourceReport.format($0, unit) }
+    }
   }
   private(set) var rows: [Row] = []
 
@@ -419,7 +430,7 @@ private struct ResourceReport {
     rows.append(Row(scenario: scenario, metric: metric, value: value, unit: "MiB", limit: limit))
   }
 
-  private static func format(_ value: Double, _ unit: String) -> String {
+  static func format(_ value: Double, _ unit: String) -> String {
     switch unit {
     case "%": return String(format: "%.2f%%", value)
     case "MiB": return String(format: "%.1f MiB", value)
@@ -428,9 +439,15 @@ private struct ResourceReport {
   }
 
   /// Sample counts the app records at hide and quit (`samples-*.json`), when it reports them.
-  mutating func samples(_ scenario: String, _ metric: String, _ value: Int?) {
-    guard let value else { return }
-    rows.append(Row(scenario: scenario, metric: metric, value: Double(value), unit: "count", limit: nil))
+  mutating func samples(_ scenario: String, _ metric: String, _ value: Int?, limit: Double? = nil, minimum: Double? = nil) {
+    guard let value else {
+      // A gated count the app didn't report fails rather than passing silently.
+      if limit != nil || minimum != nil {
+        rows.append(Row(scenario: scenario, metric: metric + " (not reported)", value: -1, unit: "count", limit: nil, minimum: 0))
+      }
+      return
+    }
+    rows.append(Row(scenario: scenario, metric: metric, value: Double(value), unit: "count", limit: limit, minimum: minimum))
   }
 
   var lines: [String] {
@@ -440,7 +457,7 @@ private struct ResourceReport {
       "RESOURCE " + row.scenario.padding(toLength: 30, withPad: " ", startingAt: 0)
         + row.metric.padding(toLength: 34, withPad: " ", startingAt: 0)
         + Self.format(row.value, row.unit).padding(toLength: 13, withPad: " ", startingAt: 0)
-        + (row.limit.map { "≤ " + Self.format($0, row.unit) + (row.exceeded ? "  EXCEEDED" : "") } ?? "—")
+        + (row.budget.map { $0 + (row.exceeded ? "  EXCEEDED" : "") } ?? "—")
     }
   }
 
@@ -450,7 +467,7 @@ private struct ResourceReport {
     text += "| Scenario | Metric | Value | Budget |\n|---|---|---:|---|\n"
     for row in rows {
       text += "| \(row.scenario) | \(row.metric) | \(Self.format(row.value, row.unit)) | "
-        + (row.limit.map { "≤ " + Self.format($0, row.unit) + (row.exceeded ? " **exceeded**" : "") } ?? "—") + " |\n"
+        + (row.budget.map { $0 + (row.exceeded ? " **exceeded**" : "") } ?? "—") + " |\n"
     }
     return text
   }
@@ -652,7 +669,7 @@ extension NativeStartupTest {
       report.memory(overview, "footprint, fresh launch", memory.currentMiB)
       logState(app, overview)
     }
-    report.samples(overview, "monitor samples taken", readSamples(overviewFolder, "quit")?.samples)
+    report.samples(overview, "monitor samples taken", readSamples(overviewFolder, "quit")?.samples, limit: 0)
 
     let performance = "(b) live Performance view"
     let background = "(c) hidden in background"
@@ -681,9 +698,11 @@ extension NativeStartupTest {
       logState(app, background)
     }
     let quitAt = readSamples(performanceFolder, "quit")
-    report.samples(performance, "monitor samples shown", hiddenAt?.published)
-    report.samples(background, "monitor samples taken hidden", hiddenAt.flatMap { hide in quitAt.map { $0.samples - hide.samples } })
-    report.samples(background, "monitor samples shown hidden", hiddenAt.flatMap { hide in quitAt.map { $0.published - hide.published } })
+    report.samples(performance, "monitor samples shown", hiddenAt?.published, minimum: ResourceBudgets.minimumLiveSamples)
+    report.samples(background, "monitor samples taken hidden",
+      hiddenAt.flatMap { hide in quitAt.map { $0.samples - hide.samples } }, limit: 0)
+    report.samples(background, "monitor samples shown hidden",
+      hiddenAt.flatMap { hide in quitAt.map { $0.published - hide.published } }, limit: 0)
 
     let heavy = "(d) heavy session"
     let heavyFolder = try fixture.launchFolder("heavy", manifest: ["storage": fixture.storage.path, "photos": fixture.photos.path])
