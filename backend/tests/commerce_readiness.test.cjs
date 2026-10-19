@@ -85,3 +85,20 @@ test('unsafe return origins fail preflight and live checkout rejects HTTP loopba
     { STRIPE_RESTRICTED_KEY: canaryKey, STRIPE_WEBHOOK_SECRET: canaryWebhook })
   assert.equal(local.status, 0)
 })
+
+test('approved recurring template remains closed until provider bindings and acceptance are complete', t => {
+  const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../commerce.subscription.example.json'), 'utf8'))
+  assert.equal(config.amount_minor, 3999)
+  assert.equal(config.trial_days, 3)
+  assert.equal(config.billing_interval, 'year')
+  assert.equal(config.max_devices, 3)
+  assert.equal(config.enabled, false)
+  assert.equal(run(t, config).status, 2)
+  const result = run(t, { ...config, enabled: true, price_id: 'price_fixture', portal_configuration_id: 'bpc_fixture' },
+    { STRIPE_RESTRICTED_KEY: canaryKey, STRIPE_WEBHOOK_SECRET: canaryWebhook })
+  assert.equal(result.status, 0)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.launch_ready, false)
+  assert.ok(report.required_verification.includes('stripe_recurring_price_amount_currency_interval_and_trial'))
+  assert.ok(report.required_verification.includes('trial_conversion_renewal_failure_and_recovery'))
+})

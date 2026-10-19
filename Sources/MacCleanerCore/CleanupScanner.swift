@@ -193,8 +193,7 @@ public actor CleanupScanner {
   }
 
   private func isIgnored(_ url: URL, ignoredPaths: Set<String>) -> Bool {
-    let path = url.standardizedFileURL.path
-    return ignoredPaths.contains { ignored in path == ignored || path.hasPrefix(ignored + "/") }
+    FileSystem.isIgnored(url, ignoredPaths: ignoredPaths)
   }
 
   private func deduplicated(_ items: [CleanupTarget]) -> [CleanupTarget] {

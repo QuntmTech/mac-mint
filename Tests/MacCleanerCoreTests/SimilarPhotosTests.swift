@@ -100,6 +100,16 @@ final class SimilarPhotosTests: XCTestCase {
     XCTAssertTrue(PhotoAnalysis.blurry(Array(photos.prefix(5))).isEmpty, "too few photos to judge")
   }
 
+  func testLibraryScreenshotClassificationWorksWithoutPersonalFilenamesAndAvoidsBlurrySuggestions() {
+    let screenshot = PhotoFingerprint(url: URL(string: "photos-asset:///opaque-id")!, bytes: 0,
+      hash: 1, sharpness: 1, pixelWidth: 1200, pixelHeight: 2000, assetID: "opaque-id", isScreenshot: true)
+    let ordinary = (0..<10).map { photo("p\($0).jpg", hash: UInt64($0) << 20, sharpness: 1000) }
+    XCTAssertTrue(screenshot.isScreenshot)
+    XCTAssertFalse(PhotoAnalysis.looksLikeScreenshot(screenshot.url))
+    XCTAssertTrue(PhotoAnalysis.blurry(ordinary + [screenshot]).isEmpty)
+    XCTAssertTrue(photo("Screenshot 2026.png", hash: 0, sharpness: 1000).isScreenshot)
+  }
+
   func testLibraryPackagesAreRecognised() {
     XCTAssertTrue(
       PhotoAnalysis.isInsideLibraryPackage(

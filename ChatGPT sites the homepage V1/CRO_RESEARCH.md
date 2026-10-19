@@ -20,3 +20,9 @@ Primary current action: availability inquiry. Secondary action: interactive demo
 Hypothesis: clear next-step expectations, concrete product demonstrations and accurate requirements reduce uncertainty. No conversion dataset or randomized test was supplied, so no conversion lift or “better than every competitor” conclusion is claimed. Competitors' established release, support and reputation cannot be reproduced by copy. Product screenshots and user testing remain next validation steps before consumer launch.
 
 Claims review: newer repository code supersedes the old “no cloud account / no network calls” wording. No prices or universal performance claims were added. Manual copy/claims review completed. The supplied Copy King `scripts/preflight.py` is absent; no automated copy preflight is claimed.
+
+## Guided hero demo refinement
+
+The hero's first action now starts an illustrative scan instead of claiming that a scan has already completed. A short Scan / Review / Restore sequence makes the next action clear. Editable selections, explicit cache rebuild consequences, an unchecked backup example, a session receipt and working example Restore let visitors test the product's control and recovery story. Native-app typography and readable phone rows improve inspection without changing the page's visual identity or adding a new section.
+
+After Restore, visitors can explicitly open the existing availability dialog or explore app leftovers and exact duplicates. Availability remains accurate: no consumer installer or pricing is invented. The demo stays local to the browser and adds no telemetry. This is a conversion hypothesis based on reducing uncertainty; no measured conversion lift is claimed.

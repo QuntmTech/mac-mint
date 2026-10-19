@@ -135,9 +135,16 @@ public enum FileSystem {
     _ enumerator: FileManager.DirectoryEnumerator,
     _ visit: (URL) -> Visit
   ) {
-    while let next = enumerator.nextObject() {
-      guard let url = next as? URL else { continue }
-      switch visit(url) {
+    while true {
+      // Drain Foundation's bridged temporaries once per filesystem entry.
+      let step: Visit?
+      #if canImport(ObjectiveC)
+        step = autoreleasepool { (enumerator.nextObject() as? URL).map(visit) }
+      #else
+        step = (enumerator.nextObject() as? URL).map(visit)
+      #endif
+      guard let step else { return }
+      switch step {
       case .continue: break
       case .skipDescendants: enumerator.skipDescendants()
       case .stop: return

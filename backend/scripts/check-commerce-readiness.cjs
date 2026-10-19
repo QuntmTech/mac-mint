@@ -49,7 +49,8 @@ console.log(JSON.stringify({
   checks,
   required_verification: [
     'intended_stripe_account_and_sandbox',
-    'stripe_price_amount_currency_and_one_time_type',
+    config?.billing_mode === 'subscription' ? 'stripe_recurring_price_amount_currency_interval_and_trial' : 'stripe_price_amount_currency_and_one_time_type',
+    ...(config?.billing_mode === 'subscription' ? ['owner_bound_portal_and_period_end_cancellation', 'trial_conversion_renewal_failure_and_recovery'] : []),
     'restricted_key_permissions',
     'registered_webhook_delivery_and_signature',
     'validated_notarized_stable_release',

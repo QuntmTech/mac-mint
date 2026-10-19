@@ -147,6 +147,11 @@ extension AppViewModel {
 
   func reviewUninstall() {
     guard let app = selectedApp else { return }
+    guard app.bundleIdentifier != Bundle.main.bundleIdentifier,
+      FileSystem.comparisonPath(app.url) != FileSystem.comparisonPath(Bundle.main.bundleURL) else {
+      statusMessage = "MacMint cannot uninstall itself while running. Use Finder after quitting MacMint."
+      return
+    }
     if selectedAppIsRunning {
       statusMessage = "Quit \(app.name) before uninstalling it"
       return
@@ -159,8 +164,8 @@ extension AppViewModel {
     let leftovers = appLeftovers.filter { selectedLeftoverIDs.contains($0.id) }.map { leftover in
       PlanItem(
         url: leftover.url, displayName: leftover.url.lastPathComponent, kind: .appLeftover,
-        expectedBytes: leftover.size, reason: leftover.reason, source: source,
-        needsAttention: !leftover.isSuggested, dependsOn: bundle.id,
+        expectedBytes: leftover.size, reason: leftover.reason + " " + leftover.category.consequence, source: source,
+        needsAttention: !leftover.isSuggested || !leftover.isDisposableData, dependsOn: bundle.id,
         identity: leftover.identity, ownerBundleID: app.bundleIdentifier)
     }
     presentPlan(

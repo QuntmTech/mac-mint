@@ -91,7 +91,8 @@ public actor AppScanner {
   /// `otherBundleIDs` are the bundle identifiers of every other installed app. They keep a
   /// sibling (e.g. `com.vendor.app.pro` vs `com.vendor.app`) from being matched as this app's data.
   public func leftoversReport(
-    for app: AppRecord, otherBundleIDs: Set<String> = [], ignoredPaths: Set<String> = []
+    for app: AppRecord, otherBundleIDs: Set<String> = [], ignoredPaths: Set<String> = [],
+    hasOtherInstallation: Bool = false
   ) async -> ScanReport<[AppLeftover]> {
     let started = Date()
     let roots = leftoverRoots()
@@ -111,7 +112,9 @@ public actor AppScanner {
           value: sort(matches), issues: issues, duration: Date().timeIntervalSince(started),
           wasCancelled: true)
       }
-      guard fileManager.fileExists(atPath: root.path) else { continue }
+      guard fileManager.fileExists(atPath: root.path),
+        !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths),
+        (try? root.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { continue }
 
       do {
         let entries = try fileManager.contentsOfDirectory(
@@ -123,7 +126,9 @@ public actor AppScanner {
               wasCancelled: true)
           }
           let entryPath = entry.standardizedFileURL.path
-          guard !isIgnored(entryPath, ignoredPaths: ignoredPaths) else { continue }
+          guard !FileSystem.isIgnored(entry, ignoredPaths: ignoredPaths),
+            !FileSystem.containsIgnoredDescendant(entry, ignoredPaths: ignoredPaths),
+            (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { continue }
 
           if let match = match(entry, root: root, context: context),
             seen.insert(entryPath).inserted
@@ -145,7 +150,9 @@ public actor AppScanner {
             }
             for child in children {
               let childPath = child.standardizedFileURL.path
-              guard !isIgnored(childPath, ignoredPaths: ignoredPaths),
+              guard !FileSystem.isIgnored(child, ignoredPaths: ignoredPaths),
+                !FileSystem.containsIgnoredDescendant(child, ignoredPaths: ignoredPaths),
+                (try? child.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
                 seen.insert(childPath).inserted
               else { continue }
               if let match = match(child, root: root, context: context) {
@@ -161,7 +168,11 @@ public actor AppScanner {
     }
 
     return ScanReport(
-      value: sort(matches), issues: issues, duration: Date().timeIntervalSince(started))
+      value: sort(hasOtherInstallation ? matches.map { item in
+        AppLeftover(id: item.id, url: item.url, size: item.size, confidence: .medium,
+          reason: "Another installed copy uses this bundle identifier. Keep its shared data unless you intend to remove it for every copy.",
+          isShared: true, identity: item.identity)
+      } : matches), issues: issues, duration: Date().timeIntervalSince(started))
   }
 
   public func inspect(_ url: URL) -> AppRecord? {
@@ -199,6 +210,7 @@ public actor AppScanner {
       homeDirectory.appendingPathComponent("Library/Application Scripts"),
       homeDirectory.appendingPathComponent("Library/Caches"),
       homeDirectory.appendingPathComponent("Library/Preferences"),
+      homeDirectory.appendingPathComponent("Library/Preferences/ByHost"),
       homeDirectory.appendingPathComponent("Library/Logs"),
       homeDirectory.appendingPathComponent("Library/Saved Application State"),
       homeDirectory.appendingPathComponent("Library/WebKit"),
@@ -267,7 +279,11 @@ public actor AppScanner {
   }
 
   private func match(_ url: URL, root: URL, context: MatchContext) -> AppLeftover? {
-    let stem = Self.stem(of: url.lastPathComponent)
+    var stem = Self.stem(of: url.lastPathComponent)
+    if root.lastPathComponent == "ByHost", let dot = stem.lastIndex(of: "."),
+      UUID(uuidString: String(stem[stem.index(after: dot)...])) != nil {
+      stem = String(stem[..<dot])
+    }
     let inGroupContainers = root.lastPathComponent == "Group Containers"
     // macOS's own data is never offered as a third-party app's leftovers.
     if Self.isAppleOwned(stem), context.bundleID?.hasPrefix("com.apple.") != true { return nil }
@@ -355,10 +371,6 @@ public actor AppScanner {
       .map(String.init)
       .filter { $0.count >= 3 && !["app", "the", "inc", "llc", "mac"].contains($0) }
     return Set(tokens)
-  }
-
-  private func isIgnored(_ path: String, ignoredPaths: Set<String>) -> Bool {
-    ignoredPaths.contains { ignored in path == ignored || path.hasPrefix(ignored + "/") }
   }
 
   private func sort(_ records: [AppRecord]) -> [AppRecord] {

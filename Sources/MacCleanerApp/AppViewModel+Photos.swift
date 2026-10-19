@@ -115,7 +115,7 @@ extension AppViewModel {
           message: "\(library.total - library.photos.count) library assets could not be analyzed from local thumbnails. Cloud-only, unreadable or unsupported items may be omitted. No cloud downloads were requested.")] : []
         let analysis = Task.detached(priority: .userInitiated) {
           PhotoScanResult(photos: library.photos, similarGroups: PhotoAnalysis.group(library.photos),
-            blurry: PhotoAnalysis.blurry(library.photos), screenshots: [], skippedLibraries: [], issues: issues,
+            blurry: PhotoAnalysis.blurry(library.photos), screenshots: library.photos.filter(\.isScreenshot), skippedLibraries: [], issues: issues,
             wasCancelled: Task.isCancelled)
         }
         result = await withTaskCancellationHandler(operation: { await analysis.value }, onCancel: { analysis.cancel() })
@@ -198,15 +198,28 @@ extension AppViewModel {
 
   /// Selects every shot except the kept one — only when the user asks.
   func selectAllButKeeper(in group: SimilarPhotoGroup) {
-    let kept = keeper(of: group).id
-    for photo in group.photos where photo.id != kept {
-      if photo.isLibraryAsset { selectedPhotoIDs.insert(photo.id) } else { setFileSelection(photo.url, selected: true) }
-    }
+    setPhotoSelection(group.photos, selected: true)
+  }
+
+  func setPhotoSelection(_ photos: [PhotoFingerprint], selected: Bool) {
+    guard !isWorking, !isScanning, !isPreparingPlan, let scan = photoScan else { return }
+    let requested = Set(photos.map(\.id))
+    let keepers = Set(scan.similarGroups.map { keeper(of: $0).id })
+    let current = scan.photos.filter { requested.contains($0.id) }
+    let libraryIDs = Set(current.filter { $0.isLibraryAsset && (!selected || !keepers.contains($0.id)) }.map(\.id))
+    var next = selectedPhotoIDs
+    if selected { next.formUnion(libraryIDs) } else { next.subtract(libraryIDs) }
+    selectedPhotoIDs = next
+    setFileSelections(current.filter { !$0.isLibraryAsset }.map(\.url), selected: selected)
+    // Previous deck choices must not undo a later explicit bulk decision.
+    photoReviewSession.choices = []
+    statusMessage = selected ? "Photos selected for review; group keepers stay protected" : "Photo selection cleared"
   }
 
   // MARK: Removing
 
   func reviewPhotos() {
+    guard !isWorking, !isScanning, !isPreparingPlan else { return }
     let files = queuedPhotoFileItems
     if files.items.isEmpty, files.libraryCount > 0 {
       Task { await deleteSelectedLibraryPhotos() }
@@ -220,7 +233,7 @@ extension AppViewModel {
   /// Library photos go through Photos itself (system confirmation, Recently Deleted for 30 days).
   func deleteSelectedLibraryPhotos() async {
     let assets = selectedPhotos.filter(\.isLibraryAsset)
-    guard !assets.isEmpty, !isWorking, requirePaidAccess() else { return }
+    guard !assets.isEmpty, !isWorking, !isScanning, !isPreparingPlan, requirePaidAccess() else { return }
     isWorking = true
     operationTitle = "Photos"
     statusMessage = "Waiting for your confirmation in Photos…"
@@ -232,8 +245,8 @@ extension AppViewModel {
       let selectedIDs = Set(assets.map(\.id))
       let keepers = (photoScan?.similarGroups ?? []).filter { group in
         group.photos.contains { selectedIDs.contains($0.id) }
-      }.compactMap { keeper(of: $0).assetID }
-      let deleted = try await PhotoLibraryService.delete(assetIDs: assets.compactMap(\.assetID), protecting: keepers)
+      }.map { keeper(of: $0) }.filter(\.isLibraryAsset)
+      let deleted = try await PhotoLibraryService.delete(photos: assets, protecting: keepers)
       guard deleted else {
         statusMessage = "Nothing was deleted"
         return

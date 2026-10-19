@@ -96,7 +96,7 @@ public actor OrphanScanner {
     for (relative, label) in Self.locations {
       if Task.isCancelled { break }
       let root = homeDirectory.appendingPathComponent(relative)
-      guard fileManager.fileExists(atPath: root.path) else { continue }
+      guard !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths), fileManager.fileExists(atPath: root.path) else { continue }
       let entries: [URL]
       do {
         entries = try fileManager.contentsOfDirectory(
@@ -106,7 +106,8 @@ public actor OrphanScanner {
         continue
       }
       for entry in entries {
-        if FileSystem.isIgnored(entry, ignoredPaths: ignoredPaths) { continue }
+        if FileSystem.isIgnored(entry, ignoredPaths: ignoredPaths) ||
+          FileSystem.containsIgnoredDescendant(entry, ignoredPaths: ignoredPaths) { continue }
         guard let candidate = Self.bundleID(fromName: entry.lastPathComponent, inGroupContainers: label == "Group Containers"),
           !Self.isProtected(candidate), !Self.isClaimed(candidate, by: installed)
         else { continue }

@@ -53,7 +53,7 @@ final class AccountStore: ObservableObject {
     let tokenFingerprint: String
     let access: CachedAccess
   }
-  private var sessionGeneration = UUID()
+  private(set) var sessionGeneration = UUID()
   private var isVerifying = false
   private var recheckTask: Task<Void, Never>?
   private var deviceReleaseTask: Task<Void, Never>?
