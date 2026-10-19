@@ -208,6 +208,7 @@ enum SmokeTest {
       let update = UpdaterController.Update(version: "0.9.0", build: "1000")
       updater.showPreview(available: update, reminder: update, waitingForWork: false)
       render(prefix + "-Update-available", RootView(), width: 980, height: 660)
+      render(prefix + "-Updates-settings", UpdatesSettingsCard().padding(20), width: 720, height: 420)
       updater.showPreview(available: update, reminder: nil, waitingForWork: true)
       render(prefix + "-Update-waiting", RootView(), width: 980, height: 660)
       updater.showPreview(available: nil, reminder: nil, waitingForWork: false)
