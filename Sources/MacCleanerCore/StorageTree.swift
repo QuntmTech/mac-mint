@@ -245,7 +245,7 @@ public actor StorageTreeScanner {
     } catch {
       state.coverage.inaccessiblePaths.append(url.path)
       return StorageNode(
-        url: url, kind: .inaccessible, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
+        url: Self.retained(url), kind: .inaccessible, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
     }
 
     var children: [StorageNode] = []
@@ -270,7 +270,7 @@ public actor StorageTreeScanner {
           state.coverage.otherVolumes.append(entry.path)
           children.append(
             StorageNode(
-              url: entry, kind: .otherVolume, allocatedBytes: 0, logicalBytes: 0, itemCount: 0))
+              url: Self.retained(entry), kind: .otherVolume, allocatedBytes: 0, logicalBytes: 0, itemCount: 0))
           continue
         }
         if values.isPackage == true {
@@ -295,7 +295,7 @@ public actor StorageTreeScanner {
       if max(allocated, logical) >= detailThreshold {
         children.append(
           StorageNode(
-            url: entry, kind: .file, allocatedBytes: allocated, logicalBytes: logical,
+            url: Self.retained(entry), kind: .file, allocatedBytes: allocated, logicalBytes: logical,
             itemCount: 1, cloudOnlyCount: cloudOnly ? 1 : 0,
             modified: values.contentModificationDate, identity: FileSystem.fileIdentity(at: entry)))
       } else {
@@ -340,7 +340,7 @@ public actor StorageTreeScanner {
     let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
       .contentModificationDate
     return StorageNode(
-      url: url, kind: .folder,
+      url: Self.retained(url), kind: .folder,
       allocatedBytes: kept.reduce(0) { $0 + $1.allocatedBytes },
       logicalBytes: kept.reduce(0) { $0 + $1.logicalBytes },
       itemCount: kept.reduce(0) { $0 + $1.itemCount },
@@ -352,8 +352,16 @@ public actor StorageTreeScanner {
     let measurement = FileSystem.measure(at: url, fileManager: fileManager, ignoredPaths: state.ignoredPaths)
     if !measurement.isComplete { state.coverage.inaccessiblePaths.append(url.path) }
     return StorageNode(
-      url: url, kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,
+      url: Self.retained(url), kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,
       itemCount: 1, modified: modified, identity: FileSystem.fileIdentity(at: url))
+  }
+
+  /// Enumerated URLs carry the prefetched resource values (a per-URL cache of strings, data
+  /// and dictionaries). Nodes keep the URL for later actions, which read fresh values anyway.
+  static func retained(_ url: URL) -> URL {
+    var plain = url
+    plain.removeAllCachedResourceValues()
+    return plain
   }
 
   /// Cloud placeholders (iCloud, Dropbox, OneDrive via File Provider) carry SF_DATALESS.
