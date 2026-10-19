@@ -3,7 +3,9 @@ No real credentials, charges, emails or production database changes.
 """
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
 import concurrent.futures
+import datetime
 import hashlib
 import hmac
 import json
@@ -25,6 +27,22 @@ sessions, subscriptions, invoices, requests = {}, {}, {}, []
 portal_valid = True
 provider_fails = False
 now = int(time.time())
+# Disposable Ed25519 seed for this run only; signatures are checked independently with Node's crypto.
+signing_seed = os.urandom(32)
+VERIFY_JS = """const c=require('crypto'),[compact,seed]=process.argv.slice(1),[p,s]=compact.split('.')
+const key=c.createPrivateKey({key:Buffer.concat([Buffer.from('302e020100300506032b657004220420','hex'),Buffer.from(seed,'base64')]),format:'der',type:'pkcs8'})
+process.stdout.write(c.verify(null,Buffer.from(p,'base64url'),c.createPublicKey(key),Buffer.from(s,'base64url'))?'valid':'invalid')"""
+
+
+def verified_claims(compact):
+    result = subprocess.run(['node', '-e', VERIFY_JS, compact, base64.b64encode(signing_seed).decode()], capture_output=True, text=True)
+    assert result.stdout == 'valid', (result.stdout, result.stderr)
+    payload = compact.split('.')[0]
+    return json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+
+
+def epoch(iso):
+    return int(datetime.datetime.fromisoformat(iso.replace('Z', '+00:00')).timestamp())
 price = dict(id='price_recurring', active=True, type='recurring', unit_amount=1900, currency='usd', livemode=False,
              recurring=dict(interval='month', interval_count=1, usage_type='licensed'))
 
@@ -136,7 +154,8 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
 
     with (folder / 'server.log').open('w') as log:
         process = subprocess.Popen(base + ['serve', '--http', f'127.0.0.1:{port}'], stdout=log, stderr=log,
-            env={**os.environ, 'STRIPE_RESTRICTED_KEY': 'fixture-only', 'STRIPE_WEBHOOK_SECRET': 'fixture-signing-secret'})
+            env={**os.environ, 'STRIPE_RESTRICTED_KEY': 'fixture-only', 'STRIPE_WEBHOOK_SECRET': 'fixture-signing-secret',
+                'MACMINT_ENTITLEMENT_SIGNING_KEY': 'mm-sub-1:' + base64.b64encode(signing_seed).decode()})
         try:
             for _ in range(100):
                 try:
@@ -175,6 +194,16 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             assert all(status == 200 for status, _ in results), (results, (folder / 'server.log').read_text())
             assert me()['entitlement']['active'] is True
             initial_expiry = me()['entitlement']['expires_at']
+            device = 'SUBSCRIPTION-MAC-0001'
+            def assertion(account=token, mac=device):
+                status, value = call('/api/macmint/me?device_id=' + mac, token=account)
+                assert status == 200, value
+                return value.get('entitlement_assertion')
+            status, activated = call('/api/macmint/devices/activate', dict(device_id=device, reactivate=False), token)
+            assert status == 200, activated
+            paid = verified_claims(activated['entitlement_assertion'])
+            assert paid['device_id'] == device and paid['active'] is True and paid['expires_at'] == epoch(initial_expiry), (paid, initial_expiry)
+            assert paid['offline_until'] <= paid['expires_at']
             assert call('/api/macmint/billing/portal', {}, other)[0] == 503
             assert call('/api/macmint/billing/portal', dict(customer='cus_foreign'), token)[0] == 200
             assert requests[-1][2]['customer'] == session['customer']
@@ -185,23 +214,29 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             invoice['lines']['data'][0]['period']['end'] += 30 * 86400
             assert webhook('invoice.payment_failed', invoice['id'])[0] == 200
             assert me()['entitlement']['expires_at'] == initial_expiry
+            assert me()['entitlement']['active'] is True and assertion() is None, 'past_due keeps online access but gets no fresh offline assertion'
             call('/__test/settings', dict(expire=True))
-            assert me()['entitlement']['active'] is False
+            assert me()['entitlement']['active'] is False and assertion() is None
             assert call('/api/macmint/checkout', dict(request_key=str(uuid.uuid4())), token)[1]['error'] == 'plan_exists'
             invoice['status'] = 'paid'; sub['status'] = 'active'
             assert webhook('invoice.paid', invoice['id'])[0] == 200
             assert me()['entitlement']['active'] is True
             assert me()['entitlement']['expires_at'] != initial_expiry
+            recovered = verified_claims(assertion())
+            assert recovered['expires_at'] == epoch(me()['entitlement']['expires_at']) and recovered['offline_until'] <= recovered['expires_at']
             sub['cancel_at_period_end'] = True
             assert webhook('customer.subscription.updated', sub['id'])[0] == 200
             assert me()['billing']['subscription']['cancel_at_period_end'] is True
+            # Cancelling at period end keeps the paid period; offline evidence never outlives it.
+            ending = verified_claims(assertion())
+            assert ending['offline_until'] <= ending['expires_at'] == epoch(me()['entitlement']['expires_at'])
             call('/__test/settings', dict(enabled=False))
             assert call('/api/macmint/billing/portal', {}, token)[0] == 200
             print('PASS: failed renewal never extends access; payment recovery, period-end cancellation and portal survive checkout kill switch')
 
             sub['status'] = 'canceled'
             assert webhook('customer.subscription.deleted', sub['id'])[0] == 200
-            assert me()['entitlement']['active'] is False
+            assert me()['entitlement']['active'] is False and assertion() is None
             status = call('/api/macmint/checkout/status?request_key=' + key, token=token)[1]
             assert status['state'] == 'fulfilled' and status['can_start_new'] is True
             call('/__test/settings', dict(enabled=True))
@@ -223,6 +258,7 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             assert webhook('customer.subscription.deleted', new_sub['id'])[0] == 200
             assert me()['entitlement']['active'] is True and me()['entitlement']['expires_at'] is None
             assert me()['entitlement']['max_devices'] == 5
+            assert verified_claims(assertion())['expires_at'] is None, 'An independent lifetime license still signs'
             print('PASS: terminal cancellation, safe resubscription, customer reuse, portal preflight and independent lifetime access')
 
             # The approved public offer: annual USD 39.99, three-day trial, three Macs.
@@ -242,11 +278,16 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             assert webhook('checkout.session.completed', trial_session['id'])[0] == 200
             trial_account = call('/api/macmint/me', token=other)[1]
             assert trial_account['entitlement']['active'] is True and trial_account['entitlement']['source'] == 'subscription_trial'
+            trial_mac = 'SUBSCRIPTION-MAC-0002'
+            assert call('/api/macmint/devices/activate', dict(device_id=trial_mac, reactivate=False), other)[0] == 200
+            trial_claims = verified_claims(assertion(other, trial_mac))
+            assert trial_claims['offline_until'] == trial_claims['expires_at'] == now + 3 * 86400, trial_claims
             assert trial_account['billing']['subscription']['amount_minor'] == 3999
             assert not trial_account['billing']['subscription']['paid_through']
             assert call('/api/macmint/checkout/config', token=other)[1]['trial_days'] == 0
             call('/__test/settings', dict(expireTrial=True))
             assert call('/api/macmint/me', token=other)[1]['entitlement']['active'] is False
+            assert assertion(other, trial_mac) is None
             trial_sub['status'] = 'past_due'; trial_invoice['status'] = 'open'
             assert webhook('invoice.payment_failed', trial_invoice['id'])[0] == 200
             assert call('/api/macmint/me', token=other)[1]['entitlement']['active'] is False
@@ -261,6 +302,7 @@ with tempfile.TemporaryDirectory(prefix='pb-subscriptions-', dir=ROOT / '.build'
             retry_fields = next(fields for method, path, fields in reversed(requests) if method == 'POST' and path == '/v1/checkout/sessions')
             assert 'subscription_data[trial_period_days]' not in retry_fields
             print('PASS: approved annual offer, bounded three-day trial, expiry, failed first charge, paid conversion and one-trial-only resubscription')
+            print('PASS: offline assertions follow subscriptions: capped by paid-through or trial end, none while past_due, expired or canceled')
             print('PASS: new billing migration reapplies safely and client billing records remain locked')
         finally:
             process.terminate()

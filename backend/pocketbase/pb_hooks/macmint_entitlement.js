@@ -149,6 +149,26 @@ function seconds(iso) {
   return isNaN(ms) ? null : Math.floor(ms / 1000)
 }
 
+// What offline evidence may vouch for. `entitlement` is the effective (license + subscription)
+// answer, already capped by the paid-through or trial end. A subscription with payment trouble
+// may keep online access while Stripe retries, but gets no fresh offline assertion; only a
+// one-time license that is active on its own still signs. Unreadable billing state fails closed.
+function offlineBasis(app, userId, entitlement) {
+  if (!entitlement || entitlement.active !== true) return null
+  let troubled
+  try {
+    troubled = app.findRecordsByFilter("billing_subscriptions",
+      "user = {:u} && terminal = false && (status = 'past_due' || status = 'unpaid')", "", 1, 0, { u: userId }) || []
+  } catch (err) {
+    return null
+  }
+  if (!troubled.length) return entitlement
+  let record
+  try { record = app.findFirstRecordByFilter("plan_entitlements", "user = {:u}", { u: userId }) } catch (err) { return null }
+  const license = require(`${__hooks}/macmint_lib.js`).entitlementPayload(record)
+  return license.active ? license : null
+}
+
 // entitlement is entitlementPayload() output; expires_at is ISO 8601 or null.
 function assertionPayload(kid, userId, deviceId, entitlement, issuedAt, graceDays) {
   const expiresAt = seconds(entitlement.expires_at)
@@ -194,12 +214,15 @@ function secretKey(app, key) {
   return derived
 }
 
-// Returns the compact assertion, or null when this device isn't active for an active plan or no
-// signing key is configured. `devices` is the account's active (non-deactivated) device list.
-function issue(app, userId, deviceId, entitlement, devices) {
+// Returns the compact assertion, or null when this device isn't active for an active plan, the
+// plan's billing is in trouble, or no signing key is configured. `devices` is the account's
+// active (non-deactivated) device list.
+function issue(app, userId, deviceId, effective, devices) {
   const id = String(deviceId || "")
-  if (!userId || !DEVICE_ID.test(id) || !entitlement || entitlement.active !== true) return null
+  if (!userId || !DEVICE_ID.test(id) || !effective || effective.active !== true) return null
   if (!(devices || []).some((d) => d.device_id === id)) return null
+  const entitlement = offlineBasis(app, userId, effective)
+  if (!entitlement) return null
   const key = configuredKey(app)
   if (!key) return null
   try {
@@ -236,6 +259,7 @@ module.exports = {
   decodeBase64: decodeBase64,
   parseSigningKey: parseSigningKey,
   offlineGraceDays: offlineGraceDays,
+  offlineBasis: offlineBasis,
   assertionPayload: assertionPayload,
   sign: sign,
   issue: issue,

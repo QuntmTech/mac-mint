@@ -26,17 +26,25 @@ function split(compact) {
   const [payload, signature] = compact.split('.')
   return { message: Buffer.from(payload, 'base64url'), signature: Buffer.from(signature, 'base64url') }
 }
-function fakeApp({ secret, client } = {}) {
+function fakeApp({ secret, client, billing = [], billingFails = false, license } = {}) {
   const shared = new Map()
   const lookups = []
   return {
     lookups,
+    billing,
     store: () => ({ has: k => shared.has(k), get: k => shared.get(k), set: (k, v) => shared.set(k, v) }),
     findFirstRecordByFilter(collection, filter) {
       lookups.push(collection)
       if (collection === 'app_secrets' && secret !== undefined) return { get: () => secret }
       if (collection === 'app_config' && client !== undefined) return { get: () => JSON.stringify(client) }
+      if (collection === 'plan_entitlements' && license) return { get: k => license[k] }
       throw new Error('not found')
+    },
+    // Mirrors the payment-trouble filter in offlineBasis().
+    findRecordsByFilter(collection, filter, sort, limit, offset, params) {
+      if (collection !== 'billing_subscriptions' || billingFails) throw new Error('billing unavailable')
+      assert.match(filter, /terminal = false/)
+      return this.billing.filter(row => row.user === params.u && !row.terminal && ['past_due', 'unpaid'].includes(row.status)).slice(0, limit)
     },
   }
 }
@@ -158,4 +166,45 @@ test('the shared wire vector is stable (Tests/MacCleanerAppTests/AccountEntitlem
   const vector = 'eyJhY3RpdmUiOnRydWUsImRldmljZV9pZCI6IkFCQ0RFRjAxMjM0NTY3ODkiLCJleHBpcmVzX2F0IjpudWxsLCJpc3N1ZWRfYXQiOjE4MDAwMDAwMDAsImtpZCI6Im1tLXRlc3QtMSIsIm9mZmxpbmVfdW50aWwiOjE4MDEyMDk2MDAsInBsYW4iOiJwcm8iLCJ1c2VyX2lkIjoidXNlcjEiLCJ2IjoxfQ.5ultdfhb-3pEE38G_aKeqPfbVrWmKHoM_shIY_zhNC78gdoGuQFPUnq1V6dBKwPeLru9DhFnv7gv0vlbid_TCQ'
   assert.equal(signer.sign(signer.assertionPayload('mm-test-1', 'user1', activeDevice, pro, 1800000000, 14), seed), vector)
   assert.equal(Buffer.from(nacl.sign.keyPair.fromSeed(seed).publicKey).toString('base64'), 'A6EHv/POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg=')
+})
+
+test('subscriptions: offline evidence is capped by the paid period and withheld during payment trouble', () => {
+  const devices = [{ device_id: activeDevice }]
+  const paidThrough = new Date(Date.now() + 30 * 86400000).toISOString()
+  const subscription = { ...pro, expires_at: paidThrough, source: 'subscription' }
+  const row = { user: 'user1', status: 'active', terminal: false }
+  const app = fakeApp({ secret: testKey, billing: [row] })
+  const claims = JSON.parse(split(signer.issue(app, 'user1', activeDevice, subscription, devices)).message)
+  assert.equal(claims.expires_at, Math.floor(Date.parse(paidThrough) / 1000))
+  assert.ok(claims.offline_until <= claims.expires_at)
+
+  const trialEnd = new Date(Date.now() + 3 * 86400000).toISOString()
+  const trial = JSON.parse(split(signer.issue(fakeApp({ secret: testKey, billing: [{ ...row, status: 'trialing' }] }), 'user1', activeDevice,
+    { ...pro, expires_at: trialEnd, source: 'subscription_trial' }, devices)).message)
+  assert.equal(trial.offline_until, Math.floor(Date.parse(trialEnd) / 1000), 'A trial is capped by its end')
+
+  // past_due may keep online access while Stripe retries; no fresh offline assertion, even from the reuse cache.
+  row.status = 'past_due'
+  assert.equal(signer.issue(app, 'user1', activeDevice, subscription, devices), null)
+  row.status = 'unpaid'
+  assert.equal(signer.issue(app, 'user1', activeDevice, subscription, devices), null)
+  assert.equal(signer.issue(fakeApp({ secret: testKey, billingFails: true }), 'user1', activeDevice, subscription, devices), null, 'fails closed')
+  // Terminal (canceled) rows grant no access upstream and are not "trouble" here.
+  assert.ok(signer.issue(fakeApp({ secret: testKey, billing: [{ ...row, status: 'canceled', terminal: true }] }), 'user1', activeDevice, subscription, devices))
+})
+
+test('subscriptions: a one-time license that is active on its own still signs during payment trouble', () => {
+  const devices = [{ device_id: activeDevice }]
+  const troubled = [{ user: 'user1', status: 'past_due', terminal: false }]
+  const merged = { ...pro, expires_at: new Date(Date.now() + 30 * 86400000).toISOString(), max_devices: 5, source: 'subscription' }
+  const lifetime = fakeApp({ secret: testKey, billing: troubled, license: { plan: 'pro', status: 'active', expires_at: '', max_devices: 5, source: 'license' } })
+  const claims = JSON.parse(split(signer.issue(lifetime, 'user1', activeDevice, merged, devices)).message)
+  assert.equal(claims.expires_at, null, 'Signed from the license alone, not the troubled subscription')
+  const shortLicense = new Date(Date.now() + 5 * 86400000).toISOString()
+  const limited = fakeApp({ secret: testKey, billing: troubled, license: { plan: 'pro', status: 'active', expires_at: shortLicense, max_devices: 3 } })
+  assert.equal(JSON.parse(split(signer.issue(limited, 'user1', activeDevice, merged, devices)).message).expires_at, Math.floor(Date.parse(shortLicense) / 1000))
+  const lapsed = fakeApp({ secret: testKey, billing: troubled, license: { plan: 'pro', status: 'active', expires_at: '2020-01-01T00:00:00Z', max_devices: 3 } })
+  assert.equal(signer.issue(lapsed, 'user1', activeDevice, merged, devices), null)
+  const free = fakeApp({ secret: testKey, billing: troubled, license: { plan: 'free', status: 'active', expires_at: '', max_devices: 0 } })
+  assert.equal(signer.issue(free, 'user1', activeDevice, merged, devices), null)
 })

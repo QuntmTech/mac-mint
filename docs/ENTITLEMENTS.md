@@ -17,6 +17,10 @@ base64url(canonical JSON payload) "." base64url(64-byte Ed25519 signature over t
 
 Times are integer Unix seconds. `offline_until = issued_at + offline_grace_days`, capped by `expires_at`. `offline_grace_days` comes from the public `app_config` record `client` (`{"offline_grace_days": 14}`; default 14, clamped to 0–60).
 
+### Subscriptions
+
+The assertion signs the same effective entitlement as `/me` (`effectiveEntitlement`: one-time license merged with recurring access from `macmint_billing.js`). For an active or trialing subscription, `expires_at` is the paid-through or trial end, so `offline_until` never outlives the paid period. A subscription with payment trouble (`past_due` or `unpaid`) may keep online access while Stripe retries the charge, but gets no fresh assertion. The only exception is a one-time license that is active on its own; then the assertion signs that license alone. Canceled (terminal) subscriptions grant nothing. Cancelling at period end keeps the paid period, capped as above. Billing state that can't be read fails closed. `offline_grace_days` comes from the public `app_config` record `client` (`{"offline_grace_days": 14}`; default 14, clamped to 0–60).
+
 Server: [`macmint_entitlement.js`](../backend/pocketbase/pb_hooks/macmint_entitlement.js) with vendored [tweetnacl-js 1.0.3](../backend/pocketbase/pb_hooks/macmint_nacl.js) (verbatim; npm integrity and file hash in its header and re-checked by `backend/tests/entitlements.test.cjs`). App: [`EntitlementAssertion.swift`](../Sources/MacCleanerCore/EntitlementAssertion.swift) (claims and policy, portable) and [`AccountEntitlementVerifier.swift`](../Sources/MacCleanerApp/AccountEntitlementVerifier.swift) (CryptoKit).
 
 ## What the app accepts
