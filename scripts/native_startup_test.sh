@@ -97,6 +97,6 @@ ARCH="$(uname -m)"
 xcrun swiftc -swift-version 6 -parse-as-library \
   -sdk "$SDK" -target "$ARCH-apple-macos14.0" \
   "$ROOT/scripts/native_startup_test.swift" \
-  -framework AppKit -framework CoreGraphics -o "$PROBE"
+  -framework AppKit -framework CoreGraphics -framework ImageIO -framework UniformTypeIdentifiers -o "$PROBE"
 : > "$DIAGNOSTICS/native-startup-test-owned-apps.jsonl"
 MACMINT_NATIVE_STARTUP_DIAGNOSTICS="$DIAGNOSTICS" "$PROBE" "$APP" 2>&1 | tee "$DIAGNOSTICS/native-startup-test-output.log"

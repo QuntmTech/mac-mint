@@ -5,6 +5,10 @@ enum AppPaths {
   /// "MacCleanerHybridBase" folder the first time it runs.
   static let supportDirectory: URL = {
     let fm = FileManager.default
+    if let isolated = ResourceProbeSession.supportDirectory {
+      try? fm.createDirectory(at: isolated, withIntermediateDirectories: true)
+      return isolated
+    }
     let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
     let current = base.appendingPathComponent("MacMint", isDirectory: true)
     let legacy = base.appendingPathComponent("MacCleanerHybridBase", isDirectory: true)

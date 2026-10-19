@@ -149,6 +149,7 @@ struct RootView: View {
         showingOnboarding = true
       }
     }
+    .task { await ResourceProbeSession.runIfRequested(model) }
     .task {
       // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and slowly.
       guard !SmokeTest.isRequested else { return }
