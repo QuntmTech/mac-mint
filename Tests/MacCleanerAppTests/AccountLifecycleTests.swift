@@ -458,6 +458,30 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertTrue(corrected.isUnlocked)
   }
 
+  func testStoredEvidenceIsDroppedWhenTheServerStopsVouching() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let signing = SigningFixture(), fixture = AccountFixture(signing: signing), tokens = TestTokens()
+    let evidence = OfflineEntitlementStorage.memory()
+    let client = AccountClient(transport: { try await fixture.respond($0) })
+    func store() -> AccountStore {
+      AccountStore(supportDirectory: folder, client: client, deviceInfo: device, tokenStorage: tokens.storage,
+        entitlementStorage: evidence, verifier: signing.verifier)
+    }
+    let running = store()
+    await running.signIn(email: "fixture@example.invalid", password: "fixture")
+    XCTAssertNotNil(evidence.load())
+    await fixture.stopVouching()
+    await running.refreshAccess(force: true)
+    XCTAssertEqual(running.phase, .active(offline: false), "Online access continues")
+    XCTAssertTrue(running.isUnlocked)
+    XCTAssertNil(evidence.load(), "Earlier evidence must not outlive the server's newer answer")
+    await fixture.goOffline()
+    let restarted = store()
+    await restarted.start()
+    XCTAssertFalse(restarted.isUnlocked)
+  }
+
   func testLegacyServerUnlocksOnlineButLeavesNothingForAnOfflineRestart() async throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: folder) }
@@ -847,6 +871,7 @@ private actor AccountFixture {
   private var cancelSuffix: String?
   private var deactivated = false
   private var graceDays = 14
+  private var vouching = true
   init(signing: SigningFixture? = nil, now: @escaping @Sendable () -> Date = { Date() }) {
     self.signing = signing
     self.now = now
@@ -857,6 +882,9 @@ private actor AccountFixture {
   func cancelNextVerification() { cancelNext("/me") }
   func cancelNext(_ suffix: String) { cancelSuffix = suffix }
   func offlineGrace(days: Int) { graceDays = days }
+  /// The server keeps answering "active" online but stops issuing offline assertions
+  /// (for example a past_due subscription).
+  func stopVouching() { vouching = false }
   /// A Mac that never had a device row (not a removal): background checks may register it.
   func forgetThisMac() { removed = true; deactivated = false }
   /// Removal through the website: the server keeps a tombstone and requires explicit reactivation.
@@ -922,7 +950,7 @@ private actor AccountFixture {
       }
       body = snapshotBody
       let namesThisMac = path.hasSuffix("activate") || request.url?.query?.contains("device_id=native-integration-device") == true
-      if let signing, namesThisMac, planActive, !removed {
+      if let signing, vouching, namesThisMac, planActive, !removed {
         body["entitlement_assertion"] = try signing.assertion(
           user: "fixture", device: "native-integration-device", issuedAt: now(), graceDays: graceDays, forged: forged)
       }

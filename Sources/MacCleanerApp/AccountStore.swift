@@ -343,6 +343,11 @@ final class AccountStore: ObservableObject {
     snapshot = result.withoutAssertion
     let verifiedAt = now()
     cachedAccess = CachedAccess(snapshot: result.withoutAssertion, verifiedAt: verifiedAt)
+    if case .unsigned = evaluation, offlineRecord != nil || signedEntitlement != nil {
+      // The server no longer vouches for offline use (billing trouble, no key, an older
+      // server): stored evidence must not outlive that answer.
+      clearOfflineEvidence()
+    }
     if case .signed(let signed) = evaluation, let token {
       signedEntitlement = signed
       // The server's issue time is the trusted "now": re-anchor, so a Mac whose clock ran ahead

@@ -15,7 +15,7 @@ base64url(canonical JSON payload) "." base64url(64-byte Ed25519 signature over t
  "offline_until":1801209600,"plan":"pro","user_id":"…","v":1}
 ```
 
-Times are integer Unix seconds. `offline_until = issued_at + offline_grace_days`, capped by `expires_at`. `offline_grace_days` comes from the public `app_config` record `client` (`{"offline_grace_days": 14}`; default 14, clamped to 0–60).
+Times are integer Unix seconds. `offline_until = issued_at + offline_grace_days`, capped by `expires_at`.
 
 ### Subscriptions
 
@@ -25,7 +25,7 @@ Server: [`macmint_entitlement.js`](../backend/pocketbase/pb_hooks/macmint_entitl
 
 ## What the app accepts
 
-- Online: the assertion, when present, must verify (signature, known `kid`, `v` 1, user, this Mac, active). A failure is treated as a failed check. No assertion means a legacy server: unlock this run only.
+- Online: the assertion, when present, must verify (signature, known `kid`, `v` 1, user, this Mac, active). A failure is treated as a failed check. No assertion (a legacy server, no key, or billing trouble) unlocks this run only and discards any stored offline evidence, so earlier evidence never outlives the server's newer answer.
 - Offline or after a restart: a verified assertion from the Keychain with `now < offline_until`, before `expires_at`, and `now` no earlier than five minutes before the latest time this Mac has seen (the high-water mark, kept in the same Keychain item and never earlier than `issued_at`). Every verified online assertion re-anchors the mark to its server `issued_at`, so a Mac whose clock ran ahead isn't locked out once the clock is corrected; later checks advance it again.
 - Quiet foreground checks (at most every 15 minutes while access is valid and online; every activation while offline) keep valid access through 404/408/425/429/5xx, TLS and verification failures. A quiet network failure switches to offline, so the signed `offline_until` window, not the running app's last online check, decides from then on. An expired session (401) or a definitive answer (no active plan, this Mac removed) removes access. Launch and explicit retries fall back to valid offline evidence for transient failures, never for TLS or verification failures. Cancellation changes nothing about the account; an interrupted launch or retry settles on valid offline evidence or a Try Again panel.
 
