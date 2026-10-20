@@ -66,13 +66,21 @@ routerAdd("POST", "/api/macmint/stripe/webhook", e => {
     catch (_) { return e.json(503, { error: "reversal_pending" }) }
     return e.json(200, { received: true })
   }
-  if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed",
+  if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed", "customer.subscription.trial_will_end",
     "invoice.paid", "invoice.payment_failed", "invoice.payment_action_required", "invoice.finalization_failed", "invoice.voided", "invoice.marked_uncollectible"].indexOf(event.type) >= 0) {
     try { require(`${__hooks}/macmint_billing.js`).event(e.app, event.type, event.data && event.data.object) }
     catch (_) { return e.json(503, { error: "billing_sync_pending" }) }
     return e.json(200, { received: true })
   }
   const session = event.data && event.data.object
+  // Plan-page Payment Link purchases: only configured links are recorded; others are acknowledged.
+  if (session && session.payment_link && event.type.startsWith("checkout.session.")) {
+    if (["checkout.session.completed", "checkout.session.async_payment_succeeded"].indexOf(event.type) >= 0) {
+      try { require(`${__hooks}/macmint_funnel.js`).recordSession(e.app, session) }
+      catch (_) { return e.json(503, { error: "fulfillment_pending" }) }
+    }
+    return e.json(200, { received: true })
+  }
   if (!session || !session.metadata || !session.metadata.macmint_order) return e.json(200, { received: true })
   if (["checkout.session.expired", "checkout.session.async_payment_failed"].indexOf(event.type) >= 0) {
     try { payments.recordTerminalSession(e.app, session, event.type === "checkout.session.expired" ? "expired" : "failed") }
