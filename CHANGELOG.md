@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.10.0 — 2026-10-20
+- **Free 7-day trial with device plans:**
+  - Every "get MacMint" button opens one plan page: 1, 2 or 5 Macs ($39.95, $59.95 or $99.95 a year), $0 today.
+  - Stripe checkout comes next, then a "create your password" step and a download page.
+- **One-click updates:** Settings → Updates → **Check for Updates…** installs and relaunches through Sparkle, and updates are signed. An optional developer channel delivers every new build.
+- **Lighter app:**
+  - The memory peak after a large storage map dropped from ~150 MB to ~60 MB.
+  - It stops sampling while hidden, and the Performance screen does less work.
+  - Caches are released in the background and under memory pressure.
+  - CI now enforces CPU and memory budgets.
+- **Safer cleanup:**
+  - Excluded apps no longer make their data look orphaned, and caches of running apps are skipped.
+  - MacMint proves what reached the Trash.
+  - New removals wait for recovery checks, and a damaged History can be reset with a backup.
+- **Reliability:**
+  - One main window, and review preparation can be cancelled.
+  - It asks before quitting during a move.
+  - AI answers survive navigation, and Photos-library items appear in Review.
+- **Accounts:**
+  - Offline access uses a server-signed pass tied to this Mac.
+  - Temporary server errors no longer lock out paying users.
+  - Refunds and disputes end access.
+- **For testers:** `scripts/install_dev_build.sh` installs any CI-tested build in about a minute.
+
 ## 0.9.0 — 2026-10-16
 - **AI (opt-in, off by default, with consent):**
   - **Explain** any cache, app-data folder, background agent, or developer tool.
