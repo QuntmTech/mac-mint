@@ -4,13 +4,45 @@
   "web_origin": "https://macmint.co",
   "billing_mode": "subscription",
   "price_id": "",
-  "amount_minor": 3999,
+  "amount_minor": 3995,
   "currency": "usd",
   "plan": "pro",
   "duration_days": 0,
   "billing_interval": "year",
   "billing_interval_count": 1,
-  "trial_days": 3,
-  "max_devices": 3,
-  "portal_configuration_id": ""
+  "trial_days": 7,
+  "max_devices": 1,
+  "portal_configuration_id": "",
+  "tiers": [
+    {
+      "tier": "mac1",
+      "devices": 1,
+      "payment_link_id": "",
+      "url": "",
+      "price_id": "",
+      "amount_minor": 3995,
+      "currency": "usd",
+      "trial_days": 7
+    },
+    {
+      "tier": "mac2",
+      "devices": 2,
+      "payment_link_id": "",
+      "url": "",
+      "price_id": "",
+      "amount_minor": 5995,
+      "currency": "usd",
+      "trial_days": 7
+    },
+    {
+      "tier": "mac5",
+      "devices": 5,
+      "payment_link_id": "",
+      "url": "",
+      "price_id": "",
+      "amount_minor": 9995,
+      "currency": "usd",
+      "trial_days": 7
+    }
+  ]
 }
