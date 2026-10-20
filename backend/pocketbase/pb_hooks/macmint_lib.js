@@ -186,7 +186,18 @@ function mePayload(app, user) {
   }
 }
 
+// Lowercases a new or changed account email and refuses case variants of another account's
+// address. Unchanged addresses (including legacy mixed-case ones) are left alone.
+function uniqueEmail(e, original) {
+  const email = String(e.record.get("email") || "").trim().toLowerCase()
+  if (!email || (original !== undefined && email === String(original || "").trim().toLowerCase())) return
+  e.record.set("email", email)
+  const others = e.app.findRecordsByFilter("users", "email:lower = {:e} && id != {:id}", "", 1, 0, { e: email, id: e.record.id || "" }) || []
+  if (others.length) throw new BadRequestError("An account with this email already exists.")
+}
+
 module.exports = {
+  uniqueEmail: uniqueEmail,
   activateDevice: activateDevice,
   DEFAULT_MAX_DEVICES: DEFAULT_MAX_DEVICES,
   body: body,

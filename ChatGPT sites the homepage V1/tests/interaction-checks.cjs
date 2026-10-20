@@ -17,9 +17,13 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  ok(home.root.findAllByType('h1').length===1,'One semantic h1');
  ok(home.root.findAllByType('details').length>=10,'FAQ and disclosure markup exists');
  const menu=home.root.findAllByType('button').find(n=>n.props['aria-controls']==='mobile-nav');await click(menu);ok(menu.props['aria-expanded']===true,'Mobile menu opens');await act(async()=>listeners.keydown({key:'Escape'}));ok(menu.props['aria-expanded']===false,'Mobile menu closes on Escape');
- await click(button(home,'Check availability'));ok(home.root.findAllByType('dialog').length===1,'CTA opens availability dialog');ok(text(home.toJSON()).includes('isn’t linked here yet'),'No fake download claim');await click(home.root.findAllByType('button').find(n=>n.props['aria-label']==='Close dialog'));
+ const starts=home.root.findAllByType('a').filter(n=>n.props.href==='/start');
+ ok(starts.length===4&&!button(home,'Check availability'),'Nav, hero, final and footer CTAs all open the plan page');
+ ok(starts.filter(n=>text(n).includes('Start free trial')).length>=3,'Primary CTAs say Start free trial');
+ ok(!text(home.toJSON()).includes('No installer linked yet'),'Obsolete no-installer note is gone');
+ await click(home.root.findAllByType('button').find(n=>text(n)==='Privacy notes'));ok(home.root.findAllByType('dialog').length===1,'Privacy dialog still opens');await click(home.root.findAllByType('button').find(n=>n.props['aria-label']==='Close dialog'));
 
- ok(text(home.toJSON()).includes('In development · No installer linked yet.'),'Release state is disclosed beside CTAs');
+ ok(text(home.toJSON()).includes('7-day free trial · Cancel anytime'),'Trial terms are disclosed beside CTAs');
  const workflowTabs=home.root.findAllByType('button').filter(n=>n.props.id?.startsWith('step-tab-'));
  let prevented=false;await act(async()=>workflowTabs[0].props.onKeyDown({key:'ArrowRight',preventDefault(){prevented=true}}));
  ok(prevented&&workflowTabs[1].props['aria-selected']===true,'Workflow supports keyboard arrow navigation');
@@ -40,8 +44,7 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  global.setInterval=callback=>{const id=++intervalID;intervals.set(id,callback);return id;};
  global.clearInterval=id=>intervals.delete(id);
  async function finishScan(){await act(async()=>{for(let tick=0;tick<20;tick++){fakeNow+=120;for(const callback of [...intervals.values()])callback();}});}
- let availabilityClicks=0;
- const prod=await mount(ProductDemo,{onAvailability:()=>availabilityClicks++});
+ const prod=await mount(ProductDemo,{startUrl:'/start'});
  ok(prod.root.findAll(n=>n.props.className==='cleanup-row').length===0,'Demo starts with a clear scan action, not fabricated completed results');
  await click(button(prod,'Run Quick Scan'));ok(text(prod.toJSON()).includes('Scanning…'),'Scan starts');
  await click(button(prod,'Cancel'));ok(text(prod.toJSON()).includes('Demo scan cancelled')&&intervals.size===0,'Scan cancels and releases its timer');
@@ -73,13 +76,13 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  ok(text(prod.toJSON()).includes('6.4 GB selected')&&text(prod.toJSON()).includes('Staying put: device backups'),'Final review is editable and explains what is kept');
  await click(button(prod,'Move to demo Trash'));
  ok(text(prod.toJSON()).includes('6.4 GB')&&text(prod.toJSON()).includes('Free space hasn’t changed yet'),'Cleanup explains Trash separately from reclaimed space');
- ok(availabilityClicks===0,'Availability is never opened automatically');
+ ok(!prod.root.findAllByType('a').some(n=>n.props.href==='/start'),'The plan link appears only after a restore');
  await click(button(prod,'View receipt'));
  ok(text(prod.toJSON()).includes('6.4 GB moved to demo Trash'),'Demo history records cleanup');
  await act(async()=>picker.props.onChange({target:{value:'overview'}}));
  await click(button(prod,'Restore these files'));
  ok(text(prod.toJSON()).includes('Back where they started.'),'Files can be restored from the success view');
- await click(button(prod,'Check availability'));ok(availabilityClicks===1,'The next step runs only after an explicit availability click');
+ ok(prod.root.findAllByType('a').find(n=>text(n).includes('Start free trial')).props.href==='/start','The restored demo offers the plan page');
  await click(button(prod,'View receipt'));
  ok(text(prod.toJSON()).includes('Restored')&&!button(prod,'Restore files'),'Restored receipts cannot be restored twice');
  await act(async()=>picker.props.onChange({target:{value:'cleaner'}}));
@@ -105,5 +108,5 @@ async function click(b){assert.ok(b,'Button exists');await act(async()=>b.props.
  const large=await mount(LargeFilesDemo);const select=large.root.findByType('select');await act(async()=>select.props.onChange({target:{value:'5'}}));ok(large.root.findAll(n=>n.props.className==='file-row').length===1,'5 GB threshold filters files');await click(large.root.findAllByType('button').find(n=>n.props['aria-label']==='Review Weekend-film.mov'));ok(text(large.toJSON()).includes('This only changes the example'),'Large file removal requires review');await click(button(large,'Move to demo Trash'));ok(text(large.toJSON()).includes('No example files match'),'Reviewed file is removed from example');
  const uninstall=await mount(UninstallerDemo);await click(button(uninstall,'Orbit Notes'));ok(text(uninstall.toJSON()).includes('0.98 GB'),'Uninstaller total follows app and selected related files');await click(button(uninstall,'Review uninstall'));await click(button(uninstall,'Confirm demo uninstall'));ok(text(uninstall.toJSON()).includes('Example app moved to Trash'),'Uninstaller confirmation works');
  for(const t of [home,prod,dup,large,uninstall])await act(async()=>t.unmount());
- console.log(`PASS: ${passed} checks covering navigation, scan lifecycle, editable review, Trash receipts, restore, explicit availability, reset, duplicate keeper safety, file filters and uninstall.`);
+ console.log(`PASS: ${passed} checks covering navigation, scan lifecycle, editable review, Trash receipts, restore, plan-page CTAs, reset, duplicate keeper safety, file filters and uninstall.`);
 })().catch(e=>{console.error(e);process.exit(1)});

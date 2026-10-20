@@ -43,7 +43,29 @@ function validConfiguration(cfg, nowMillis = Date.now()) {
     cfg.duration_days * 86400000 + nowMillis <= 8640000000000000 &&
     Number.isSafeInteger(cfg.max_devices) && cfg.max_devices >= 1 && cfg.max_devices <= 100 &&
     typeof cfg.livemode === "boolean" && typeof cfg.enabled === "boolean" &&
-    validBillingTerms(cfg) && webOrigin(cfg.web_origin, cfg.livemode) !== null)
+    validBillingTerms(cfg) && validTiers(cfg) && webOrigin(cfg.web_origin, cfg.livemode) !== null)
+}
+// Plan-page tiers sold through Stripe Payment Links. Each tier freezes the Price, amount,
+// currency, device allowance and trial that a completed link session must match exactly.
+// Only Stripe-hosted link URLs of the configured mode are accepted (no custom domains).
+const TIER_FIELDS = ["tier", "devices", "payment_link_id", "url", "price_id"]
+function validTier(cfg, tier) {
+  return !!(tier && typeof tier === "object" && !Array.isArray(tier) &&
+    typeof tier.tier === "string" && /^[a-z0-9][a-z0-9_-]{0,31}$/.test(tier.tier) &&
+    Number.isSafeInteger(tier.devices) && tier.devices >= 1 && tier.devices <= 100 &&
+    typeof tier.payment_link_id === "string" && /^plink_[A-Za-z0-9]+$/.test(tier.payment_link_id) &&
+    typeof tier.url === "string" && (cfg.livemode ? /^https:\/\/buy\.stripe\.com\/(?!test_)[A-Za-z0-9]{6,200}$/ : /^https:\/\/buy\.stripe\.com\/test_[A-Za-z0-9]{6,200}$/).test(tier.url) &&
+    typeof tier.price_id === "string" && /^price_[A-Za-z0-9]+$/.test(tier.price_id) &&
+    Number.isSafeInteger(tier.amount_minor) && tier.amount_minor > 0 && tier.amount_minor <= 99999999 &&
+    typeof tier.currency === "string" && /^[a-z]{3}$/.test(tier.currency) &&
+    Number.isSafeInteger(tier.trial_days) && tier.trial_days >= 0 && tier.trial_days <= 30 &&
+    (tier.billing_interval === undefined || ["month", "year"].indexOf(tier.billing_interval) >= 0))
+}
+function validTiers(cfg) {
+  if (cfg.tiers === undefined) return true
+  if (billingMode(cfg) !== "subscription" || !Array.isArray(cfg.tiers) || cfg.tiers.length < 1 || cfg.tiers.length > 6) return false
+  if (!cfg.tiers.every(tier => validTier(cfg, tier))) return false
+  return TIER_FIELDS.every(field => new Set(cfg.tiers.map(tier => String(tier[field]))).size === cfg.tiers.length)
 }
 function billingMode(value) { return value.billing_mode || "payment" }
 function validBillingTerms(cfg) {
@@ -214,16 +236,28 @@ function checkoutURL(session, order, user) {
       !/^https:\/\/checkout\.stripe\.com\//.test(session.url || "")) throw Error("Checkout could not be opened.")
   return session.url
 }
+// MacMint sessions carry their order in metadata (signed-in checkout) or come from a
+// configured Payment Link (plan page); the caller checks which link and order it binds.
 function authoritativeSession(app, session) {
   if (!session || !/^cs_[A-Za-z0-9_]+$/.test(session.id || "")) throw Error("Invalid session")
   const full = new StripeClient(app).send("GET", "checkout/sessions/" + session.id + "?expand%5B%5D=line_items")
-  if (!full || full.id !== session.id || !full.metadata || !full.metadata.macmint_order) throw Error("Invalid session response")
+  if (!full || full.id !== session.id || !(full.metadata && full.metadata.macmint_order) && !paymentLink(full)) throw Error("Invalid session response")
   return full
+}
+function paymentLink(full) {
+  const link = full && full.payment_link
+  return typeof link === "string" ? link : link && typeof link === "object" ? link.id || "" : ""
+}
+// Payment Link orders are created from a verified session, so they bind by link and
+// session ID; signed-in orders bind by the client_reference_id they were created with.
+function sessionOwner(order, full) {
+  const link = order.get("payment_link_id")
+  return link ? paymentLink(full) === link && full.id === order.get("session_id") : full.client_reference_id === order.get("user")
 }
 function verifyOrderSession(order, full) {
   const lines = full.line_items && full.line_items.data
   const total = order.get("billing_mode") === "subscription" && order.get("trial_days") > 0 ? 0 : order.get("amount_minor")
-  if (full.mode !== (order.get("billing_mode") || "payment") || full.client_reference_id !== order.get("user") || full.amount_total !== total ||
+  if (full.mode !== (order.get("billing_mode") || "payment") || !sessionOwner(order, full) || full.amount_total !== total ||
       full.currency !== order.get("currency") || full.livemode !== order.get("livemode") || !lines || lines.length !== 1 ||
       full.line_items.has_more || lines[0].quantity !== 1 || !lines[0].price || lines[0].price.id !== order.get("price_id") ||
       (order.get("session_id") && order.get("session_id") !== full.id)) throw Error("Order mismatch")
@@ -561,7 +595,7 @@ function reconcileOrder(app, ref) {
   }
   if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) throw { code: "bad_request" }
   const full = authoritativeSession(app, { id: sessionId })
-  if (full.metadata.macmint_order !== order.id) throw { code: "session_mismatch" }
+  if (order.get("payment_link_id") ? full.id !== order.get("session_id") : full.metadata.macmint_order !== order.id) throw { code: "session_mismatch" }
   if (full.mode === "subscription") {
     if (full.subscription) require(`${__hooks}/macmint_billing.js`).fulfill(app, full)
     else if (full.status === "expired") applyTerminal(app, full, "expired")
@@ -589,5 +623,5 @@ function publishableRelease(record) {
   return !record.get("published") || (!!record.get("validated") && !!record.get("notarized") &&
     /^[a-f0-9]{64}$/.test(String(record.get("sha256"))) && trustedDownloadURL(String(record.get("download_url"))))
 }
-module.exports = { StripeClient, secret, configuration, validConfiguration, publicOffer, offerForUser, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession, authoritativeSession, verifyOrderSession,
+module.exports = { StripeClient, secret, configuration, validConfiguration, validTiers, paymentLink, publicOffer, offerForUser, readiness, webOrigin, validRequestKey, checkoutStatus, verifySignature, orderForRequest, checkout, fulfill, recordTerminalSession, authoritativeSession, verifyOrderSession,
   reverse, applyReversal, applySubscriptionReversal, releaseSubscriptionHold, recomputeEntitlement, revokeLicense, reconcileOrder, trustedDownloadURL, publishableRelease }

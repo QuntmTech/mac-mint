@@ -35,8 +35,11 @@ const webhook = process.env.STRIPE_WEBHOOK_SECRET || ''
 const keyPrefix = mode ? `rk_${mode}_` : ''
 const keyMatches = !!keyPrefix && key.startsWith(keyPrefix) && key.length > keyPrefix.length && key.trim() === key
 const webhookPresent = webhook.startsWith('whsec_') && webhook.length > 6 && webhook.trim() === webhook
+const tiered = config && typeof config === 'object' && config.tiers !== undefined
 const checks = [
   { id: 'commerce_config', passed: valid },
+  // Plan-page tiers are part of the configuration: any invalid tier blocks the whole offer.
+  ...(tiered ? [{ id: 'payment_link_tiers', passed: valid && Array.isArray(config.tiers) }] : []),
   { id: 'commerce_enabled', passed: config?.enabled === true },
   { id: 'restricted_key_matches_mode', passed: keyMatches },
   { id: 'webhook_secret_present', passed: webhookPresent },
@@ -51,6 +54,7 @@ console.log(JSON.stringify({
     'intended_stripe_account_and_sandbox',
     config?.billing_mode === 'subscription' ? 'stripe_recurring_price_amount_currency_interval_and_trial' : 'stripe_price_amount_currency_and_one_time_type',
     ...(config?.billing_mode === 'subscription' ? ['owner_bound_portal_and_period_end_cancellation', 'trial_conversion_renewal_failure_and_recovery'] : []),
+    ...(tiered ? ['payment_link_trial_card_redirect_and_quantity_settings', 'welcome_claim_and_download_journey'] : []),
     'restricted_key_permissions',
     'registered_webhook_delivery_and_signature',
     'validated_notarized_stable_release',

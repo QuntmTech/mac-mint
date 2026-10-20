@@ -20,9 +20,9 @@ const defaultSelection = cleanupRows.filter(row => row.risk === "safe").map(row 
 const initialExclusions = ["~/Projects/Keep"];
 const scanChecks = ["Application caches", "Browser caches", "Developer caches", "Application logs", "Device backups"];
 type Receipt = { id: number; items: string[]; restored: boolean };
-type DemoProps = { module?: string; onModuleChange?: (module: string) => void; onAvailability?: () => void };
+type DemoProps = { module?: string; onModuleChange?: (module: string) => void; startUrl?: string };
 
-export function ProductDemo({ module, onModuleChange, onAvailability }: DemoProps = {}) {
+export function ProductDemo({ module, onModuleChange, startUrl }: DemoProps = {}) {
   const [localTab, setLocalTab] = useState("overview");
   const tab = module ?? localTab;
   const [progress, setProgress] = useState<number | null>(null);
@@ -178,7 +178,7 @@ export function ProductDemo({ module, onModuleChange, onAvailability }: DemoProp
             <div className="demo-receipt"><div><strong>{receiptTotal.toFixed(1)} <small>GB</small></strong><span>{receipt.restored ? "restored in this demo" : "moved to demo Trash"}</span></div><span className={`badge ${receipt.restored ? "safe" : "neutral"}`}>{receiptRows.length} categories · {receipt.restored ? "Restored" : "Restorable"}</span></div>
             <p className="demo-kept"><ShieldCheck size={15} /><span>{!receipt.items.includes("backups") ? "Your device backups stayed untouched." : "Your device backups were included because you selected them."} Nothing on your Mac was changed.</span></p>
             {!receipt.restored && <p className="demo-space-note">Free space hasn’t changed yet. In macOS, emptying Trash is a separate step.</p>}
-            <div className="demo-outcome-actions">{receipt.restored ? onAvailability && <button className="mini-button green" onClick={onAvailability}>Check availability <ArrowRight size={15} /></button> : <button className="mini-button green" onClick={() => restore(receipt.id)}><RotateCcw size={15} /> Restore these files</button>}<button className="plain-button" onClick={() => setTab("history")}><History size={14} /> View receipt</button></div>
+            <div className="demo-outcome-actions">{receipt.restored ? startUrl && <a className="mini-button green" href={startUrl}>Start free trial <ArrowRight size={15} /></a> : <button className="mini-button green" onClick={() => restore(receipt.id)}><RotateCcw size={15} /> Restore these files</button>}<button className="plain-button" onClick={() => setTab("history")}><History size={14} /> View receipt</button></div>
             {receipt.restored && <div className="demo-next"><p>See what else MacMint can help you inspect.</p><div><button onClick={() => setTab("apps")}><LayoutGrid size={16} /> App leftovers <ArrowRight size={13} /></button><button onClick={() => setTab("duplicates")}><Copy size={16} /> Exact duplicates <ArrowRight size={13} /></button></div></div>}
             <button className="plain-button demo-return" onClick={() => { setOutcome(null); setScanned(true); }}>Back to results <ArrowRight size={13} /></button>
             <button className="plain-button demo-reset" onClick={reset}><RotateCcw size={13} /> Reset demo</button>

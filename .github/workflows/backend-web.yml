@@ -32,6 +32,8 @@ jobs:
         run: python3 backend/tests/service_integration.py
       - name: Recurring subscription and billing portal integration checks
         run: python3 backend/tests/subscriptions_integration.py
+      - name: Plan page, payment link claim and download integration checks
+        run: python3 backend/tests/funnel_integration.py
   website:
     runs-on: ubuntu-latest
     steps:

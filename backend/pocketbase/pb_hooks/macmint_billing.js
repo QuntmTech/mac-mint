@@ -43,9 +43,16 @@ function access(app, userId) {
 function known(app, subscriptionId) {
   return (app.findRecordsByFilter("billing_subscriptions", "subscription_id = {:s}", "", 1, 0, { s: subscriptionId }) || [])[0] || null
 }
+// Plan-page Payment Link sessions have no order metadata; their order is created from the
+// verified session and found by session ID. Signed-in sessions name their order.
+function orderForSession(app, full) {
+  if (payments().paymentLink(full)) return app.findFirstRecordByFilter("checkout_orders", "session_id = {:s} && payment_link_id != ''", { s: full.id })
+  return app.findRecordById("checkout_orders", full.metadata.macmint_order)
+}
 function verifyBinding(order, full, subscriptionId) {
   payments().verifyOrderSession(order, full)
-  if (!full.metadata || full.metadata.macmint_order !== order.id || full.mode !== "subscription" || full.status !== "complete" || id(full.subscription) !== subscriptionId ||
+  const named = order.get("payment_link_id") ? payments().paymentLink(full) === order.get("payment_link_id") : !!full.metadata && full.metadata.macmint_order === order.id
+  if (!named || full.mode !== "subscription" || full.status !== "complete" || id(full.subscription) !== subscriptionId ||
       !/^cus_[A-Za-z0-9_]+$/.test(id(full.customer) || "") ||
       (order.get("customer_id") && order.get("customer_id") !== id(full.customer)) ||
       (order.get("subscription_id") && order.get("subscription_id") !== subscriptionId)) throw Error("Subscription checkout mismatch")
@@ -53,7 +60,7 @@ function verifyBinding(order, full, subscriptionId) {
 function bind(app, full, subscriptionId) {
   let row
   app.runInTransaction(tx => {
-    const order = tx.findRecordById("checkout_orders", full.metadata.macmint_order)
+    const order = orderForSession(tx, full)
     verifyBinding(order, full, subscriptionId)
     row = known(tx, subscriptionId)
     if (row) {
@@ -66,6 +73,11 @@ function bind(app, full, subscriptionId) {
     row = new Record(tx.findCollectionByNameOrId("billing_subscriptions"))
     for (const [key, value] of Object.entries({ user: order.get("user"), order: order.id,
       subscription_id: subscriptionId, customer_id: id(full.customer), livemode: order.get("livemode"), status: "incomplete", terminal: false, sync_generation: 0 })) row.set(key, value)
+    // A second plan-page trial for an account or billing email binds held: no access until
+    // an operator reviews it in Stripe and releases the hold.
+    if (order.get("attention") === "duplicate_trial") {
+      row.set("access_hold", "duplicate_trial"); row.set("held_at", new Date().toISOString()); row.set("hold_reference", full.id)
+    }
     tx.save(row)
     if (order.get("trial_days") > 0) {
       const entitlement = require(`${__hooks}/macmint_lib.js`).ensureEntitlement(tx, order.get("user"))
@@ -87,8 +99,13 @@ function resolve(app, subscriptionId, suppliedSession) {
     const list = new (payments().StripeClient)(app).send("GET", "checkout/sessions?subscription=" + encodeURIComponent(subscriptionId) + "&limit=2")
     if (!list || !Array.isArray(list.data) || list.has_more || list.data.length > 1) throw Error("Ambiguous subscription checkout")
     if (!list.data.length) return null
-    if (!list.data[0].metadata || !list.data[0].metadata.macmint_order) return null
-    full = payments().authoritativeSession(app, list.data[0])
+    const listed = list.data[0]
+    if (!listed.metadata || !listed.metadata.macmint_order) {
+      // An unclaimed plan-page purchase has no order yet; its claim binds and syncs it.
+      if (!payments().paymentLink(listed)) return null
+      if (!(app.findRecordsByFilter("checkout_orders", "session_id = {:s} && payment_link_id != ''", "", 1, 0, { s: listed.id }) || []).length) return null
+    }
+    full = payments().authoritativeSession(app, listed)
   }
   return bind(app, full, subscriptionId)
 }
@@ -190,7 +207,8 @@ function summary(app, userId) {
   return { subscription: { status: row.get("status"), paid_through: row.get("paid_through") || null,
     trial_through: row.get("trial_through") || null,
     current_period_end: row.get("current_period_end") || null, cancel_at_period_end: row.get("cancel_at_period_end") === true,
-    cancel_at: row.get("cancel_at") || null, access_held: !!String(row.get("access_hold") || ""), ...payments().publicOffer({ billing_mode: "subscription",
+    cancel_at: row.get("cancel_at") || null, access_held: !!String(row.get("access_hold") || ""),
+    hold_reason: String(row.get("access_hold") || "") === "duplicate_trial" ? "duplicate_trial" : null, ...payments().publicOffer({ billing_mode: "subscription",
       billing_interval: order.get("billing_interval"), billing_interval_count: order.get("billing_interval_count"),
       trial_days: order.get("trial_days") || 0,
       amount_minor: order.get("amount_minor"), currency: order.get("currency"), plan: "pro", duration_days: 0, max_devices: order.get("max_devices") }) } }

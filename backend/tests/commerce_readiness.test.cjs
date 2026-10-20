@@ -88,17 +88,26 @@ test('unsafe return origins fail preflight and live checkout rejects HTTP loopba
 
 test('approved recurring template remains closed until provider bindings and acceptance are complete', t => {
   const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../commerce.subscription.example.json'), 'utf8'))
-  assert.equal(config.amount_minor, 3999)
-  assert.equal(config.trial_days, 3)
+  assert.equal(config.amount_minor, 3995)
+  assert.equal(config.trial_days, 7)
   assert.equal(config.billing_interval, 'year')
-  assert.equal(config.max_devices, 3)
+  assert.equal(config.max_devices, 1)
   assert.equal(config.enabled, false)
   assert.equal(run(t, config).status, 2)
-  const result = run(t, { ...config, enabled: true, price_id: 'price_fixture', portal_configuration_id: 'bpc_fixture' },
+  const unboundTiers = run(t, { ...config, enabled: true, price_id: 'price_fixture', portal_configuration_id: 'bpc_fixture' },
+    { STRIPE_RESTRICTED_KEY: canaryKey, STRIPE_WEBHOOK_SECRET: canaryWebhook })
+  assert.equal(unboundTiers.status, 2, 'Blank Payment Link bindings keep the whole offer blocked')
+  assert.equal(JSON.parse(unboundTiers.stdout).checks.find(check => check.id === 'payment_link_tiers').passed, false)
+  const tiers = config.tiers.map((tier, index) => ({ ...tier, payment_link_id: 'plink_fixture' + index,
+    url: 'https://buy.stripe.com/test_fixture' + index, price_id: 'price_fixture' + index }))
+  const result = run(t, { ...config, enabled: true, price_id: 'price_fixture', portal_configuration_id: 'bpc_fixture', tiers },
     { STRIPE_RESTRICTED_KEY: canaryKey, STRIPE_WEBHOOK_SECRET: canaryWebhook })
   assert.equal(result.status, 0)
+  assert.ok(!result.stdout.includes('buy.stripe.com') && !result.stdout.includes('plink_'), 'Link bindings are never printed')
   const report = JSON.parse(result.stdout)
   assert.equal(report.launch_ready, false)
+  assert.equal(report.checks.find(check => check.id === 'payment_link_tiers').passed, true)
   assert.ok(report.required_verification.includes('stripe_recurring_price_amount_currency_interval_and_trial'))
   assert.ok(report.required_verification.includes('trial_conversion_renewal_failure_and_recovery'))
+  assert.ok(report.required_verification.includes('payment_link_trial_card_redirect_and_quantity_settings'))
 })
