@@ -21,7 +21,7 @@
     "@types/react-dom": "19.2.3",
     "react-test-renderer": "19.2.6",
     "tailwindcss": "4.2.1",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=22.13.0"
