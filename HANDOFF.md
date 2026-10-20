@@ -2,6 +2,10 @@
 
 Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
 
+## Free-trial checkout funnel — 2026-10-20
+
+Every homepage call-to-action now opens `/start`, a plan page for MacMint Pro, Annual (7-day free trial; 1/2/5 Macs at US$39.95/59.95/99.95 per year, from server configuration). "Start free trial" goes to the tier's Stripe Payment Link; the signed webhook records a private purchase claim; `/welcome` creates the account once (or links an existing account for that email) and `/download` serves the validated DMG. This supersedes the earlier US$39.99/three-day/three-Mac offer. Read the funnel section and go-live checklist in [Stripe setup](docs/STRIPE_SETUP.md), `macmint_funnel.js`, `macmint_download.js` and `backend/tests/funnel_integration.py`. Nothing was configured in Stripe or deployed.
+
 ## Latest public-readiness and recurring billing extension — 2026-10-19
 
 Start with [public-readiness review](docs/PUBLIC_READINESS_REVIEW.md) and [Stripe setup](docs/STRIPE_SETUP.md) for this pass (paths are under `docs/` from the repository root). The owner approved **US$39.99/year with a three-day free trial**; the existing three-Mac allowance is retained. Checkout remains disabled until the intended Stripe business account, sandbox lifecycle, email delivery, deployment and signed consumer download pass acceptance.
