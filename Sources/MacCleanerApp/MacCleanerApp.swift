@@ -10,6 +10,7 @@ struct MacCleanerDesktopApp: App {
   @StateObject private var monitor = SystemMonitor()
   @StateObject private var care = CareService()
   @StateObject private var updates = UpdateService()
+  @StateObject private var updater = UpdaterController()
   @StateObject private var appUpdates = AppUpdatesStore()
   @AppStorage(AppAppearance.storageKey) private var appearance: AppAppearance = .system
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
@@ -26,16 +27,26 @@ struct MacCleanerDesktopApp: App {
         .environmentObject(monitor)
         .environmentObject(care)
         .environmentObject(updates)
+        .environmentObject(updater)
         .environmentObject(appUpdates)
         .tint(AppTheme.accent)
         .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth: 980, minHeight: 620)
         .background(MainWindowReader())
-        .onAppear { appDelegate.model = model }
+        .onAppear {
+          appDelegate.model = model
+          appDelegate.updater = updater
+          updater.bind(to: model)
+        }
+        .onChange(of: updates.status) { _, status in
+          // A newer or required version on the server: let Sparkle find it so the banner installs it.
+          if status != .current { updater.probeForUpdate() }
+        }
         .task {
           PreviewCaches.startMemoryPressureHandling()
           monitor.activateControls()
           care.start()
+          updater.onCycleFinished = { [weak updates] in Task { await updates?.check() } }
           updates.start()
           await account.start()
           await account.refreshAIStatus()
@@ -46,6 +57,10 @@ struct MacCleanerDesktopApp: App {
     .commands {
       // One workspace window: every window would share the model's sheets and onboarding.
       CommandGroup(replacing: .newItem) {}
+      CommandGroup(after: .appInfo) {
+        Button("Check for Updates…") { updater.checkForUpdates() }
+          .disabled(!updater.canCheckForUpdates)
+      }
       CommandGroup(replacing: .appSettings) {
         Button("Settings…") { model.selectedSection = .settings }
           .keyboardShortcut(",", modifiers: [.command])
@@ -115,6 +130,7 @@ struct MacCleanerDesktopApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
   weak var model: AppViewModel?
+  weak var updater: UpdaterController?
 
   func applicationWillFinishLaunching(_ notification: Notification) {
     // Window tabs would offer "+" to create another copy of the single workspace.
@@ -123,6 +139,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard let model, model.isWorking else { return .terminateNow }
+    if let gate = updater?.relaunchGate, gate.isRelaunching {
+      // Install and Relaunch was already chosen and waited for earlier work. Work started
+      // since then finishes first; MacMint then quits for the installer without asking again.
+      gate.terminateWhenIdle { NSApp.terminate(nil) }
+      return .terminateCancel
+    }
     let alert = NSAlert()
     alert.alertStyle = .warning
     alert.messageText = "Quit while MacMint is working?"

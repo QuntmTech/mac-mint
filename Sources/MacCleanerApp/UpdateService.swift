@@ -2,10 +2,12 @@ import AppKit
 import Foundation
 import MacCleanerCore
 
-/// Checks the published release feed. Only informs: the download opens in the browser, and
-/// only from an allowlisted first-party HTTPS location (otherwise the account page). Builds
-/// can still be ad-hoc signed prereleases that Gatekeeper does not vouch for, so the
-/// release's published SHA-256 (`ReleaseInfo.expectedSHA256`) is the integrity reference.
+/// Checks the published release feed and the server's minimum supported version. Sparkle
+/// (`UpdaterController`) installs updates; this keeps the "required" gate and, when Sparkle
+/// has nothing to install, a fallback download that opens in the browser from an allowlisted
+/// first-party HTTPS location (otherwise the account page). Builds can still be ad-hoc signed
+/// prereleases that Gatekeeper does not vouch for, so the release's published SHA-256
+/// (`ReleaseInfo.expectedSHA256`) is the integrity reference for that download.
 @MainActor
 final class UpdateService: ObservableObject {
   @Published private(set) var status: UpdateStatus = .current
@@ -18,14 +20,14 @@ final class UpdateService: ObservableObject {
   }
 
   private let checker = ReleaseChecker()
-  private var timer: Timer?
+  private var started = false
 
+  /// Checks once at launch. Later checks follow Sparkle's daily schedule
+  /// (`UpdaterController.onCycleFinished`) and Check for Updates.
   func start() {
-    guard timer == nil else { return }
+    guard !started else { return }
+    started = true
     Task { await check() }
-    timer = Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { [weak self] _ in
-      Task { @MainActor in await self?.check() }
-    }
   }
 
   func check() async {
