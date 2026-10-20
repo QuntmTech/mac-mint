@@ -1,4 +1,4 @@
-/** Consumer download remains unset until a validated, notarized release is available. */
+/** Every purchase call-to-action opens the plan page; the installer is offered after checkout on /download. */
 export const productConfig = {
   name: "MacMint",
   minimumMacOS: "macOS 14+",
@@ -8,5 +8,6 @@ export const productConfig = {
   supportUrl: "mailto:support@macmint.co",
   signInUrl: "/login",
   signUpUrl: "/signup",
+  startUrl: "/start",
   sourceCommit: "095f2e6b11bd7adc571c5d6f79ff1370f582c32f",
 };
