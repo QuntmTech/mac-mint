@@ -71,6 +71,9 @@ final class AccountStore: ObservableObject {
   /// Server kill switch for AI features (app_config `ai`); off until confirmed.
   @Published var aiAvailable = false
   @Published var aiStatus = AIStatus(enabled: false)
+  /// When (and for which session) the AI switch was last read; app activation re-reads it
+  /// only when stale or after the session changed.
+  var lastAIStatusCheck: (date: Date, session: UUID)?
 
   let deviceInfo: DeviceInfo
   let client: AccountClient
@@ -499,6 +502,7 @@ final class AccountStore: ObservableObject {
     snapshot = nil
     aiAvailable = false
     aiStatus = AIStatus(enabled: false)
+    lastAIStatusCheck = nil
     infoMessage = nil
     phase = .signedOut
     errorMessage = message

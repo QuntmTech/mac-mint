@@ -23,3 +23,39 @@ Exercise sorting with unknown and nonfinite CPU values, deterministic ties, case
 Normal native startup checks remain important: isolated rendering did not catch the earlier MenuBarExtra feedback loop. Real app quitting must be checked only with disposable applications; synthetic fixtures and screenshots establish presentation behavior, not that a user's real work can be interrupted safely. Longer Instruments sessions on Intel and Apple silicon remain necessary before making battery or daily-use CPU/RAM claims.
 
 The macOS 26 offscreen images omit the glass-backed sidebar when captured through `cacheDisplay`; geometry checks alone do not verify its pixels. The Performance detail and the macOS 15 sidebar can be inspected in their artifacts. Ordinary macOS 26 sidebar drawing and interaction remain a separate native check; no Screen Recording permission is requested to work around this capture limitation.
+
+## MacMint's own resource budget
+
+A cleaner that costs noticeable CPU or memory contradicts its purpose, so the packaged-app probe (`scripts/native_startup_test.swift`, `MACMINT_RESOURCE_SCENARIOS=1` in macOS CI) measures MacMint itself and fails the build when a budget is exceeded. Readings are `proc_pid_rusage` CPU-time deltas (percent of one core) and `phys_footprint`, the number Activity Monitor shows as Memory.
+
+| Scenario | What runs | Budget |
+|---|---|---|
+| (a) Overview idle | Fresh launch, Overview in front, 30 s | CPU ≤ 0.5% |
+| (b) Live Performance view | Performance in front with ~10 regular apps, 60 s | CPU ≤ 2% |
+| (c) Hidden | Same app hidden on Performance, 30 s | CPU ≤ 0.2%, no monitor samples |
+| (d) Heavy session | Map 80k generated files, scan 300 generated photos, return to Overview, then hide | Overview CPU ≤ 0.5%, hidden CPU ≤ 0.2%, settled footprint ≤ 85 MiB, footprint after 30 s hidden ≤ fresh launch + 35 MiB |
+
+Ordinary hidden launches (menu bar off/on) must stay under 2% after settling, the live view must take at least five samples a minute, and hidden or Overview launches must take none.
+
+Before and after this work, on CI runners (macOS 15 / macOS 26):
+
+| Scenario | Before | After |
+|---|---|---|
+| (a) Overview idle CPU | 0.05% / 0.07% | 0.03% / 0.02% |
+| (b) Live Performance CPU (60 s) | 2.25% / 1.91% | 0.92% / 0.59% |
+| (c) Hidden on Performance CPU | 0.46% / 0.45% (still sampling) | 0.13% / 0.04% (no samples) |
+| (d) Session peak footprint | 152.5 / 159.3 MiB | 62.6 / 68.2 MiB |
+| (d) Settled on Overview | 149.7 / 157.7 MiB | 53.3 / 66.1 MiB |
+| (d) After 30 s hidden | 149.8 / 160.5 MiB | 53.1 / 69.1 MiB |
+
+Why the hidden allowance is 35 MiB rather than 15: after release the compacted map and scan results are about 2-3 MB of a ~30 MB live heap. The rest is runtime and framework state from the screens that were used (Swift metadata, Objective-C method caches, SwiftUI graph), and allocator pages macOS keeps for reuse; macOS 26's allocator keeps about 52 MB dirty for 31 MB live. Returning further would need the scans in a separate process.
+
+Probe launches pass `--resource-probe <temporary folder>`: the app keeps History, exclusions, snapshots and slowdown records in that folder and only reads the generated fixtures. Companion apps (Calculator, Stickies and similar) are launched only on disposable CI runners and only those exact instances are quit. With `MACMINT_PROBE_PROFILE=1` the step also saves `sample`, `heap` and `footprint` output as the `MacMint-Resource-Report` artifact, and the job summary carries the table.
+
+Rules that keep the numbers there:
+
+- Sampling is lease based. Window leases sample only while the workspace is in front (app active, unhidden, a normal window visible and not minimized or covered); the open menu bar popover and Auto Tame keep their own leases. Auto Tame shares the one timer and samples without publishing readings to views.
+- Important-usage free space can make macOS compute purgeable space, so it is read at most once a minute. Disk insights (`diskutil`, `tmutil`) are cached for ten minutes.
+- Per-sample readings live in `SystemMonitor.live`; only the cards, status text and process rows observe them. Rows are equatable display values built once per reading, meters scale a fill instead of measuring with a GeometryReader, and the row menus sit in their own equatable view.
+- Previews, icons and Finder icons are bounded caches. They are released when leaving their screen, when the workspace window closes, after ten seconds hidden or in the background, and on memory-pressure warnings, followed by `malloc_zone_pressure_relief`. Leaving Storage keeps the totals, the visible levels, the trail and every selected item, and drops deeper folders, which are mapped again when opened. Selections, the review queue, History and recovery records are never released.
+- Mapping drains an autorelease pool per folder and keeps nodes without the enumerator's prefetched URL values.

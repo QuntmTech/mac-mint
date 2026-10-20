@@ -6,7 +6,8 @@ import XCTest
 @MainActor
 final class ResourceMonitorTests: XCTestCase {
   func testVisibilityLeasesAreIdempotentAndRespectFastestConsumer() {
-    let monitor = SystemMonitor(), first = UUID(), second = UUID()
+    let monitor = SystemMonitor(activity: AppActivity(center: NotificationCenter(), evaluate: { true }))
+    let first = UUID(), second = UUID()
     monitor.start(lease: first, interval: 20); monitor.start(lease: first, interval: 20)
     XCTAssertEqual(monitor.activeLeaseCount, 1)
     monitor.start(lease: second, interval: 15)

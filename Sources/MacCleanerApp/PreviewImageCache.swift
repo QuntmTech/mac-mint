@@ -67,14 +67,38 @@ actor LocalPreviewDecoder {
 @MainActor
 enum PreviewCaches {
   static let photos = PreviewImageCache(byteLimit: 8 * 1_024 * 1_024, countLimit: 32)
-  private static var pressureSource: DispatchSourceMemoryPressure?
-  static func startMemoryPressureHandling() {
-    guard pressureSource == nil else { return }
-    let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-    source.setEventHandler { @Sendable in MainActor.assumeIsolated { release() } }
-    source.resume(); pressureSource = source
-  }
-  static func release() {
+  /// Memory pressure, closing the window and time in the background all release previews.
+  static func startMemoryPressureHandling() { MemoryRelief.shared.start() }
+  /// Returns whether anything was held.
+  @discardableResult
+  static func release() -> Bool {
+    let held = photos.count + ThumbnailCache.shared.count + PerformanceIconCache.shared.count + FileIcons.count
+      + OwnerDirectory.count > 0
     photos.removeAll(); ThumbnailCache.shared.removeAll(); PerformanceIconCache.shared.removeAll()
+    FileIcons.removeAll(); OwnerDirectory.removeAll()
+    return held
   }
+}
+
+/// Finder icons for list rows. `NSWorkspace.icon(forFile:)` asks Icon Services each time,
+/// and rows call it on every render; this keeps the last 128 paths.
+@MainActor
+enum FileIcons {
+  private static var icons: [String: (image: NSImage, lastUse: UInt64)] = [:]
+  private static var clock: UInt64 = 0
+  static let countLimit = 128
+  static var count: Int { icons.count }
+
+  static func icon(forPath path: String) -> NSImage {
+    clock &+= 1
+    if let hit = icons[path] { icons[path] = (hit.image, clock); return hit.image }
+    let image = NSWorkspace.shared.icon(forFile: path)
+    if icons.count >= countLimit, let oldest = icons.min(by: { $0.value.lastUse < $1.value.lastUse }) {
+      icons.removeValue(forKey: oldest.key)
+    }
+    icons[path] = (image, clock)
+    return image
+  }
+
+  static func removeAll() { icons.removeAll() }
 }

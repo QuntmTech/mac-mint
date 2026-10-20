@@ -157,9 +157,7 @@ struct StorageExplorerView: View {
     "\(node.name), \(ByteFormatter.string(node.allocatedBytes))"
   }
 
-  private func opensFolder(_ node: StorageNode) -> Bool {
-    node.kind == .folder && !node.children.isEmpty
-  }
+  private func opensFolder(_ node: StorageNode) -> Bool { model.canOpenStorageNode(node) }
 
   private func tileFace(_ node: StorageNode, rect: Treemap.Rect, isSelected: Bool, isHovered: Bool)
     -> some View
@@ -250,7 +248,7 @@ struct StorageExplorerView: View {
         Text(ByteFormatter.string(child.allocatedBytes))
           .font(.callout.monospacedDigit())
           .frame(width: 78, alignment: .trailing)
-        if child.kind == .folder && !child.children.isEmpty {
+        if model.canOpenStorageNode(child) {
           Button {
             model.openStorageNode(child)
           } label: {
@@ -271,7 +269,7 @@ struct StorageExplorerView: View {
 
   @ViewBuilder
   private func contextMenu(for node: StorageNode) -> some View {
-    if node.kind == .folder && !node.children.isEmpty {
+    if model.canOpenStorageNode(node) {
       Button("Open") { model.openStorageNode(node) }
     }
     if model.storageRemovalAllowed(node) {

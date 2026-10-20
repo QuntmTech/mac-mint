@@ -13,11 +13,12 @@ enum TamingTargetStatus: Equatable { case current, goneOrChanged, unavailable }
 /// Same-user Darwin background policy, reversible without root. Never uses nice, STOP or RAM limits.
 @MainActor
 struct DarwinTamingBackend: TamingBackend {
-  static var boot: String {
+  /// Fixed for the life of the process; read once rather than per app per sample.
+  static let boot: String = {
     var value = timeval(); var size = MemoryLayout<timeval>.size
     guard sysctlbyname("kern.boottime", &value, &size, nil, 0) == 0 else { return "" }
     return "\(value.tv_sec):\(value.tv_usec)"
-  }
+  }()
   func status(_ identity: TamingIdentity) -> TamingTargetStatus {
     let boot = Self.boot
     guard !boot.isEmpty else { return .unavailable }
@@ -154,7 +155,8 @@ final class AppTamingController {
     policy.reset()
   }
   func tick(apps: [SystemMonitor.AppUsage], systemCPU: Double?, foreground: String?, now: Date) {
-    guard activated else { return }
+    // Off with nothing slowed: no identities to resolve, nothing to restore or evaluate.
+    guard needsMonitoring else { return }
     let identities = apps.compactMap { usage -> (TamingIdentity, SystemMonitor.AppUsage)? in
       guard let id = Self.identity(usage) else { return nil }; return (id, usage)
     }

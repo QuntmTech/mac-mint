@@ -120,6 +120,8 @@ final class AppViewModel: ObservableObject {
   @Published var storagePath: String?
   @Published var storageScannedCount = 0
   @Published var selectedStoragePaths: Set<String> = [] { didSet { queueInputsChanged() } }
+  /// Folders whose deeper levels were released from memory (see `compactStorageMap`).
+  var storagePrunedFolders: Set<String> = []
   @Published var devItems: [DevStorageItem] = [] { didSet { queueInputsChanged() } }
   @Published var selectedDevIDs: Set<String> = [] { didSet { queueInputsChanged() } }
   @Published var photoSource: PhotoSource = .library
@@ -225,6 +227,8 @@ final class AppViewModel: ObservableObject {
       await reconcileInterruptedOrganization()
       recoveryReady = true
     }
+    // Background release keeps selections, the queue, History and recovery state.
+    MemoryRelief.shared.register { [weak self] in self?.compactStorageMap() ?? false }
   }
 
   var selectedCleanupBytes: Int64 {
@@ -678,6 +682,7 @@ final class AppViewModel: ObservableObject {
     operationTitle = nil
     currentTask = nil
     statusMessage = message
+    MemoryRelief.shared.relieveSoon()
   }
 
   func finishCancelledOperation() {

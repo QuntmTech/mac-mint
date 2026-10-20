@@ -13,43 +13,7 @@ struct MenuBarView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      HStack(spacing: 10) {
-        BrandMark(size: 26)
-        VStack(alignment: .leading, spacing: 1) {
-          Text("MacMint").font(.headline)
-          Text(monitorSummary).font(.caption).foregroundStyle(.secondary)
-        }
-        Spacer()
-      }
-
-      VStack(alignment: .leading, spacing: 6) {
-        HStack {
-          Text(model.volumeName).font(.callout.weight(.medium))
-          Spacer()
-          Text("\(ByteFormatter.string(monitor.snapshot.freeBytes)) free")
-            .font(.callout.monospacedDigit())
-            .foregroundStyle(.secondary)
-        }
-        ProgressView(value: monitor.snapshot.diskUsedFraction)
-          .tint(monitor.snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accent)
-      }
-
-      HStack(spacing: 8) {
-        MetricTile(
-          title: "Memory", value: monitor.snapshot.pressure.rawValue,
-          detail: monitor.snapshot.memoryUsedBytes.map {
-            "\(ByteFormatter.string($0)) of \(ByteFormatter.string(monitor.snapshot.physicalMemory))"
-          } ?? "—",
-          tint: pressureColor)
-        MetricTile(
-          title: "CPU",
-          value: monitor.snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "…",
-          detail: "all cores", tint: AppTheme.accentText)
-        MetricTile(
-          title: "Swap",
-          value: monitor.snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
-          detail: "in use", tint: .secondary)
-      }
+      MenuBarReadings(live: monitor.live, volumeName: model.volumeName)
 
       Divider()
 
@@ -80,27 +44,9 @@ struct MenuBarView: View {
     .padding(16)
     .frame(width: 320)
     .background(AppTheme.canvas)
-    .onAppear { monitor.start(lease: monitoringLease, interval: 4) }
+    // The popover samples only while it is open, whether or not a window is in front.
+    .onAppear { monitor.start(lease: monitoringLease, interval: 4, kind: .popover) }
     .onDisappear { monitor.stop(lease: monitoringLease) }
-  }
-
-  private var monitorSummary: String {
-    switch monitor.snapshot.pressure {
-    case .critical: return "Memory is under heavy pressure"
-    case .warning: return "Memory is getting tight"
-    case .unknown: return "Readings are not available yet"
-    case .normal:
-      return monitor.snapshot.diskUsedFraction > 0.9 ? "Disk is almost full" : "Everything looks healthy"
-    }
-  }
-
-  private var pressureColor: Color {
-    switch monitor.snapshot.pressure {
-    case .normal: return AppTheme.accentText
-    case .warning: return AppTheme.warning
-    case .critical: return AppTheme.danger
-    case .unknown: return .secondary
-    }
   }
 
   private func open(_ section: AppViewModel.Section?) {
@@ -109,6 +55,73 @@ struct MenuBarView: View {
     if !MainWindow.focusExisting() { openWindow(id: "main") }
     NSApp.activate(ignoringOtherApps: true)
   }
+}
+
+/// The popover's live readings; only this part re-renders when a sample arrives.
+private struct MenuBarReadings: View {
+  @ObservedObject var live: SystemMonitor.LiveReadings
+  let volumeName: String
+  private var snapshot: SystemMonitor.Snapshot { live.reading.snapshot }
+
+  var body: some View {
+    HStack(spacing: 10) {
+      BrandMark(size: 26)
+      VStack(alignment: .leading, spacing: 1) {
+        Text("MacMint").font(.headline)
+        Text(monitorSummary).font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer()
+    }
+
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text(volumeName).font(.callout.weight(.medium))
+        Spacer()
+        Text("\(ByteFormatter.string(snapshot.freeBytes)) free")
+          .font(.callout.monospacedDigit())
+          .foregroundStyle(.secondary)
+      }
+      ProgressView(value: snapshot.diskUsedFraction)
+        .tint(snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accent)
+    }
+
+    HStack(spacing: 8) {
+      MetricTile(
+        title: "Memory", value: snapshot.pressure.rawValue,
+        detail: snapshot.memoryUsedBytes.map {
+          "\(ByteFormatter.string($0)) of \(ByteFormatter.string(snapshot.physicalMemory))"
+        } ?? "—",
+        tint: pressureColor)
+      MetricTile(
+        title: "CPU",
+        value: snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "…",
+        detail: "all cores", tint: AppTheme.accentText)
+      MetricTile(
+        title: "Swap",
+        value: snapshot.swapUsedBytes.map { ByteFormatter.string($0) } ?? "—",
+        detail: "in use", tint: .secondary)
+    }
+  }
+
+  private var monitorSummary: String {
+    switch snapshot.pressure {
+    case .critical: return "Memory is under heavy pressure"
+    case .warning: return "Memory is getting tight"
+    case .unknown: return "Readings are not available yet"
+    case .normal:
+      return snapshot.diskUsedFraction > 0.9 ? "Disk is almost full" : "Everything looks healthy"
+    }
+  }
+
+  private var pressureColor: Color {
+    switch snapshot.pressure {
+    case .normal: return AppTheme.accentText
+    case .warning: return AppTheme.warning
+    case .critical: return AppTheme.danger
+    case .unknown: return .secondary
+    }
+  }
+
 }
 
 struct MetricTile: View {

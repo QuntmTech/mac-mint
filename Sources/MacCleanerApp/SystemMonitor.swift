@@ -4,6 +4,9 @@ import Foundation
 import MacCleanerCore
 
 /// Views own idempotent leases; a serial utility sampler performs kernel/filesystem work.
+/// Window leases pause while the workspace isn't in front (hidden, inactive, minimized or
+/// covered); the menu bar popover and Auto Tame keep theirs. Per-sample readings live in
+/// `live`, so only views that display them re-render when a sample arrives.
 @MainActor
 final class SystemMonitor: ObservableObject {
   enum Pressure: String, Sendable { case normal = "Normal", warning = "Elevated", critical = "High", unknown = "Unavailable" }
@@ -27,9 +30,27 @@ final class SystemMonitor: ObservableObject {
     let application: NSRunningApplication
     var canControl: Bool { ProcessControlPolicy.allows(pid: id, bundleID: bundleID) }
   }
-  @Published private(set) var snapshot = Snapshot()
-  @Published private(set) var apps: [AppUsage] = []
-  @Published private(set) var sampledAt: Date?
+  struct Reading: Equatable {
+    var snapshot = Snapshot()
+    var apps: [AppUsage] = []
+    var sampledAt: Date?
+  }
+  /// One publication per sample, observed only by views that show readings.
+  @MainActor final class LiveReadings: ObservableObject {
+    @Published fileprivate(set) var reading = Reading()
+  }
+  enum LeaseKind: Sendable {
+    /// A workspace screen: sampled only while the workspace window is in front.
+    case window
+    /// The menu bar popover while it is open.
+    case popover
+    /// Auto Tame / slowdown expiry: samples without publishing readings to views.
+    case control
+  }
+  let live = LiveReadings()
+  var snapshot: Snapshot { live.reading.snapshot }
+  var apps: [AppUsage] { live.reading.apps }
+  var sampledAt: Date? { live.reading.sampledAt }
   struct TamingDisplay: Equatable, Sendable {
     var state = TamingState()
     var automatic = false
@@ -40,9 +61,15 @@ final class SystemMonitor: ObservableObject {
   private let tamingLease = UUID()
   private var controlObservers: [NSObjectProtocol] = []
   private var controlsActivated = false
-  init(tamingController: AppTamingController? = nil) {
+  private let activity: AppActivity
+  private(set) var isForeground: Bool
+  init(tamingController: AppTamingController? = nil, activity: AppActivity? = nil) {
     self.tamingController = tamingController ?? AppTamingController(store: TamingStore(
       url: AppPaths.supportDirectory.appendingPathComponent("process-slowdown.json")))
+    let activity = activity ?? .shared
+    self.activity = activity
+    isForeground = activity.isForeground
+    activity.observe { [weak self] foreground in self?.foregroundChanged(foreground) }
     publishTaming()
   }
 
@@ -54,7 +81,7 @@ final class SystemMonitor: ObservableObject {
       forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
     ) { @Sendable [weak self] _ in
       MainActor.assumeIsolated {
-        guard let self else { return }
+        guard let self, self.tamingController.needsMonitoring else { return }
         self.tamingController.foregroundChanged(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         self.publishTaming()
       }
@@ -87,28 +114,50 @@ final class SystemMonitor: ObservableObject {
     let display = TamingDisplay(state: tamingController.state, automatic: tamingController.autoEnabled,
       message: tamingController.message)
     if taming != display { taming = display }
-    if tamingController.needsMonitoring { start(lease: tamingLease, interval: 8) }
+    // Auto Tame shares this sampler; it never runs a second loop, and none while it is off.
+    if tamingController.needsMonitoring { start(lease: tamingLease, interval: 8, kind: .control) }
     else { stop(lease: tamingLease) }
   }
   var topApps: [AppUsage] { Array(apps.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(8)) }
   private var timer: Timer?
-  private var leases: [UUID: TimeInterval] = [:]
+  private struct Lease { var interval: TimeInterval; var kind: LeaseKind }
+  private var leases: [UUID: Lease] = [:]
   private(set) var samplingInterval: TimeInterval?
   private var samplingTask: Task<Void, Never>?
   private var generation = UUID()
   private let sampler = ResourceSampler()
   private(set) var activeLeaseCount = 0
+  /// Process-wide counts, reported by `--resource-probe` launches.
+  private(set) static var samples = 0
+  private(set) static var publishedSamples = 0
 
-  func start(lease: UUID, interval: TimeInterval = 4) {
-    leases[lease] = max(3, interval); activeLeaseCount = leases.count
+  func start(lease: UUID, interval: TimeInterval = 4, kind: LeaseKind = .window) {
+    if kind == .window { activity.refresh() }
+    let next = Lease(interval: max(3, interval), kind: kind)
+    if let current = leases[lease], current.interval == next.interval, current.kind == next.kind { return }
+    leases[lease] = next; activeLeaseCount = leases.count
     configureTimer()
   }
   func stop(lease: UUID) {
-    leases.removeValue(forKey: lease); activeLeaseCount = leases.count
+    guard leases.removeValue(forKey: lease) != nil else { return }
+    activeLeaseCount = leases.count
     configureTimer()
   }
+  /// Readings reach views only while something visible consumes them.
+  var publishesReadings: Bool {
+    leases.isEmpty || leases.values.contains { $0.kind == .popover || ($0.kind == .window && isForeground) }
+  }
+  private func foregroundChanged(_ foreground: Bool) {
+    guard foreground != isForeground else { return }
+    let wasPublishing = publishesReadings
+    isForeground = foreground
+    let before = samplingInterval
+    configureTimer()
+    // Returning to the front refreshes immediately instead of showing a stale reading.
+    if !wasPublishing, publishesReadings, samplingInterval != nil, samplingInterval == before { sample() }
+  }
   private func configureTimer() {
-    let requested = leases.values.min()
+    let requested = leases.values.filter { $0.kind != .window || isForeground }.map(\.interval).min()
     let floor: TimeInterval = ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical ? 12 : ProcessInfo.processInfo.isLowPowerModeEnabled ? 8 : 3
     let interval = requested.map { max(floor, $0) }
     guard interval != samplingInterval else { return }
@@ -138,14 +187,18 @@ final class SystemMonitor: ObservableObject {
       let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
       guard let self, !Task.isCancelled, generation == token else { return }
       defer { samplingTask = nil }
-      snapshot = result.snapshot
-      apps = applications.compactMap { app in
+      Self.samples += 1
+      let usages = applications.compactMap { app -> AppUsage? in
         guard !app.isTerminated, let reading = result.apps[app.processIdentifier] else { return nil }
         return AppUsage(id: app.processIdentifier, name: app.localizedName ?? "App", bundleID: app.bundleIdentifier,
           memoryBytes: reading.memoryBytes, cpuPercent: reading.cpuPercent, started: reading.started, application: app)
       }
-      sampledAt = Date()
-      tamingController.tick(apps: apps, systemCPU: snapshot.cpuUsage,
+      if publishesReadings {
+        live.reading = Reading(snapshot: result.snapshot, apps: usages, sampledAt: Date())
+        Self.publishedSamples += 1
+      }
+      guard tamingController.needsMonitoring else { return }
+      tamingController.tick(apps: usages, systemCPU: result.snapshot.cpuUsage,
         foreground: NSWorkspace.shared.frontmostApplication?.bundleIdentifier, now: Date())
       publishTaming()
     }
@@ -178,16 +231,29 @@ enum ProcessControlPolicy {
 actor ResourceSampler {
   struct AppReading: Sendable { let started: UInt64; let memoryBytes: Int64; let cpuPercent: Double? }
   struct Result: Sendable { let snapshot: SystemMonitor.Snapshot; let apps: [pid_t: AppReading] }
+  typealias DiskReader = @Sendable () -> (free: Int64, total: Int64)?
+  /// Important-usage capacity can make macOS compute purgeable space, so it is read at
+  /// most this often and reused by the samples in between.
+  static let diskInterval: TimeInterval = 60
   private struct Baseline { let started: UInt64; let cpu: UInt64; let time: UInt64 }
   private var baselines: [pid_t: Baseline] = [:]
   private var previousTicks: (busy: UInt64, total: UInt64)?
+  private var disk: (free: Int64, total: Int64, readAt: TimeInterval)?
+  private let readDisk: DiskReader
+  private let clock: @Sendable () -> TimeInterval
+  private(set) var diskReads = 0
+
+  init(readDisk: @escaping DiskReader = ResourceSampler.startupDisk,
+    clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
+    self.readDisk = readDisk; self.clock = clock
+  }
+
   func reset() { baselines = [:]; previousTicks = nil }
 
   func read(pids: [pid_t]) -> Result {
     var next = SystemMonitor.Snapshot()
-    if let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey]) {
-      next.totalBytes = Int64(values.volumeTotalCapacity ?? 0); next.freeBytes = values.volumeAvailableCapacityForImportantUsage ?? 0
-    }
+    let capacity = diskCapacity()
+    next.totalBytes = capacity.total; next.freeBytes = capacity.free
     next.cpuUsage = cpuUsage(); next.memoryUsedBytes = memoryUsed(); next.swapUsedBytes = swapUsed(); next.pressure = pressure()
     var readings: [pid_t: AppReading] = [:], updated: [pid_t: Baseline] = [:]
     for pid in pids {
@@ -205,6 +271,22 @@ actor ResourceSampler {
     }
     baselines = updated
     return Result(snapshot: next, apps: readings)
+  }
+
+  private func diskCapacity() -> (free: Int64, total: Int64) {
+    let now = clock()
+    if let disk, now >= disk.readAt, now - disk.readAt < Self.diskInterval { return (free: disk.free, total: disk.total) }
+    diskReads += 1
+    let value = readDisk() ?? (free: 0, total: 0)
+    disk = (free: value.free, total: value.total, readAt: now)
+    return value
+  }
+
+  nonisolated static func startupDisk() -> (free: Int64, total: Int64)? {
+    guard let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
+      .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
+    ]) else { return nil }
+    return (free: values.volumeAvailableCapacityForImportantUsage ?? 0, total: Int64(values.volumeTotalCapacity ?? 0))
   }
   nonisolated static func cpuPercent(previousCPU: UInt64, currentCPU: UInt64, previousTime: UInt64, currentTime: UInt64, sameProcess: Bool) -> Double? {
     guard sameProcess, currentTime > previousTime, currentCPU >= previousCPU else { return nil }

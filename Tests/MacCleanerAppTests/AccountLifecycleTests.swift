@@ -703,6 +703,25 @@ final class AccountLifecycleTests: XCTestCase {
     XCTAssertFalse(store.aiStatus.enabled)
   }
 
+  func testActivationReusesAFreshAIStatusAndRereadsAfterTheSessionChanges() async throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: folder) }
+    let fixture = AccountFixture(), tokens = TestTokens(), checks = RequestCounter()
+    let store = AccountStore(supportDirectory: folder, client: AccountClient(transport: { request in
+      if request.url?.path.contains("app_config") == true { checks.increment() }
+      return try await fixture.respond(request)
+    }), deviceInfo: device, tokenStorage: tokens.storage)
+    await store.refreshAIStatus()
+    XCTAssertEqual(checks.value, 1); XCTAssertTrue(store.aiStatus.enabled)
+    await store.refreshAIStatusIfStale(); await store.refreshAIStatusIfStale()
+    XCTAssertEqual(checks.value, 1, "Switching back to MacMint reuses a fresh answer")
+    await store.signIn(email: "fixture@example.invalid", password: "fixture")
+    await store.refreshAIStatusIfStale()
+    XCTAssertEqual(checks.value, 2, "A new session reads the switch again")
+    await store.refreshAIStatusIfStale(maxAge: 0)
+    XCTAssertEqual(checks.value, 3)
+  }
+
   func testCancelledOrReplacedSessionCannotSendAnAIRequestAfterAvailabilityCheck() async throws {
     let previous = UserDefaults.standard.object(forKey: AppViewModel.aiEnabledKey)
     defer { UserDefaults.standard.set(previous, forKey: AppViewModel.aiEnabledKey) }
@@ -848,6 +867,13 @@ private final class TestClock: @unchecked Sendable {
   private var date = Date()
   var now: Date { lock.lock(); defer { lock.unlock() }; return date }
   func advance(_ interval: TimeInterval) { lock.lock(); defer { lock.unlock() }; date.addTimeInterval(interval) }
+}
+
+private final class RequestCounter: @unchecked Sendable {
+  private let lock = NSLock()
+  private var count = 0
+  var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+  func increment() { lock.lock(); count += 1; lock.unlock() }
 }
 
 private actor AccountFixture {
