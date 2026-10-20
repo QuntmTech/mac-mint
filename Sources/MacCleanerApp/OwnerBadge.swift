@@ -12,6 +12,9 @@ enum OwnerDirectory {
 
   private static var cache: [String: Owner?] = [:]
 
+  static var count: Int { cache.count }
+  static func removeAll() { cache.removeAll() }
+
   static func owner(for hint: OwnerHint?) -> Owner? {
     guard let hint else { return nil }
     if let id = hint.bundleID {
@@ -20,7 +23,7 @@ enum OwnerDirectory {
       if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
         resolved = Owner(
           name: FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""),
-          icon: NSWorkspace.shared.icon(forFile: url.path))
+          icon: FileIcons.icon(forPath: url.path))
       }
       cache[id] = resolved
       if let resolved { return resolved }

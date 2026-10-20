@@ -1,4 +1,5 @@
 import Foundation
+import MacCleanerCore
 
 /// Pure display data. It contains no running-application handle or process authority.
 enum PerformancePresentation {
@@ -43,13 +44,20 @@ enum PerformancePresentation {
     }
   }
 
+  static func matches(_ app: App, query: String) -> Bool {
+    query.isEmpty || app.name.localizedCaseInsensitiveContains(query)
+      || (app.bundleID?.localizedCaseInsensitiveContains(query) ?? false)
+      || String(app.id.pid).contains(query)
+  }
+
+  static func matchCount(_ apps: [App], query: String) -> Int {
+    let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    return apps.reduce(0) { $0 + (matches($1, query: query) ? 1 : 0) }
+  }
+
   static func apps(_ apps: [App], query: String, sort: Sort) -> [App] {
     let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-    return apps.filter { app in
-      query.isEmpty || app.name.localizedCaseInsensitiveContains(query)
-        || (app.bundleID?.localizedCaseInsensitiveContains(query) ?? false)
-        || String(app.id.pid).contains(query)
-    }.sorted { left, right in
+    return apps.filter { matches($0, query: query) }.sorted { left, right in
       switch sort.key {
       case .cpu:
         if let decision = compare(validCPU(left.cpuPercent), validCPU(right.cpuPercent), direction: sort.direction) { return decision }
@@ -99,5 +107,83 @@ enum PerformancePresentation {
   static func memoryFraction(_ bytes: Int64?, physicalMemory: Int64) -> Double? {
     guard let bytes, bytes >= 0, physicalMemory > 0 else { return nil }
     return fraction(Double(bytes), capacity: Double(physicalMemory))
+  }
+
+  /// Display-ready row. Equal rows draw identically, so SwiftUI skips unchanged rows; meter
+  /// fractions are rounded to half-percent steps, below what a bar can show.
+  struct Row: Identifiable, Equatable, Sendable {
+    let id: ProcessID
+    let stripe: Bool
+    let name: String
+    let detail: String
+    let help: String
+    let cpuText: String
+    let cpuAccessibility: String
+    let cpuFraction: Double?
+    let memoryText: String
+    let memoryAccessibility: String
+    let memoryFraction: Double?
+    let fallbackSymbol: String
+    let control: Control
+  }
+
+  /// Inputs of the per-row action controls, which change only with slowdown state.
+  struct Control: Equatable, Sendable {
+    let id: ProcessID
+    let name: String
+    let bundleID: String?
+    let slowed: Bool
+    let excepted: Bool
+    let canControl: Bool
+  }
+
+  struct RowInputs: Equatable, Sendable {
+    var apps: [App]
+    var query: String
+    var sort: Sort
+    var taming: TamingState
+    var physicalMemory: Int64
+    var logicalCPUCount: Int
+    var controllable: Set<ProcessID>
+  }
+
+  static func quantized(_ fraction: Double?) -> Double? {
+    fraction.map { ($0 * 200).rounded() / 200 }
+  }
+
+  static func rows(_ inputs: RowInputs) -> [Row] {
+    apps(inputs.apps, query: inputs.query, sort: inputs.sort).enumerated().map { index, app in
+      let receipt = inputs.taming.receipts.first { $0.identity.pid == app.id.pid && $0.identity.started == app.id.started }
+      let excepted = app.bundleID.map { inputs.taming.exceptions[$0.lowercased()] != nil } ?? false
+      let detail = excepted ? "Never slowed · PID \(app.id.pid)" : receipt.map {
+        "\($0.automatic ? "Auto tamed" : "Slowed") until " + $0.expires.formatted(date: .omitted, time: .shortened)
+      } ?? "PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
+      let cpu = validCPU(app.cpuPercent)
+      let memory = app.memoryBytes >= 0 ? ByteFormatter.string(app.memoryBytes) : nil
+      return Row(id: app.id, stripe: index.isMultiple(of: 2), name: app.name, detail: detail,
+        help: app.name + " · PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? ""),
+        cpuText: cpu.map { String(format: "%.1f%%", $0) } ?? "—",
+        cpuAccessibility: cpu.map { String(format: "%.1f percent of one core", $0) } ?? "Not measured yet",
+        cpuFraction: quantized(cpuFraction(app.cpuPercent, logicalCPUCount: inputs.logicalCPUCount)),
+        memoryText: memory ?? "—", memoryAccessibility: memory ?? "Unavailable",
+        memoryFraction: quantized(memoryFraction(app.memoryBytes, physicalMemory: inputs.physicalMemory)),
+        fallbackSymbol: app.fallbackSymbol,
+        control: Control(id: app.id, name: app.name, bundleID: app.bundleID, slowed: receipt != nil,
+          excepted: excepted, canControl: inputs.controllable.contains(app.id)))
+    }
+  }
+
+  /// Sorting, filtering and formatting run once per changed input, not on every render.
+  @MainActor
+  final class RowCache {
+    private var inputs: RowInputs?
+    private var cached: [Row] = []
+    private(set) var builds = 0
+    func rows(_ inputs: RowInputs) -> [Row] {
+      if inputs == self.inputs { return cached }
+      builds += 1
+      cached = PerformancePresentation.rows(inputs); self.inputs = inputs
+      return cached
+    }
   }
 }

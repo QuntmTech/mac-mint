@@ -95,6 +95,65 @@ public struct StorageNode: Identifiable, Hashable, Sendable {
   }
 }
 
+extension StorageNode {
+  /// A smaller copy for when the full map isn't on screen: folders `levels` below this node
+  /// keep their totals but drop their children, except folders in `expanding` (the visible
+  /// trail and the ancestors of selections). Returns the IDs of folders whose children were
+  /// dropped, so they can be mapped again when opened.
+  public func compacted(levels: Int, expanding: Set<String>) -> (node: StorageNode, pruned: Set<String>) {
+    var pruned = Set<String>()
+    let node = compacting(depth: 0, levels: max(1, levels), expanding: expanding, pruned: &pruned)
+    return (node, pruned)
+  }
+
+  private func compacting(depth: Int, levels: Int, expanding: Set<String>, pruned: inout Set<String>) -> StorageNode {
+    guard kind == .folder, !children.isEmpty else { return self }
+    if depth >= levels && !expanding.contains(id) {
+      pruned.insert(id)
+      return with(children: [])
+    }
+    return with(children: children.map {
+      $0.compacting(depth: depth + 1, levels: levels, expanding: expanding, pruned: &pruned)
+    })
+  }
+
+  /// Every folder from `path` up to (not including) this node's parent: what must stay
+  /// expanded for the node at `path` to remain reachable.
+  public static func ancestors(of path: String, within root: String) -> Set<String> {
+    var result = Set<String>()
+    var current = (path as NSString).deletingLastPathComponent
+    while current.count >= root.count, current.hasPrefix(root) {
+      result.insert(current)
+      let parent = (current as NSString).deletingLastPathComponent
+      if parent == current { break }
+      current = parent
+    }
+    return result
+  }
+
+  /// This tree with the node at `id` replaced (for a folder mapped again on demand) and the
+  /// totals of every ancestor recomputed.
+  public func replacing(_ id: String, with replacement: StorageNode) -> StorageNode {
+    if self.id == id { return replacement }
+    let prefix = self.id == "/" ? "/" : self.id + "/"
+    guard kind == .folder, id.hasPrefix(prefix) else { return self }
+    let next = children.map { $0.replacing(id, with: replacement) }
+    return StorageNode(
+      url: url, name: name, kind: kind,
+      allocatedBytes: next.reduce(0) { $0 + $1.allocatedBytes },
+      logicalBytes: next.reduce(0) { $0 + $1.logicalBytes },
+      itemCount: next.reduce(0) { $0 + $1.itemCount },
+      cloudOnlyCount: next.reduce(0) { $0 + $1.cloudOnlyCount },
+      modified: modified, children: next, id: self.id, identity: identity)
+  }
+
+  private func with(children: [StorageNode]) -> StorageNode {
+    StorageNode(url: url, name: name, kind: kind, allocatedBytes: allocatedBytes, logicalBytes: logicalBytes,
+      itemCount: itemCount, cloudOnlyCount: cloudOnlyCount, modified: modified, children: children, id: id,
+      identity: identity)
+  }
+}
+
 public struct StorageCoverage: Hashable, Sendable {
   public var scannedItems = 0
   public var inaccessiblePaths: [String] = []
@@ -171,7 +230,14 @@ public actor StorageTreeScanner {
     }
   }
 
+  /// Each folder drains its own autorelease pool: listing a folder returns autoreleased URLs,
+  /// arrays and prefetched values, which otherwise live until the whole map finishes and
+  /// leave the heap fragmented around the nodes that are kept.
   private func scanFolder(_ url: URL, state: inout ScanState, isRoot: Bool = false) -> StorageNode {
+    drainingAutoreleasePool { scanFolderContents(url, state: &state, isRoot: isRoot) }
+  }
+
+  private func scanFolderContents(_ url: URL, state: inout ScanState, isRoot: Bool) -> StorageNode {
     if FileSystem.isIgnored(url, ignoredPaths: state.ignoredPaths) {
       state.coverage.excludedItems += 1
       return StorageNode(url: url, name: "Excluded", kind: .aggregate, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
@@ -186,7 +252,7 @@ public actor StorageTreeScanner {
     } catch {
       state.coverage.inaccessiblePaths.append(url.path)
       return StorageNode(
-        url: url, kind: .inaccessible, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
+        url: Self.retained(url), kind: .inaccessible, allocatedBytes: 0, logicalBytes: 0, itemCount: 0)
     }
 
     var children: [StorageNode] = []
@@ -211,7 +277,7 @@ public actor StorageTreeScanner {
           state.coverage.otherVolumes.append(entry.path)
           children.append(
             StorageNode(
-              url: entry, kind: .otherVolume, allocatedBytes: 0, logicalBytes: 0, itemCount: 0))
+              url: Self.retained(entry), kind: .otherVolume, allocatedBytes: 0, logicalBytes: 0, itemCount: 0))
           continue
         }
         if values.isPackage == true {
@@ -236,7 +302,7 @@ public actor StorageTreeScanner {
       if max(allocated, logical) >= detailThreshold {
         children.append(
           StorageNode(
-            url: entry, kind: .file, allocatedBytes: allocated, logicalBytes: logical,
+            url: Self.retained(entry), kind: .file, allocatedBytes: allocated, logicalBytes: logical,
             itemCount: 1, cloudOnlyCount: cloudOnly ? 1 : 0,
             modified: values.contentModificationDate, identity: FileSystem.fileIdentity(at: entry)))
       } else {
@@ -281,7 +347,7 @@ public actor StorageTreeScanner {
     let modified = try? url.resourceValues(forKeys: [.contentModificationDateKey])
       .contentModificationDate
     return StorageNode(
-      url: url, kind: .folder,
+      url: Self.retained(url), kind: .folder,
       allocatedBytes: kept.reduce(0) { $0 + $1.allocatedBytes },
       logicalBytes: kept.reduce(0) { $0 + $1.logicalBytes },
       itemCount: kept.reduce(0) { $0 + $1.itemCount },
@@ -293,8 +359,16 @@ public actor StorageTreeScanner {
     let measurement = FileSystem.measure(at: url, fileManager: fileManager, ignoredPaths: state.ignoredPaths)
     if !measurement.isComplete { state.coverage.inaccessiblePaths.append(url.path) }
     return StorageNode(
-      url: url, kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,
+      url: Self.retained(url), kind: .package, allocatedBytes: measurement.bytes, logicalBytes: measurement.bytes,
       itemCount: 1, modified: modified, identity: FileSystem.fileIdentity(at: url))
+  }
+
+  /// Enumerated URLs carry the prefetched resource values (a per-URL cache of strings, data
+  /// and dictionaries). Nodes keep the URL for later actions, which read fresh values anyway.
+  static func retained(_ url: URL) -> URL {
+    var plain = url
+    plain.removeAllCachedResourceValues()
+    return plain
   }
 
   /// Cloud placeholders (iCloud, Dropbox, OneDrive via File Provider) carry SF_DATALESS.

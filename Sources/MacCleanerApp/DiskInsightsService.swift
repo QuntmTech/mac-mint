@@ -3,6 +3,19 @@ import MacCleanerCore
 
 /// Gathers DiskInsights with short, read-only system tool calls off the main thread.
 enum DiskInsightsService {
+  @MainActor private static var recent: (insights: DiskInsights, at: TimeInterval)?
+
+  /// Opening Performance repeatedly reuses a reading for ten minutes instead of launching
+  /// diskutil and tmutil (and recomputing purgeable space) on every visit.
+  @MainActor
+  static func cached(maxAge: TimeInterval = 600) async -> DiskInsights {
+    let now = ProcessInfo.processInfo.systemUptime
+    if let recent, now - recent.at < maxAge { return recent.insights }
+    let insights = await load()
+    recent = (insights, ProcessInfo.processInfo.systemUptime)
+    return insights
+  }
+
   static func load() async -> DiskInsights {
     await Task.detached(priority: .utility) {
       var insights = DiskInsights()

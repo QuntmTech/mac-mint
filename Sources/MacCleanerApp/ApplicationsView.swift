@@ -128,7 +128,7 @@ struct ApplicationsView: View {
           )
         ) { app in
           HStack(spacing: 11) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+            Image(nsImage: FileIcons.icon(forPath: app.url.path))
               .resizable()
               .interpolation(.high)
               .frame(width: 38, height: 38)
@@ -173,7 +173,7 @@ struct ApplicationsView: View {
     if let app = model.selectedApp {
       VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top, spacing: 14) {
-          Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+          Image(nsImage: FileIcons.icon(forPath: app.url.path))
             .resizable().interpolation(.high).frame(width: 54, height: 54)
           VStack(alignment: .leading, spacing: 7) {
             Text(app.name).font(.system(size: 23, weight: .semibold)).fixedSize(horizontal: false, vertical: true)

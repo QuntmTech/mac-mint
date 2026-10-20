@@ -104,7 +104,7 @@ struct RootView: View {
       guard !SmokeTest.isRequested else { return }
       Task {
         await account.refreshAccess()
-        await account.refreshAIStatus()
+        await account.refreshAIStatusIfStale()
       }
     }
     .sheet(isPresented: $model.showingScanIssues) {
@@ -140,7 +140,8 @@ struct RootView: View {
     }
     .onChange(of: model.selectedSection) { old, section in
       lastTabs[section.parent] = section
-      if old == .photos || old == .duplicates || old == .applications { PreviewCaches.release() }
+      if old == .photos || old == .duplicates || old == .applications { PreviewCaches.release(); MemoryRelief.shared.relieveSoon() }
+      if old == .storage { model.compactStorageMap(); MemoryRelief.shared.relieveSoon() }
     }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .onAppear {
@@ -150,11 +151,14 @@ struct RootView: View {
         showingOnboarding = true
       }
     }
+    .task { await ResourceProbeSession.runIfRequested(model) }
     .task {
-      // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and slowly.
+      // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and every
+      // minute while the workspace is in front. Hidden or background windows skip it.
       guard !SmokeTest.isRequested else { return }
+      var refreshed = false
       while !Task.isCancelled {
-        await model.refreshVolumeSummary()
+        if !refreshed || AppActivity.shared.isForeground { await model.refreshVolumeSummary(); refreshed = true }
         try? await Task.sleep(for: .seconds(60))
       }
     }

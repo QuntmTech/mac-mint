@@ -82,6 +82,39 @@ final class StorageTreeTests: XCTestCase {
     XCTAssertEqual(tree.logicalBytes, Int64(5 * 1_048_576), "original tree is unchanged")
   }
 
+  func testCompactionKeepsVisibleLevelsTotalsAndSelectionsAndRemapGraftsBack() async throws {
+    let root = makeTempDirectory()
+    defer { try? fm.removeItem(at: root) }
+    try write(root, "A/B/C/deep.bin", 2 * 1_048_576)
+    let kept = try write(root, "A/B/D/kept.bin", 3 * 1_048_576)
+    try write(root, "E/F/G/other.bin", 2 * 1_048_576)
+    let tree = await StorageTreeScanner().scan(root).root
+    let path = { (relative: String) in root.appendingPathComponent(relative).standardizedFileURL.path }
+    let keptPath = kept.standardizedFileURL.path
+
+    let expanding = StorageNode.ancestors(of: keptPath, within: tree.id)
+    XCTAssertEqual(expanding, [tree.id, path("A"), path("A/B"), path("A/B/D")])
+    let (compact, pruned) = tree.compacted(levels: 2, expanding: expanding)
+    XCTAssertEqual(compact.allocatedBytes, tree.allocatedBytes, "Totals survive compaction")
+    XCTAssertEqual(compact.logicalBytes, tree.logicalBytes)
+    XCTAssertNotNil(compact.node(at: keptPath), "A selected node stays reachable")
+    XCTAssertNotNil(compact.node(at: path("E/F")), "Visible levels stay")
+    XCTAssertEqual(compact.node(at: path("E/F"))?.children.isEmpty, true)
+    XCTAssertNil(compact.node(at: path("E/F/G")))
+    XCTAssertNil(compact.node(at: path("A/B/C/deep.bin")))
+    XCTAssertEqual(pruned, [path("E/F"), path("A/B/C")])
+    XCTAssertEqual(compact.node(at: path("E/F"))?.itemCount, tree.node(at: path("E/F"))?.itemCount)
+
+    // Opening a pruned folder maps it again and grafts it back with ancestor totals updated.
+    try write(root, "E/F/G/new.bin", 1_048_576)
+    let remapped = await StorageTreeScanner().scan(root.appendingPathComponent("E/F")).root
+    let grafted = compact.replacing(path("E/F"), with: remapped)
+    XCTAssertNotNil(grafted.node(at: path("E/F/G/new.bin")))
+    XCTAssertEqual(grafted.logicalBytes, tree.logicalBytes + 1_048_576)
+    XCTAssertEqual(grafted.node(at: path("E"))?.logicalBytes, Int64(3 * 1_048_576))
+    XCTAssertNotNil(grafted.node(at: keptPath))
+  }
+
   func testTreemapFillsBoundsProportionally() {
     let bounds = Treemap.Rect(x: 0, y: 0, width: 600, height: 400)
     let values: [Double] = [6, 6, 4, 3, 2, 2, 1]

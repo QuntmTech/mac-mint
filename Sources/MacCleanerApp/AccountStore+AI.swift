@@ -22,8 +22,18 @@ extension AccountStore {
     let result = await client.aiStatus()
     // A response that arrives after sign-out (or a newer sign-in) must not re-enable AI.
     guard !Task.isCancelled, generation == sessionGeneration else { return }
-    aiStatus = result
-    aiAvailable = aiStatus.enabled
+    lastAIStatusCheck = (Date(), generation)
+    // Unchanged answers don't republish the account (and re-render every window).
+    if aiStatus != result { aiStatus = result }
+    if aiAvailable != result.enabled { aiAvailable = result.enabled }
+  }
+
+  /// App activation re-checks the AI switch at most every ten minutes. Each AI request
+  /// still re-checks it first, and the server enforces it regardless.
+  func refreshAIStatusIfStale(maxAge: TimeInterval = 600) async {
+    if let last = lastAIStatusCheck, last.session == sessionGeneration,
+      case let age = Date().timeIntervalSince(last.date), age >= 0, age < maxAge { return }
+    await refreshAIStatus()
   }
 
   private func refreshedAIToken(feature: String, separatelyConsented: Bool = false) async throws -> String {

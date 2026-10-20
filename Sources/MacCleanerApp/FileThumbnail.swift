@@ -15,7 +15,7 @@ struct FileThumbnail: View {
       if let image {
         Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
       } else {
-        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable()
+        Image(nsImage: FileIcons.icon(forPath: url.path)).resizable()
       }
     }
     .frame(width: size, height: size)
@@ -38,6 +38,7 @@ final class ThumbnailCache {
   private let cache = PreviewImageCache(byteLimit: 8 * 1_024 * 1_024, countLimit: 48)
   private var generation = UUID()
 
+  var count: Int { cache.count }
   func removeAll() { generation = UUID(); cache.removeAll() }
 
   func thumbnail(for url: URL, size: CGFloat) async -> NSImage? {

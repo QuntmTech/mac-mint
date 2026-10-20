@@ -26,12 +26,10 @@ extension EnvironmentValues {
 struct PerformanceView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var monitor: SystemMonitor
-  @Environment(\.scenePhase) private var scenePhase
   @Environment(\.performancePreview) private var preview
-  @Environment(\.colorSchemeContrast) private var contrast
   @State private var pendingQuit: SystemMonitor.AppUsage?
   @State private var monitoringLease = UUID()
-  @State private var pausedReading: Reading?
+  @State private var pausedReading: SystemMonitor.Reading?
   @State private var previewPaused: Bool?
   @State private var search = ""
   @State private var sort = PerformancePresentation.Sort()
@@ -39,57 +37,22 @@ struct PerformanceView: View {
   @State private var insights: DiskInsights?
   @State private var showingExceptions = false
 
-  private struct Reading {
-    let snapshot: SystemMonitor.Snapshot
-    let apps: [SystemMonitor.AppUsage]
-    let sampledAt: Date?
-    @MainActor init(_ monitor: SystemMonitor) {
-      snapshot = monitor.snapshot; apps = monitor.apps; sampledAt = monitor.sampledAt
-    }
-  }
-
   private var paused: Bool { preview.map { previewPaused ?? $0.paused } ?? (pausedReading != nil) }
-  private var snapshot: SystemMonitor.Snapshot { preview?.snapshot ?? pausedReading?.snapshot ?? monitor.snapshot }
-  private var sampledAt: Date? {
-    if let preview { return preview.sampledAt }
-    if let pausedReading { return pausedReading.sampledAt }
-    return monitor.sampledAt
-  }
-  private var logicalCPUCount: Int { preview?.logicalCPUCount ?? ProcessInfo.processInfo.processorCount }
   private var tamingDisplay: SystemMonitor.TamingDisplay { preview?.taming ?? monitor.taming }
-  private var query: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
-  private var usages: [SystemMonitor.AppUsage] { preview == nil ? (pausedReading?.apps ?? monitor.apps) : [] }
-  private var appRows: [PerformancePresentation.App] {
-    preview?.apps ?? usages.map { app in
-      .init(id: .init(pid: app.id, started: app.started), name: app.name, bundleID: app.bundleID,
-        memoryBytes: app.memoryBytes, cpuPercent: app.cpuPercent)
-    }
-  }
-  private var samplingDetail: String {
-    guard let sampledAt else { return paused ? "Paused before the first sample. Resume to measure activity." : "Measuring app activity…" }
-    let time = sampledAt.formatted(date: .omitted, time: .standard)
-    return paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
-      : "Updated \(time) · refreshes about every \(Int(preview == nil ? (monitor.samplingInterval ?? 4) : 4)) seconds"
-  }
-
-  private var readingStatus: String {
-    let state = paused ? "Paused" : (sampledAt == nil ? "Measuring" : "Live")
-    return sampledAt.map { state + " · " + $0.formatted(date: .omitted, time: .standard) } ?? state
+  private var feed: PerformanceFeed {
+    PerformanceFeed(preview: preview, frozen: pausedReading, paused: paused,
+      logicalCPUCount: preview?.logicalCPUCount ?? ProcessInfo.processInfo.processorCount,
+      samplingInterval: preview == nil ? (monitor.samplingInterval ?? 4) : 4)
   }
 
   var body: some View {
+    let feed = self.feed
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
         PageHeader("Performance", subtitle: "See what is busy, find the app, and decide what to do.")
-        ViewThatFits(in: .horizontal) {
-          HStack(alignment: .top, spacing: 14) { cpuCard; memoryCard }
-          VStack(spacing: 14) { cpuCard; memoryCard }
-        }
-        processCard
-        ViewThatFits(in: .horizontal) {
-          HStack(spacing: 18) { supportingMetric("Swap", value: snapshot.swapUsedBytes.map(ByteFormatter.string) ?? "—", icon: "arrow.left.arrow.right"); freeSpaceMetric }
-          VStack(alignment: .leading, spacing: 8) { supportingMetric("Swap", value: snapshot.swapUsedBytes.map(ByteFormatter.string) ?? "—", icon: "arrow.left.arrow.right"); freeSpaceMetric }
-        }
+        PerformanceCards(live: monitor.live, feed: feed, sort: sort) { sort.select($0) }
+        processCard(feed)
+        PerformanceSupportingMetrics(live: monitor.live, feed: feed)
         diskInsightsCard
         SurfaceCard {
           VStack(alignment: .leading, spacing: 10) {
@@ -122,10 +85,11 @@ struct PerformanceView: View {
         }
       }
     }
+    // Sampling follows this screen; the monitor itself pauses window leases while the
+    // workspace is hidden, inactive, minimized or covered.
     .onAppear { updateMonitoring() }
-    .onChange(of: scenePhase) { _, _ in updateMonitoring() }
     .onChange(of: paused) { _, _ in updateMonitoring() }
-    .task { if preview == nil { insights = await DiskInsightsService.load() } }
+    .task { if preview == nil { insights = await DiskInsightsService.cached() } }
     .onDisappear { monitor.stop(lease: monitoringLease) }
     .sheet(isPresented: $showingExceptions) { TamingExceptionsView().environmentObject(monitor) }
     .alert(
@@ -146,88 +110,35 @@ struct PerformanceView: View {
 
   private func updateMonitoring() {
     guard preview == nil else { return }
-    if !paused && scenePhase == .active { monitor.start(lease: monitoringLease) }
+    if !paused { monitor.start(lease: monitoringLease) }
     else { monitor.stop(lease: monitoringLease) }
   }
 
   private func togglePaused() {
     if let preview { previewPaused = !(previewPaused ?? preview.paused) }
-    else { pausedReading = paused ? nil : Reading(monitor) }
+    else { pausedReading = paused ? nil : monitor.live.reading }
   }
 
-  private var cpuCard: some View {
-    let fraction = PerformancePresentation.fraction(snapshot.cpuUsage, capacity: 1)
-    return resourceCard(title: "CPU", value: fraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
-      subtitle: "Whole Mac · \(logicalCPUCount) logical cores", icon: "cpu", key: .cpu, tint: AppTheme.info,
-      fraction: fraction, status: fraction == nil ? "CPU reading unavailable" : "Across all cores")
+  /// Handles are resolved when an action runs, from the reading on screen.
+  private func usage(_ id: PerformancePresentation.ProcessID) -> SystemMonitor.AppUsage? {
+    guard preview == nil else { return nil }
+    return (pausedReading ?? monitor.live.reading).apps.first { $0.id == id.pid && $0.started == id.started }
   }
 
-  private var memoryCard: some View {
-    let used = snapshot.memoryUsedBytes.flatMap { $0 >= 0 ? $0 : nil }
-    return resourceCard(title: "Memory", value: used.map(ByteFormatter.string) ?? "—",
-      subtitle: snapshot.physicalMemory > 0 ? "of \(ByteFormatter.string(snapshot.physicalMemory)) installed RAM" : "Installed RAM unavailable",
-      icon: "memorychip", key: .memory, tint: pressureTint,
-      fraction: PerformancePresentation.memoryFraction(used, physicalMemory: snapshot.physicalMemory),
-      status: "Pressure: " + snapshot.pressure.rawValue)
+  private var rowActions: PerformanceRowActions {
+    PerformanceRowActions(
+      slow: { id, duration in if let usage = usage(id) { monitor.slowApp(usage, duration: duration) } },
+      restore: { id in if let usage = usage(id) { monitor.restoreApp(usage) } },
+      quit: { id, force in if let usage = usage(id) { forceQuit = force; pendingQuit = usage } },
+      neverSlow: { bundleID, name, protected in monitor.setNeverSlow(bundleID: bundleID, name: name, protected: protected) })
   }
 
-  private func resourceCard(title: String, value: String, subtitle: String, icon: String,
-    key: PerformancePresentation.SortKey, tint: Color, fraction: Double?, status: String) -> some View {
-    Button { sort.select(key) } label: {
-      VStack(alignment: .leading, spacing: 6) {
-        HStack {
-          Label(title, systemImage: icon).font(.callout.weight(.semibold)).foregroundStyle(.primary)
-          Spacer(minLength: 8)
-          Text(status).font(.caption.weight(.medium)).foregroundStyle(tint).lineLimit(1)
-        }
-        HStack(alignment: .firstTextBaseline) {
-          Text(value).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
-            .tracking(-0.8).foregroundStyle(AppTheme.ink).lineLimit(1).minimumScaleFactor(0.6)
-          Spacer(minLength: 8)
-          Image(systemName: sort.key == key && sort.direction == .ascending ? "arrow.up" : "arrow.down")
-            .font(.caption.weight(.semibold)).foregroundStyle(sort.key == key ? .primary : .secondary)
-        }
-        Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-        PerformanceMeter(fraction: fraction, tint: tint).frame(height: 5)
-      }
-      .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
-      .padding(14)
-      .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: AppTheme.corner))
-      .overlay(RoundedRectangle(cornerRadius: AppTheme.corner).strokeBorder(
-        sort.key == key || contrast == .increased ? AppTheme.ink.opacity(0.45) : AppTheme.border,
-        lineWidth: sort.key == key ? 1.5 : 1))
-      .contentShape(RoundedRectangle(cornerRadius: AppTheme.corner))
-    }
-    .buttonStyle(.plain)
-    .help("Sort running apps by highest " + title.lowercased() + " use")
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel(title + ", " + value + ". " + subtitle + ". " + status)
-    .accessibilityHint("Sorts running apps by highest " + title.lowercased() + " use")
-    .accessibilityIdentifier("performance-card-" + key.rawValue.lowercased())
-  }
-
-  private var freeSpaceMetric: some View {
-    supportingMetric("Free disk", value: snapshot.totalBytes > 0 ? ByteFormatter.string(snapshot.freeBytes) : "—", icon: "internaldrive")
-  }
-
-  private func supportingMetric(_ title: String, value: String, icon: String) -> some View {
-    Label {
-      HStack(spacing: 5) { Text(title).foregroundStyle(.secondary); Text(value).foregroundStyle(.primary) }
-    } icon: {
-      Image(systemName: icon).foregroundStyle(.secondary)
-    }
-    .font(.callout).monospacedDigit().accessibilityElement(children: .combine)
-  }
-
-  private var processCard: some View {
-    let rows = appRows
-    let displayed = PerformancePresentation.apps(rows, query: search, sort: sort)
-    let handles = Dictionary(uniqueKeysWithValues: usages.map { (PerformancePresentation.ProcessID(pid: $0.id, started: $0.started), $0) })
-    return SurfaceCard {
+  private func processCard(_ feed: PerformanceFeed) -> some View {
+    SurfaceCard {
       VStack(alignment: .leading, spacing: 8) {
         HStack(spacing: 10) {
           Text("Running apps").font(.headline)
-          Text("\(displayed.count) of \(rows.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+          PerformanceLiveText(live: monitor.live, feed: feed, kind: .count(query: search))
           Spacer(minLength: 8)
           Toggle("Auto Tame", isOn: Binding(get: { tamingDisplay.automatic }, set: { monitor.setAutomaticTaming($0) }))
             .toggleStyle(.switch).controlSize(.small).fixedSize().disabled(preview != nil)
@@ -244,9 +155,7 @@ struct PerformanceView: View {
           .controlSize(.small).help(paused ? "Resume live readings" : "Freeze the displayed readings")
           .accessibilityIdentifier("performance-pause")
         }
-        Text("Main processes · helpers not included · " + readingStatus)
-          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          .help(samplingDetail)
+        PerformanceLiveText(live: monitor.live, feed: feed, kind: .status)
         HStack(spacing: 12) {
           SearchField(prompt: "Find by app, PID or bundle", text: $search)
           Menu {
@@ -259,38 +168,8 @@ struct PerformanceView: View {
             .fixedSize().help(sort.description).accessibilityLabel("Sort running apps").accessibilityValue(sort.description)
         }
         Divider()
-        if displayed.isEmpty {
-          VStack(spacing: 8) {
-            Image(systemName: query.isEmpty ? "waveform.path.ecg" : "magnifyingglass").font(.title2).foregroundStyle(.secondary)
-            Text(query.isEmpty ? (paused ? "No apps in this paused sample" : "Waiting for an app sample") : "No matching apps").font(.callout.weight(.medium))
-            Text(query.isEmpty ? "\(paused ? "Resume" : "Leave this view open") to measure activity." : "Try an app name, process ID or bundle identifier.")
-              .font(.caption).foregroundStyle(.secondary)
-            if !query.isEmpty { Button("Clear search") { search = "" }.controlSize(.small) }
-          }.frame(maxWidth: .infinity).padding(.vertical, 24)
-        } else {
-          HStack(spacing: 12) {
-            sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
-            sortHeader(.cpu).frame(width: 96, alignment: .trailing)
-            sortHeader(.memory).frame(width: 104, alignment: .trailing)
-            Text("Actions").font(.caption).foregroundStyle(.secondary).frame(width: 182, alignment: .trailing)
-          }.padding(.horizontal, 10)
-          LazyVStack(spacing: 0) {
-            ForEach(Array(displayed.enumerated()), id: \.element.id) { index, app in
-              processRow(app, usage: handles[app.id])
-                .padding(.horizontal, 10).padding(.vertical, 10)
-                .background(index.isMultiple(of: 2) ? AppTheme.panel.opacity(0.45) : Color.clear,
-                  in: RoundedRectangle(cornerRadius: 9))
-                .background {
-                  if preview != nil && index < 5 {
-                    GeometryReader { geometry in
-                      Color.clear.preference(key: WorkspaceLayoutFrames.self,
-                        value: ["performance app row \(index)": geometry.frame(in: .global)])
-                    }
-                  }
-                }
-            }
-          }
-        }
+        PerformanceProcessRows(live: monitor.live, feed: feed, query: search, sort: sort, taming: tamingDisplay.state,
+          actions: rowActions, clearSearch: { search = "" }, selectSort: { sort.select($0, toggle: true) })
         Text("App CPU: 100% = one core and values can exceed 100%. Bars show the share of this Mac's total CPU capacity or installed RAM.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         Text("Slowdown lowers CPU, disk and network priority, not a CPU/RAM cap. Auto Tame checks sustained background load every ~8 seconds; foreground apps and exceptions stay protected. Pause freezes readings; enabled controls continue in the background.")
@@ -301,87 +180,6 @@ struct PerformanceView: View {
         }
       }
     }
-  }
-
-  private func sortHeader(_ key: PerformancePresentation.SortKey) -> some View {
-    Button { sort.select(key, toggle: true) } label: {
-      HStack(spacing: 4) {
-        Text(key.rawValue)
-        Image(systemName: sort.key == key && sort.direction == .ascending ? "chevron.up" : "chevron.down")
-          .opacity(sort.key == key ? 1 : 0.25)
-      }.font(.caption.weight(.semibold)).foregroundStyle(sort.key == key ? .primary : .secondary)
-    }
-    .buttonStyle(.plain).help("Sort by " + key.rawValue.lowercased())
-    .accessibilityValue(sort.key == key ? sort.description : "Not selected")
-    .accessibilityIdentifier("performance-sort-" + key.rawValue.lowercased())
-  }
-
-  private func processRow(_ app: PerformancePresentation.App, usage: SystemMonitor.AppUsage?) -> some View {
-    let receipt = tamingDisplay.state.receipts.first { $0.identity.pid == app.id.pid && $0.identity.started == app.id.started }
-    let excepted = app.bundleID.map { tamingDisplay.state.exceptions[$0.lowercased()] != nil } ?? false
-    let detail = excepted ? "Never slowed · PID \(app.id.pid)" : receipt.map {
-      "\($0.automatic ? "Auto tamed" : "Slowed") until " + $0.expires.formatted(date: .omitted, time: .shortened)
-    } ?? "PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
-    return HStack(spacing: 12) {
-      HStack(spacing: 10) {
-        PerformanceAppIcon(app: app, application: usage?.application)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(app.name).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
-          Text(detail)
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-        }
-        Spacer(minLength: 0)
-      }.frame(maxWidth: .infinity, alignment: .leading)
-        .help(app.name + " · PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? ""))
-      VStack(alignment: .trailing, spacing: 5) {
-        Text(PerformancePresentation.validCPU(app.cpuPercent).map { String(format: "%.1f%%", $0) } ?? "—")
-          .font(.callout.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-        PerformanceMeter(fraction: PerformancePresentation.cpuFraction(app.cpuPercent, logicalCPUCount: logicalCPUCount), tint: AppTheme.info)
-          .frame(height: 3)
-      }.frame(width: 96)
-        .accessibilityElement(children: .ignore).accessibilityLabel("CPU")
-        .accessibilityValue(PerformancePresentation.validCPU(app.cpuPercent).map { String(format: "%.1f percent of one core", $0) } ?? "Not measured yet")
-      VStack(alignment: .trailing, spacing: 5) {
-        Text(app.memoryBytes >= 0 ? ByteFormatter.string(app.memoryBytes) : "—")
-          .font(.callout.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-        PerformanceMeter(fraction: PerformancePresentation.memoryFraction(app.memoryBytes, physicalMemory: snapshot.physicalMemory), tint: AppTheme.violet)
-          .frame(height: 3)
-      }.frame(width: 104)
-        .accessibilityElement(children: .ignore).accessibilityLabel("Memory footprint")
-        .accessibilityValue(app.memoryBytes >= 0 ? ByteFormatter.string(app.memoryBytes) : "Unavailable")
-      HStack(spacing: 5) {
-        if receipt != nil {
-          Button("Restore") { if let usage { monitor.restoreApp(usage) } }
-            .controlSize(.small).help("Restore normal priority for " + app.name)
-        } else {
-          Menu {
-            Button("Slow for 15 minutes") { if let usage { monitor.slowApp(usage, duration: 900) } }
-            Button("Slow for 1 hour") { if let usage { monitor.slowApp(usage, duration: 3600) } }
-          } label: { Text(excepted ? "Protected" : "Slow") }
-            .menuStyle(.borderlessButton).fixedSize().disabled(excepted)
-            .accessibilityLabel("Slow down " + app.name)
-            .help("Lower CPU, disk and network priority until expiry or until you switch to this app")
-        }
-        Button { if let usage { forceQuit = false; pendingQuit = usage } } label: { Label("Quit", systemImage: "power") }
-          .controlSize(.small).buttonStyle(.bordered).tint(AppTheme.ink)
-          .help("Ask " + app.name + " to quit normally").accessibilityLabel("Quit " + app.name)
-        Menu {
-          if let bundleID = app.bundleID {
-            Button(excepted ? "Allow slowdown" : "Never slow down this app") {
-              monitor.setNeverSlow(bundleID: bundleID, name: app.name, protected: !excepted)
-            }
-          }
-          Divider()
-          Button("Force Quit…", role: .destructive) { if let usage { forceQuit = true; pendingQuit = usage } }
-        } label: { Image(systemName: "ellipsis").accessibilityLabel("More actions for " + app.name) }
-          .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(AppTheme.ink)
-          .frame(width: 18).accessibilityLabel("More actions for " + app.name)
-      }.frame(width: 182, alignment: .trailing)
-        .disabled(!(usage?.canControl ?? false))
-        .help(usage?.canControl == true ? "Quit or force quit " + app.name : "Process controls are unavailable for this app")
-    }
-    .accessibilityElement(children: .contain)
-    .accessibilityLabel(app.name + ", PID \(app.id.pid)")
   }
 
   private var diskInsightsCard: some View {
@@ -430,14 +228,364 @@ struct PerformanceView: View {
     }
     .accessibilityElement(children: .combine)
   }
+}
 
-  private var pressureTint: Color {
-    switch snapshot.pressure {
+/// What the live subviews display: a scene fixture, a frozen reading, or the monitor's.
+private struct PerformanceFeed {
+  let preview: PerformancePreview?
+  let frozen: SystemMonitor.Reading?
+  let paused: Bool
+  let logicalCPUCount: Int
+  let samplingInterval: TimeInterval
+
+  @MainActor func reading(_ live: SystemMonitor.LiveReadings) -> SystemMonitor.Reading {
+    frozen ?? live.reading
+  }
+  @MainActor func snapshot(_ live: SystemMonitor.LiveReadings) -> SystemMonitor.Snapshot {
+    preview?.snapshot ?? reading(live).snapshot
+  }
+  @MainActor func sampledAt(_ live: SystemMonitor.LiveReadings) -> Date? {
+    preview.map(\.sampledAt) ?? reading(live).sampledAt
+  }
+  @MainActor func apps(_ live: SystemMonitor.LiveReadings) -> [PerformancePresentation.App] {
+    preview?.apps ?? reading(live).apps.map { app in
+      .init(id: .init(pid: app.id, started: app.started), name: app.name, bundleID: app.bundleID,
+        memoryBytes: app.memoryBytes, cpuPercent: app.cpuPercent)
+    }
+  }
+  @MainActor func controllable(_ live: SystemMonitor.LiveReadings) -> Set<PerformancePresentation.ProcessID> {
+    guard preview == nil else { return [] }
+    return Set(reading(live).apps.filter(\.canControl).map { PerformancePresentation.ProcessID(pid: $0.id, started: $0.started) })
+  }
+  @MainActor func applications(_ live: SystemMonitor.LiveReadings) -> [PerformancePresentation.ProcessID: NSRunningApplication] {
+    guard preview == nil else { return [:] }
+    return Dictionary(reading(live).apps.map { (PerformancePresentation.ProcessID(pid: $0.id, started: $0.started), $0.application) },
+      uniquingKeysWith: { first, _ in first })
+  }
+}
+
+@MainActor
+struct PerformanceRowActions {
+  let slow: (PerformancePresentation.ProcessID, TimeInterval) -> Void
+  let restore: (PerformancePresentation.ProcessID) -> Void
+  let quit: (PerformancePresentation.ProcessID, Bool) -> Void
+  let neverSlow: (String, String, Bool) -> Void
+}
+
+private struct PerformanceCards: View {
+  @ObservedObject var live: SystemMonitor.LiveReadings
+  let feed: PerformanceFeed
+  let sort: PerformancePresentation.Sort
+  let select: (PerformancePresentation.SortKey) -> Void
+
+  var body: some View {
+    let snapshot = feed.snapshot(live)
+    let cpuFraction = PerformancePresentation.fraction(snapshot.cpuUsage, capacity: 1)
+    let used = snapshot.memoryUsedBytes.flatMap { $0 >= 0 ? $0 : nil }
+    let cpu = PerformanceResourceCard(title: "CPU", value: cpuFraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
+      subtitle: "Whole Mac · \(feed.logicalCPUCount) logical cores", icon: "cpu", key: .cpu, tint: AppTheme.info,
+      fraction: PerformancePresentation.quantized(cpuFraction),
+      status: cpuFraction == nil ? "CPU reading unavailable" : "Across all cores", sort: sort, select: select)
+    let memory = PerformanceResourceCard(title: "Memory", value: used.map(ByteFormatter.string) ?? "—",
+      subtitle: snapshot.physicalMemory > 0 ? "of \(ByteFormatter.string(snapshot.physicalMemory)) installed RAM" : "Installed RAM unavailable",
+      icon: "memorychip", key: .memory, tint: Self.pressureTint(snapshot.pressure),
+      fraction: PerformancePresentation.quantized(PerformancePresentation.memoryFraction(used, physicalMemory: snapshot.physicalMemory)),
+      status: "Pressure: " + snapshot.pressure.rawValue, sort: sort, select: select)
+    ViewThatFits(in: .horizontal) {
+      HStack(alignment: .top, spacing: 14) { cpu.equatable(); memory.equatable() }
+      VStack(spacing: 14) { cpu.equatable(); memory.equatable() }
+    }
+  }
+
+  static func pressureTint(_ pressure: SystemMonitor.Pressure) -> Color {
+    switch pressure {
     case .normal: return AppTheme.info
     case .warning: return AppTheme.warning
     case .critical: return AppTheme.danger
     case .unknown: return .secondary
     }
+  }
+}
+
+private struct PerformanceResourceCard: View, Equatable {
+  let title: String
+  let value: String
+  let subtitle: String
+  let icon: String
+  let key: PerformancePresentation.SortKey
+  let tint: Color
+  let fraction: Double?
+  let status: String
+  let sort: PerformancePresentation.Sort
+  let select: (PerformancePresentation.SortKey) -> Void
+  @Environment(\.colorSchemeContrast) private var contrast
+
+  nonisolated static func == (left: Self, right: Self) -> Bool {
+    left.title == right.title && left.value == right.value && left.subtitle == right.subtitle && left.tint == right.tint
+      && left.fraction == right.fraction && left.status == right.status && left.sort == right.sort
+  }
+
+  private var selected: Bool { sort.key == key }
+
+  private var face: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Label(title, systemImage: icon).font(.callout.weight(.semibold)).foregroundStyle(.primary)
+        Spacer(minLength: 8)
+        Text(status).font(.caption.weight(.medium)).foregroundStyle(tint).lineLimit(1)
+      }
+      HStack(alignment: .firstTextBaseline) {
+        Text(value).font(.system(size: 32, weight: .semibold, design: .rounded)).monospacedDigit()
+          .tracking(-0.8).foregroundStyle(AppTheme.ink).lineLimit(1).minimumScaleFactor(0.6)
+        Spacer(minLength: 8)
+        Image(systemName: selected && sort.direction == .ascending ? "arrow.up" : "arrow.down")
+          .font(.caption.weight(.semibold)).foregroundStyle(selected ? Color.primary : Color.secondary)
+      }
+      Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
+      PerformanceMeter(fraction: fraction, tint: tint).frame(height: 5)
+    }
+  }
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: AppTheme.corner)
+    let stroke: Color = selected || contrast == .increased ? AppTheme.ink.opacity(0.45) : AppTheme.border
+    let hint: String = "Sorts running apps by highest \(title.lowercased()) use"
+    let label: String = "\(title), \(value). \(subtitle). \(status)"
+    let identifier: String = "performance-card-\(key.rawValue.lowercased())"
+    Button { select(key) } label: {
+      face
+        .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(AppTheme.surface, in: shape)
+        .overlay(shape.strokeBorder(stroke, lineWidth: selected ? 1.5 : 1))
+        .contentShape(shape)
+    }
+    .buttonStyle(.plain)
+    .help("Sort running apps by highest \(title.lowercased()) use")
+    .accessibilityElement(children: .combine)
+    .accessibilityLabel(label)
+    .accessibilityHint(hint)
+    .accessibilityIdentifier(identifier)
+  }
+}
+
+private struct PerformanceSupportingMetrics: View {
+  @ObservedObject var live: SystemMonitor.LiveReadings
+  let feed: PerformanceFeed
+
+  var body: some View {
+    let snapshot = feed.snapshot(live)
+    let swap = snapshot.swapUsedBytes.map(ByteFormatter.string) ?? "—"
+    let free = snapshot.totalBytes > 0 ? ByteFormatter.string(snapshot.freeBytes) : "—"
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 18) { metric("Swap", value: swap, icon: "arrow.left.arrow.right"); metric("Free disk", value: free, icon: "internaldrive") }
+      VStack(alignment: .leading, spacing: 8) { metric("Swap", value: swap, icon: "arrow.left.arrow.right"); metric("Free disk", value: free, icon: "internaldrive") }
+    }
+  }
+
+  private func metric(_ title: String, value: String, icon: String) -> some View {
+    Label {
+      HStack(spacing: 5) { Text(title).foregroundStyle(.secondary); Text(value).foregroundStyle(.primary) }
+    } icon: {
+      Image(systemName: icon).foregroundStyle(.secondary)
+    }
+    .font(.callout).monospacedDigit().accessibilityElement(children: .combine)
+  }
+}
+
+/// The two short texts in the process card that change with each sample.
+private struct PerformanceLiveText: View {
+  enum Kind { case count(query: String), status }
+  @ObservedObject var live: SystemMonitor.LiveReadings
+  let feed: PerformanceFeed
+  let kind: Kind
+
+  var body: some View {
+    switch kind {
+    case .count(let query):
+      let apps = feed.apps(live)
+      Text("\(PerformancePresentation.matchCount(apps, query: query)) of \(apps.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+    case .status:
+      let sampledAt = feed.sampledAt(live)
+      let time = sampledAt?.formatted(date: .omitted, time: .standard)
+      let state = feed.paused ? "Paused" : (sampledAt == nil ? "Measuring" : "Live")
+      let reading: String = time.map { "\(state) · \($0)" } ?? state
+      let detail: String = Self.detail(time: time, paused: feed.paused, interval: feed.samplingInterval)
+      Text("Main processes · helpers not included · \(reading)")
+        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        .help(detail)
+    }
+  }
+
+  private static func detail(time: String?, paused: Bool, interval: TimeInterval) -> String {
+    guard let time else {
+      return paused ? "Paused before the first sample. Resume to measure activity." : "Measuring app activity…"
+    }
+    return paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
+      : "Updated \(time) · refreshes about every \(Int(interval)) seconds"
+  }
+}
+
+private struct PerformanceProcessRows: View {
+  @ObservedObject var live: SystemMonitor.LiveReadings
+  let feed: PerformanceFeed
+  let query: String
+  let sort: PerformancePresentation.Sort
+  let taming: TamingState
+  let actions: PerformanceRowActions
+  let clearSearch: () -> Void
+  let selectSort: (PerformancePresentation.SortKey) -> Void
+  @State private var cache = PerformancePresentation.RowCache()
+
+  var body: some View {
+    let snapshot = feed.snapshot(live)
+    let rows = cache.rows(.init(apps: feed.apps(live), query: query, sort: sort, taming: taming,
+      physicalMemory: snapshot.physicalMemory, logicalCPUCount: feed.logicalCPUCount, controllable: feed.controllable(live)))
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if rows.isEmpty {
+      VStack(spacing: 8) {
+        Image(systemName: trimmed.isEmpty ? "waveform.path.ecg" : "magnifyingglass").font(.title2).foregroundStyle(.secondary)
+        Text(trimmed.isEmpty ? (feed.paused ? "No apps in this paused sample" : "Waiting for an app sample") : "No matching apps").font(.callout.weight(.medium))
+        Text(trimmed.isEmpty ? "\(feed.paused ? "Resume" : "Leave this view open") to measure activity." : "Try an app name, process ID or bundle identifier.")
+          .font(.caption).foregroundStyle(.secondary)
+        if !trimmed.isEmpty { Button("Clear search", action: clearSearch).controlSize(.small) }
+      }.frame(maxWidth: .infinity).padding(.vertical, 24)
+    } else {
+      let applications = feed.applications(live)
+      PerformanceColumnHeader(sort: sort, select: selectSort).equatable()
+      LazyVStack(spacing: 0) {
+        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+          PerformanceRowView(row: row, application: applications[row.id], actions: actions)
+            .equatable()
+            .background {
+              if feed.preview != nil && index < 5 {
+                GeometryReader { geometry in
+                  Color.clear.preference(key: WorkspaceLayoutFrames.self,
+                    value: ["performance app row \(index)": geometry.frame(in: .global)])
+                }
+              }
+            }
+        }
+      }
+    }
+  }
+}
+
+private struct PerformanceColumnHeader: View, Equatable {
+  let sort: PerformancePresentation.Sort
+  let select: (PerformancePresentation.SortKey) -> Void
+  nonisolated static func == (left: Self, right: Self) -> Bool { left.sort == right.sort }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      header(.name).frame(maxWidth: .infinity, alignment: .leading)
+      header(.cpu).frame(width: 96, alignment: .trailing)
+      header(.memory).frame(width: 104, alignment: .trailing)
+      Text("Actions").font(.caption).foregroundStyle(.secondary).frame(width: 182, alignment: .trailing)
+    }.padding(.horizontal, 10)
+  }
+
+  private func header(_ key: PerformancePresentation.SortKey) -> some View {
+    Button { select(key) } label: {
+      HStack(spacing: 4) {
+        Text(key.rawValue)
+        Image(systemName: sort.key == key && sort.direction == .ascending ? "chevron.up" : "chevron.down")
+          .opacity(sort.key == key ? 1 : 0.25)
+      }.font(.caption.weight(.semibold)).foregroundStyle(sort.key == key ? .primary : .secondary)
+    }
+    .buttonStyle(.plain).help("Sort by " + key.rawValue.lowercased())
+    .accessibilityValue(sort.key == key ? sort.description : "Not selected")
+    .accessibilityIdentifier("performance-sort-" + key.rawValue.lowercased())
+  }
+}
+
+/// Equal rows are skipped entirely; the action menus sit in their own equatable view, so
+/// changing numbers never rebuild them.
+private struct PerformanceRowView: View, Equatable {
+  let row: PerformancePresentation.Row
+  let application: NSRunningApplication?
+  let actions: PerformanceRowActions
+  // The row ID carries the PID and kernel start time, so it identifies the same process.
+  nonisolated static func == (left: Self, right: Self) -> Bool { left.row == right.row }
+
+  var body: some View {
+    HStack(spacing: 12) {
+      HStack(spacing: 10) {
+        PerformanceAppIcon(id: row.id, fallbackSymbol: row.fallbackSymbol, application: application)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(row.name).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+          Text(row.detail)
+            .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        }
+        Spacer(minLength: 0)
+      }.frame(maxWidth: .infinity, alignment: .leading)
+        .help(row.help)
+      PerformanceMetricCell(text: row.cpuText, fraction: row.cpuFraction, tint: AppTheme.info,
+        label: "CPU", value: row.cpuAccessibility).frame(width: 96)
+      PerformanceMetricCell(text: row.memoryText, fraction: row.memoryFraction, tint: AppTheme.violet,
+        label: "Memory footprint", value: row.memoryAccessibility).frame(width: 104)
+      PerformanceRowControls(control: row.control, actions: actions).equatable()
+    }
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel(row.name + ", PID \(row.id.pid)")
+    .padding(.horizontal, 10).padding(.vertical, 10)
+    .background(row.stripe ? AppTheme.panel.opacity(0.45) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+  }
+}
+
+private struct PerformanceMetricCell: View {
+  let text: String
+  let fraction: Double?
+  let tint: Color
+  let label: String
+  let value: String
+
+  var body: some View {
+    VStack(alignment: .trailing, spacing: 5) {
+      Text(text).font(.callout.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
+      PerformanceMeter(fraction: fraction, tint: tint).frame(height: 3)
+    }
+    .accessibilityElement(children: .ignore).accessibilityLabel(label).accessibilityValue(value)
+  }
+}
+
+private struct PerformanceRowControls: View, Equatable {
+  let control: PerformancePresentation.Control
+  let actions: PerformanceRowActions
+  nonisolated static func == (left: Self, right: Self) -> Bool { left.control == right.control }
+
+  var body: some View {
+    let id = control.id, name = control.name
+    HStack(spacing: 5) {
+      if control.slowed {
+        Button("Restore") { actions.restore(id) }
+          .controlSize(.small).help("Restore normal priority for " + name)
+      } else {
+        Menu {
+          Button("Slow for 15 minutes") { actions.slow(id, 900) }
+          Button("Slow for 1 hour") { actions.slow(id, 3600) }
+        } label: { Text(control.excepted ? "Protected" : "Slow") }
+          .menuStyle(.borderlessButton).fixedSize().disabled(control.excepted)
+          .accessibilityLabel("Slow down " + name)
+          .help("Lower CPU, disk and network priority until expiry or until you switch to this app")
+      }
+      Button { actions.quit(id, false) } label: { Label("Quit", systemImage: "power") }
+        .controlSize(.small).buttonStyle(.bordered).tint(AppTheme.ink)
+        .help("Ask " + name + " to quit normally").accessibilityLabel("Quit " + name)
+      Menu {
+        if let bundleID = control.bundleID {
+          Button(control.excepted ? "Allow slowdown" : "Never slow down this app") {
+            actions.neverSlow(bundleID, name, !control.excepted)
+          }
+        }
+        Divider()
+        Button("Force Quit…", role: .destructive) { actions.quit(id, true) }
+      } label: { Image(systemName: "ellipsis").accessibilityLabel("More actions for " + name) }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).tint(AppTheme.ink)
+        .frame(width: 18).accessibilityLabel("More actions for " + name)
+    }.frame(width: 182, alignment: .trailing)
+      .disabled(!control.canControl)
+      .help(control.canControl ? "Quit or force quit " + name : "Process controls are unavailable for this app")
   }
 }
 
@@ -471,30 +619,35 @@ private struct TamingExceptionsView: View {
   }
 }
 
+/// A fill scaled inside a fixed track: value changes redraw without a layout pass or a
+/// GeometryReader per bar.
 private struct PerformanceMeter: View {
   let fraction: Double?
   let tint: Color
   var body: some View {
-    GeometryReader { proxy in
-      ZStack(alignment: .leading) {
-        Capsule().fill(AppTheme.panel)
-        if let fraction { Capsule().fill(tint).frame(width: proxy.size.width * fraction) }
+    Capsule().fill(AppTheme.panel)
+      .overlay(alignment: .leading) {
+        if let fraction {
+          Rectangle().fill(tint).scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
+        }
       }
-    }.accessibilityHidden(true)
+      .clipShape(Capsule())
+      .accessibilityHidden(true)
   }
 }
 
 private struct PerformanceAppIcon: View {
-  let app: PerformancePresentation.App
+  let id: PerformancePresentation.ProcessID
+  let fallbackSymbol: String
   let application: NSRunningApplication?
   @State private var icon: NSImage?
   var body: some View {
     Group {
       if let icon { Image(nsImage: icon).resizable().scaledToFit() }
-      else { Image(systemName: app.fallbackSymbol).font(.system(size: 20)).foregroundStyle(.secondary) }
+      else { Image(systemName: fallbackSymbol).font(.system(size: 20)).foregroundStyle(.secondary) }
     }
     .frame(width: 30, height: 30).accessibilityHidden(true)
-    .task(id: app.id) {
+    .task(id: id) {
       icon = application.flatMap { PerformanceIconCache.shared.icon(for: $0) }
     }
   }
@@ -507,6 +660,7 @@ final class PerformanceIconCache {
   static let shared = PerformanceIconCache()
   private let cache = PreviewImageCache(byteLimit: 2 * 1024 * 1024, countLimit: 64)
   private init() {}
+  var count: Int { cache.count }
   func removeAll() { cache.removeAll() }
   func icon(for app: NSRunningApplication) -> NSImage? {
     let key = app.bundleURL?.path ?? app.bundleIdentifier ?? String(app.processIdentifier)
