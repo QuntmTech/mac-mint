@@ -53,12 +53,16 @@ ErrorDocument 404 /404.html
   RewriteCond %{HTTPS} off
   RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
   RewriteRule ^home2/?$ / [L,R=301]
-  RewriteRule ^(login|signup|account|forgot-password|reset-password|verify-email)/?$ account-app.html [L]
+  RewriteRule ^(login|signup|account|forgot-password|reset-password|verify-email|start|welcome|download)/?$ account-app.html [L]
 </IfModule>
 <IfModule mod_headers.c>
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "SAMEORIGIN"
+  # The original request line survives the internal rewrite to account-app.html.
+  <If "%{THE_REQUEST} =~ m#^[A-Z]+ /(start|welcome|download)/?[?\s]#">
+    Header always set Referrer-Policy "no-referrer"
+  </If>
   <If "%{REQUEST_URI} =~ m#^/(assets|_next/static)/#">
     Header set Cache-Control "public, max-age=31536000, immutable"
   </If>

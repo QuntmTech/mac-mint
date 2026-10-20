@@ -8,8 +8,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 ACCOUNT_ROUTES = {
-    "/login", "/signup", "/account", "/forgot-password", "/reset-password", "/verify-email"
+    "/login", "/signup", "/account", "/forgot-password", "/reset-password", "/verify-email",
+    "/start", "/welcome", "/download",
 }
+# Purchase pages carry a Stripe session ID or an account email: never send a referrer.
+NO_REFERRER_ROUTES = {"/start", "/welcome", "/download"}
 
 
 class SiteHandler(SimpleHTTPRequestHandler):
@@ -24,7 +27,13 @@ class SiteHandler(SimpleHTTPRequestHandler):
             return None
         if path in ACCOUNT_ROUTES:
             self.path = "/account-app.html"
+            self.no_referrer = path in NO_REFERRER_ROUTES
         return super().send_head()
+
+    def end_headers(self):
+        if getattr(self, "no_referrer", False):
+            self.send_header("Referrer-Policy", "no-referrer")
+        super().end_headers()
 
     def send_error(self, code, message=None, explain=None):
         page = Path(self.directory) / "404.html"

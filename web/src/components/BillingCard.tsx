@@ -13,6 +13,8 @@ export function BillingCard({ subscription, userId, onRefresh }: { subscription:
   const trial = subscription.status === 'trialing'
   const needsPayment = ['past_due', 'unpaid', 'incomplete'].includes(subscription.status)
   const date = parseDate(subscription.cancel_at || (trial ? subscription.trial_through : subscription.paid_through))
+  const nextCharge = ended || subscription.cancel_at_period_end || subscription.access_held ? null
+    : parseDate(trial ? subscription.trial_through : subscription.current_period_end)
   const manage = async () => {
     if (busy) return
     setBusy(true); setError(null)
@@ -35,7 +37,10 @@ export function BillingCard({ subscription, userId, onRefresh }: { subscription:
       : subscription.cancel_at_period_end ? <p>Renewal is canceled.{date ? ` Access ends ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}.` : ' Refresh your account to check the access end date.'}</p>
       : trial ? <p>Your free trial{date ? ` ends ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}` : ' is active'}. After the trial, billing starts at {formattedPrice(subscription)} per {subscription.billing_interval}. Cancel before it ends to avoid the first charge.</p>
       : <p>Renews automatically each {subscription.billing_interval}.{date ? ` Paid through ${date.toLocaleDateString(undefined, { dateStyle: 'long' })}.` : ''}</p>}
-    {subscription.access_held && !ended && <Alert>Access for this subscription is paused after a refund or payment dispute. Contact support@macmint.co; renewals don't restore it automatically, and don't start another subscription.</Alert>}
+    {nextCharge && <p data-testid="next-charge">Next charge: <strong className="font-semibold">{formattedPrice(subscription)}</strong> on {nextCharge.toLocaleDateString(undefined, { dateStyle: 'long' })}</p>}
+    {subscription.access_held && !ended && (subscription.hold_reason === 'duplicate_trial'
+      ? <Alert>This account has already used its free trial, so access for this new subscription is paused until support reviews it. Contact support@macmint.co; don't start another subscription.</Alert>
+      : <Alert>Access for this subscription is paused after a refund or payment dispute. Contact support@macmint.co; renewals don't restore it automatically, and don't start another subscription.</Alert>)}
     {needsPayment && <Alert>Payment needs attention. Open billing to update your payment method or review your invoice. Do not start another subscription.</Alert>}
     {error && <Alert>{error}</Alert>}
     <div className="flex flex-wrap gap-3">

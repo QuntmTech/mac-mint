@@ -191,6 +191,7 @@ const DownloadCard = ({ release }: { release: Release | null }) => (
       </p>
     )}
     <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">Scanning, exclusions, History and Restore remain available without paid access.</p>
+    <a href="/download" className="mt-3 inline-block text-sm font-semibold text-emerald-600 hover:text-emerald-500">Download page and installation guide</a>
   </Card>
 )
 
