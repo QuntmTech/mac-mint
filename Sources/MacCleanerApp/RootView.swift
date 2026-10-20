@@ -6,6 +6,7 @@ struct RootView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var account: AccountStore
   @EnvironmentObject private var updates: UpdateService
+  @EnvironmentObject private var updater: UpdaterController
   @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
   @State private var showingOnboarding = false
   @State private var scanAfterSetup = false
@@ -263,38 +264,64 @@ struct RootView: View {
     }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
   }
 
+  /// One banner for every update source. Sparkle installs whenever it has the update; the
+  /// download page remains the fallback for the server's required/available notice.
   @ViewBuilder
   private var updateBanner: some View {
-    if let release = updates.bannerRelease {
-      HStack(spacing: 10) {
-        Image(systemName: updates.isRequired ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill")
-          .foregroundStyle(updates.isRequired ? .orange : AppTheme.accentText)
-        Text(
-          updates.isRequired
-            ? "This version of MacMint is no longer supported. Please update to \(release.version)."
-            : "MacMint \(release.version) is available — you have \(UpdateService.currentVersion)."
-        )
-        .font(.callout)
-        Spacer()
-        Button("Download") { updates.openDownload(release) }
+    if updater.isWaitingForWork {
+      updateBannerRow(icon: "clock.arrow.circlepath", tint: AppTheme.accentText,
+        text: "The update is ready. MacMint restarts to install it when the current operation finishes.")
+    } else if let update = updater.reminder {
+      updateBannerRow(icon: "arrow.down.circle.fill", tint: AppTheme.accentText,
+        text: "MacMint \(update.title) is available — you have \(UpdaterController.current.versionAndBuild).") {
+        Button("Install…") { updater.checkForUpdates() }
           .buttonStyle(.borderedProminent)
           .controlSize(.small)
+        dismissButton { updater.dismissReminder() }
+      }
+    } else if let release = updates.bannerRelease {
+      updateBannerRow(icon: updates.isRequired ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill",
+        tint: updates.isRequired ? .orange : AppTheme.accentText,
+        text: updates.isRequired
+          ? "This version of MacMint is no longer supported. Please update to \(release.version)."
+          : "MacMint \(release.version) is available — you have \(UpdateService.currentVersion).") {
+        if updater.availableUpdate != nil {
+          Button("Install…") { updater.checkForUpdates() }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        } else {
+          Button("Download") { updates.openDownload(release) }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
         if !updates.isRequired {
-          Button {
-            updates.dismissedVersion = release.version
-          } label: {
-            Image(systemName: "xmark")
-              .accessibilityLabel("Dismiss")
-          }
-          .buttonStyle(.borderless)
-          .accessibilityLabel("Dismiss update notice")
+          dismissButton { updates.dismissedVersion = release.version }
         }
       }
-      .padding(.horizontal, 16)
-      .padding(.vertical, 8)
-      .background(AppTheme.surface)
-      .overlay(alignment: .bottom) { Divider() }
     }
+  }
+
+  private func updateBannerRow<Actions: View>(icon: String, tint: Color, text: String,
+    @ViewBuilder actions: () -> Actions = { EmptyView() }) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: icon).foregroundStyle(tint)
+      Text(text).font(.callout)
+      Spacer()
+      actions()
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .background(AppTheme.surface)
+    .overlay(alignment: .bottom) { Divider() }
+  }
+
+  private func dismissButton(_ action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      Image(systemName: "xmark")
+        .accessibilityLabel("Dismiss")
+    }
+    .buttonStyle(.borderless)
+    .accessibilityLabel("Dismiss update notice")
   }
 
   private var operationBar: some View {

@@ -3,6 +3,9 @@ name: macOS build
 on:
   push:
   pull_request:
+  # Dry run of the developer feed from any branch: builds, signs and verifies appcast-dev.xml
+  # and uploads it as an artifact. Publishing happens only for pushes to main.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,6 +22,10 @@ jobs:
       MACMINT_ARCHS: ${{ matrix.os == 'macos-15' && 'arm64 x86_64' || '' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # CFBundleVersion is the commit count of HEAD, which Sparkle compares.
+          fetch-depth: 0
+          persist-credentials: false
       - name: Operating system and Swift version
         run: |
           sw_vers
@@ -33,6 +40,19 @@ jobs:
         run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+      - name: Embedded updater and version stamp
+        run: |
+          APP=dist/MacMint.app
+          PLIST="$APP/Contents/Info.plist"
+          [[ "$(plutil -extract CFBundleVersion raw "$PLIST")" == "$(git rev-list --count HEAD)" ]]
+          [[ "$(plutil -extract MacMintGitCommit raw "$PLIST")" == "$(git rev-parse HEAD)" ]]
+          [[ "$(plutil -extract CFBundleShortVersionString raw "$PLIST")" == "$(tr -d '[:space:]' < VERSION)" ]]
+          otool -L "$APP/Contents/MacOS/MacMint" | grep -F "@rpath/Sparkle.framework/"
+          [[ -d "$APP/Contents/Frameworks/Sparkle.framework" && ! -e "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" ]]
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          for code in Versions/Current/Autoupdate Versions/Current/Updater.app .; do
+            codesign -dv "$APP/Contents/Frameworks/Sparkle.framework/$code" 2>&1 | grep -E "^(Identifier|Signature|TeamIdentifier)="
+          done
       - name: Normal startup, menu bar, resource budgets, and graceful Quit
         run: ./scripts/native_startup_test.sh dist/MacMint.app
         timeout-minutes: 12
@@ -100,7 +120,7 @@ jobs:
           ACTUAL=$(shasum -a 256 candidate/MacMint.zip | awk '{print $1}')
           [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]]
           ditto -x -k candidate/MacMint.zip candidate/extracted
-          codesign --verify --strict --verbose=2 candidate/extracted/MacMint.app
+          codesign --verify --deep --strict --verbose=2 candidate/extracted/MacMint.app
           ./scripts/smoke_test.sh candidate/extracted/MacMint.app
       - name: Verify downloaded drag-to-Applications installer
         run: ./scripts/verify_installer.sh candidate/MacMint.dmg
@@ -115,3 +135,200 @@ jobs:
           path: .build/native-startup-diagnostics
           if-no-files-found: ignore
           retention-days: 14
+
+  # Developer channel (docs/UPDATES.md). Signs the tested macOS 15 archive with the Sparkle key
+  # and writes appcast-dev.xml. Never runs for pull requests or forks; read-only token.
+  developer-appcast:
+    name: Developer appcast${{ github.event_name == 'workflow_dispatch' && ' (dry run)' || '' }}
+    needs: downloaded-package
+    if: >-
+      github.repository == 'QuntmTech/mac-mint' &&
+      (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: macos-15
+    timeout-minutes: 10
+    concurrency:
+      group: developer-appcast
+      cancel-in-progress: false
+    env:
+      SPARKLE_TOOLS_URL: https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-for-Swift-Package-Manager.zip
+      # The same archive and checksum that Package.swift resolves for Sparkle 2.10.0.
+      SPARKLE_TOOLS_SHA256: 17e28312b8e18ab7cdbbe09a6fb28cc55a5479ec6c371dbc07cdecd2a14fd959
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: MacMint-macos-15-${{ github.sha }}
+          path: candidate
+      - name: Read the tested archive's bundle
+        run: |
+          EXPECTED=$(cat candidate/MacMint.zip.sha256)
+          ACTUAL=$(shasum -a 256 candidate/MacMint.zip | awk '{print $1}')
+          [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]]
+          ditto -x -k candidate/MacMint.zip "$RUNNER_TEMP/extracted"
+          PLIST="$RUNNER_TEMP/extracted/MacMint.app/Contents/Info.plist"
+          BUILD=$(plutil -extract CFBundleVersion raw "$PLIST")
+          [[ "$BUILD" =~ ^[1-9][0-9]*$ && "$BUILD" == "$(git rev-list --count HEAD)" ]]
+          [[ "$(plutil -extract MacMintGitCommit raw "$PLIST")" == "$GITHUB_SHA" ]]
+          {
+            echo "BUILD=$BUILD"
+            echo "SHORT_VERSION=$(plutil -extract CFBundleShortVersionString raw "$PLIST")"
+            echo "PUBLIC_KEY=$(plutil -extract SUPublicEDKey raw "$PLIST")"
+            echo "ARCHIVE_URL=https://github.com/$GITHUB_REPOSITORY/releases/download/dev-build-$BUILD/MacMint.zip"
+          } >> "$GITHUB_ENV"
+      - name: Sparkle signing tool
+        run: |
+          curl --fail --location --silent --show-error -o "$RUNNER_TEMP/sparkle.zip" "$SPARKLE_TOOLS_URL"
+          echo "$SPARKLE_TOOLS_SHA256  $RUNNER_TEMP/sparkle.zip" | shasum -a 256 --check
+          unzip -q "$RUNNER_TEMP/sparkle.zip" bin/sign_update -d "$RUNNER_TEMP/sparkle"
+      - name: Changes since the previous developer build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREVIOUS=$(git tag --list 'dev-build-*' --sort=-v:refname | grep -vx "dev-build-$BUILD" | head -n 1 || true)
+          if [[ -n "$PREVIOUS" ]] && git merge-base --is-ancestor "$PREVIOUS" HEAD; then
+            git log --no-merges --format=%s "$PREVIOUS..HEAD" > "$RUNNER_TEMP/changes.txt"
+            echo "SINCE=build ${PREVIOUS#dev-build-}" >> "$GITHUB_ENV"
+            echo "COMPARE=https://github.com/$GITHUB_REPOSITORY/compare/$PREVIOUS...$GITHUB_SHA" >> "$GITHUB_ENV"
+          else
+            git log --no-merges --format=%s -n 20 HEAD > "$RUNNER_TEMP/changes.txt"
+          fi
+          cat "$RUNNER_TEMP/changes.txt"
+          mkdir -p "$RUNNER_TEMP/previous"
+          if gh release download dev-feed --repo "$GITHUB_REPOSITORY" --pattern appcast-dev.xml --dir "$RUNNER_TEMP/previous"; then
+            echo "EXISTING_FEED=$RUNNER_TEMP/previous/appcast-dev.xml" >> "$GITHUB_ENV"
+          else
+            echo "No developer feed is published yet; starting one."
+          fi
+      - name: Sign the archive and write appcast-dev.xml
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          [[ -n "$SPARKLE_ED_PRIVATE_KEY" ]] || { echo "::error::The SPARKLE_ED_PRIVATE_KEY secret is not set."; exit 1; }
+          SIGNATURE=$(printf '%s\n' "$SPARKLE_ED_PRIVATE_KEY" | "$RUNNER_TEMP/sparkle/bin/sign_update" --ed-key-file - -p candidate/MacMint.zip)
+          ARGS=(generate --channel developer --version "$BUILD" --short-version "$SHORT_VERSION" --url "$ARCHIVE_URL"
+            --archive candidate/MacMint.zip --signature "$SIGNATURE" --changes-file "$RUNNER_TEMP/changes.txt"
+            --keep 10 --output "$RUNNER_TEMP/appcast-dev.xml")
+          if [[ -n "${SINCE:-}" ]]; then ARGS+=(--since "$SINCE"); fi
+          if [[ -n "${EXISTING_FEED:-}" ]]; then ARGS+=(--existing "$EXISTING_FEED"); fi
+          node scripts/sparkle_appcast.mjs "${ARGS[@]}"
+      - name: Verify the appcast against SUPublicEDKey and CFBundleVersion
+        run: |
+          xmllint --noout "$RUNNER_TEMP/appcast-dev.xml"
+          node scripts/sparkle_appcast.mjs verify --appcast "$RUNNER_TEMP/appcast-dev.xml" --archive candidate/MacMint.zip \
+            --public-key "$PUBLIC_KEY" --version "$BUILD" --url "$ARCHIVE_URL"
+          cat "$RUNNER_TEMP/appcast-dev.xml"
+      - name: Stage the feed
+        run: |
+          mkdir feed
+          cp "$RUNNER_TEMP/appcast-dev.xml" candidate/MacMint.zip candidate/MacMint.zip.sha256 feed/
+          echo "$BUILD" > feed/build-number
+          {
+            echo "Developer build $BUILD of MacMint $SHORT_VERSION from commit $GITHUB_SHA."
+            echo
+            echo "Ad-hoc signed and not notarized. Installed copies receive it through Settings → Updates → Receive developer builds."
+            if [[ -n "${COMPARE:-}" ]]; then echo; echo "Changes: $COMPARE"; fi
+          } > feed/release-notes.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: developer-feed-${{ github.sha }}
+          path: feed
+          if-no-files-found: error
+          retention-days: 14
+
+  # The only job with a write token runs no repository code: it publishes the verified feed.
+  developer-publish:
+    name: Publish developer build
+    needs: developer-appcast
+    if: github.repository == 'QuntmTech/mac-mint' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: developer-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: developer-feed-${{ github.sha }}
+          path: feed
+      - name: Verify the staged archive
+        run: |
+          EXPECTED=$(cat feed/MacMint.zip.sha256)
+          ACTUAL=$(sha256sum feed/MacMint.zip | awk '{print $1}')
+          [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]] || { echo "Digest mismatch"; exit 1; }
+          BUILD=$(cat feed/build-number)
+          [[ "$BUILD" =~ ^[1-9][0-9]*$ ]]
+          grep -q "<sparkle:version>$BUILD</sparkle:version>" feed/appcast-dev.xml
+          echo "BUILD=$BUILD" >> "$GITHUB_ENV"
+      - name: Publish dev-build pre-release
+        run: |
+          TAG="dev-build-$BUILD"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            # A re-run rebuilt the same commit; the feed signs the new archive.
+            gh release upload "$TAG" feed/MacMint.zip feed/MacMint.zip.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" feed/MacMint.zip feed/MacMint.zip.sha256 --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "MacMint developer build $BUILD" --notes-file feed/release-notes.md
+          fi
+      - name: Publish appcast-dev.xml to dev-feed
+        run: |
+          if ! gh release view dev-feed --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create dev-feed --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "MacMint developer feed" \
+              --notes "Sparkle appcast for MacMint developer builds (Settings → Updates → Receive developer builds). Not a download."
+          fi
+          # A later run may already have published a newer build; never move the feed backwards.
+          PUBLISHED=0
+          if gh release download dev-feed --repo "$GITHUB_REPOSITORY" --pattern appcast-dev.xml --dir current; then
+            PUBLISHED=$(grep -o '<sparkle:version>[0-9]*</sparkle:version>' current/appcast-dev.xml | tr -dc '0-9\n' | sort -n | tail -n 1)
+          fi
+          if (( ${PUBLISHED:-0} > BUILD )); then
+            echo "The feed already offers build $PUBLISHED; keeping it."
+          else
+            gh release upload dev-feed feed/appcast-dev.xml --clobber --repo "$GITHUB_REPOSITORY"
+          fi
+      - name: Keep the newest ten developer builds
+        run: |
+          RELEASES=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' | grep -E '^dev-build-[0-9]+$' || true)
+          TAGS=$(gh api --paginate "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/dev-build-" --jq '.[].ref' | sed 's#^refs/tags/##' | grep -E '^dev-build-[0-9]+$' || true)
+          KEEP=$(printf '%s\n%s\n' "$RELEASES" "$TAGS" | grep . | sort -u | sort -t- -k3,3nr | head -n 10)
+          for TAG in $(printf '%s\n' "$RELEASES" | grep -vxF "$KEEP" || true); do
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done
+          for TAG in $(printf '%s\n' "$TAGS" | grep -vxF "$KEEP" || true); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" 2> /dev/null || true
+          done
+
+  install-script:
+    # Exercises scripts/install_dev_build.sh end to end on a disposable runner: download the
+    # latest green main build, install it twice (the second install backs up the first), roll back.
+    if: github.event_name == 'push'
+    runs-on: macos-15
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install, reinstall and roll back
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./scripts/install_dev_build.sh main --no-launch
+          codesign --verify --deep --strict /Applications/MacMint.app
+          FIRST=$(tail -1 "$HOME/MacMint-backups/installed.log" | awk '{print $2}')
+          ./scripts/install_dev_build.sh "$FIRST" --no-launch
+          test -d "$(ls -1dt "$HOME"/MacMint-backups/*/MacMint.app | head -1)"
+          ./scripts/install_dev_build.sh --rollback --no-launch
+          codesign --verify --deep --strict /Applications/MacMint.app
+          ./scripts/install_dev_build.sh --help | grep -q -- '--rollback'

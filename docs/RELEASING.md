@@ -20,19 +20,26 @@ Add these as **environment secrets of `release`** (Settings → Environments →
 | `APPLE_TEAM_ID` | 10-character team ID |
 | `APPLE_APP_PASSWORD` | app-specific password from appleid.apple.com |
 
+`SPARKLE_ED_PRIVATE_KEY` (the Sparkle update-signing key, see [UPDATES.md](UPDATES.md#keys)) is already set as a **repository** secret, because the developer feed on `main` also uses it. The release job can read it too.
+
 If the secrets already exist at repository level, recreate them in the environment and delete the repository copies.
 
 All signing and notarization secrets must be present to publish a consumer release. Without the complete set the workflow produces an explicitly marked ad-hoc prerelease. Both paths run package smoke rendering; only the consumer path can enter the public app feed.
 
 ## Cutting a release
 
-1. Bump `CFBundleShortVersionString` / `CFBundleVersion` in `Resources/Info.plist` and `VERSION`.
+1. Bump `CFBundleShortVersionString` in `Resources/Info.plist` and `VERSION`; `build_app.sh` refuses to build when they differ. Do not edit `CFBundleVersion`: the script stamps the commit count of HEAD into the bundle, and Sparkle compares that number.
 2. Merge the validated implementation to `main`, then tag the version in `VERSION`: `git tag "v$(cat VERSION)" && git push origin "v$(cat VERSION)"`.
 3. Approve the `release` deployment when the **Release** workflow asks. It checks that the tagged commit is on `main`, then builds, signs, notarizes and staples in the approved job. A separate job, the only one with a write token, verifies the digests and publishes a GitHub release with `MacMint.dmg`, the compatibility `MacMint.zip`, and their separate SHA-256 files. Workflows otherwise run with a read-only token, and actions are pinned to commit SHAs that Dependabot updates.
+   For a Developer ID-signed, notarized build, the approved job also signs `MacMint.zip` with the Sparkle key and writes `appcast.xml`. It verifies the signature against the bundle's `SUPublicEDKey` and `CFBundleVersion`, and the release carries the file. Installed copies on the stable channel find it at `releases/latest/download/appcast.xml` and update in one click ([UPDATES.md](UPDATES.md)). An ad-hoc tag build gets no appcast: it stays a pre-release and the log says it was skipped.
 4. Publish it to the app's update feed — create an `app_releases` record in PocketBase (`macmint` project):
    `version`, `build`, `channel=stable`, `min_os=14.0`, `download_url` (the GitHub release asset URL of the DMG, `https://github.com/QuntmTech/mac-mint/releases/download/<tag>/MacMint.dmg`; the feed only accepts that form or an `https://macmint.co/` URL, and the app opens nothing else), `sha256`, `size_bytes`, `notes`, `validated=true`, `notarized=true`, `published=true`, `published_at=now`. Record these attestations only after testing the downloaded artifact, quarantine/Gatekeeper installation, local scanning, cleanup and restore on a disposable Mac. The feed rules reject unvalidated artifacts.
-   Installed apps see the update within a day (or immediately via Settings → Check Now); the website's account page shows the download.
+   The website's account page shows the download. Installed apps update through Sparkle; this record still drives the in-app banner's fallback download and the minimum-version gate.
 5. To force older versions to update, raise `min_version` in the `app_config` record with key `client`.
+
+## Developer builds
+
+Every push to `main` that passes the macOS workflow publishes the pre-release `dev-build-N` and updates `appcast-dev.xml` on the `dev-feed` pre-release. The workflow keeps the newest 10 builds. Copies that opted into developer builds install them from Settings → Updates. Nothing needs to be tagged, and no tags or releases should be created by hand. To check the signing and appcast steps from a branch without publishing, run `gh workflow run macos.yml --ref <branch>` and inspect the `developer-feed-<sha>` artifact.
 
 ## Verifying a build locally
 
@@ -75,3 +82,16 @@ Nothing in the repository deploys itself. For each backend rollout:
 5. **Register the refund and dispute events** (`charge.refunded`, `charge.dispute.created`, `charge.dispute.updated`) on the Stripe webhook endpoint and grant the restricted key Charges, Disputes and Invoices (including invoice payments) read access (see [STRIPE_SETUP.md](STRIPE_SETUP.md)). In the sandbox, refund a one-time purchase and a subscription invoice and check that the account's entitlement becomes inactive, and that a later renewal does not restore the held subscription until `POST /api/macmint/admin/billing/release-hold`.
 6. **Check AI limits.** After `1792109620`, the public `ai` record holds only `enabled` and `features`; budgets and model overrides are in the private `ai_limits` record (`daily_token_budget`, `daily_usd_budget`, `user_daily_usd_cap` (default 1.50), `models`). Allow at least 95 seconds of proxy read time for `/api/macmint/ai/review` and `/api/macmint/ai/organize`, which now wait up to 90 seconds for the provider. Desktop builds wait 100 seconds for these two requests.
 7. **Then production**, in the same order, after a fresh backup. Confirm `GET /api/crons` (superuser) lists `macmint_ai_stale_reservations` (hourly; flags, never frees) and `macmint_retention` (daily; site events older than 180 days, failed-redeem audit rows older than 90 days).
+
+## Installing a test build on a Mac in about a minute
+
+CI already builds, tests and packages every push on macOS 15 and 26, so a test Mac never needs to compile. With the GitHub CLI signed in (`brew install gh && gh auth login`):
+
+```bash
+./scripts/install_dev_build.sh                # latest green build of main
+./scripts/install_dev_build.sh my-branch      # latest green build of a branch
+./scripts/install_dev_build.sh --pr 42        # a pull request's branch
+./scripts/install_dev_build.sh --rollback     # put the previous copy back
+```
+
+The script picks the newest successful `macOS build` run, downloads the universal `macos-15` artifact (it runs on macOS 14 or later), checks its SHA-256 against CI's checksum and verifies the code signature. It then quits MacMint gracefully (it never force-quits), backs up the current app and `~/Library/Application Support/MacMint` to `~/MacMint-backups/<time>/` (it keeps the newest five), installs to `/Applications`, and relaunches. Artifacts expire after 14 days. The `install-script` CI job exercises install, reinstall and rollback on a disposable runner for every push.

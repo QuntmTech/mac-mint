@@ -104,29 +104,50 @@ public struct ReleaseChecker: Sendable {
   /// not accepted directly. No credentials, ports, queries, fragments, percent-encoding or
   /// dot segments. Mirrors `trustedDownloadURL` in backend macmint_payments_lib.js.
   public static func trustedDownloadURL(_ string: String?) -> URL? {
+    guard let parsed = plainHTTPSURL(string) else { return nil }
+    switch parsed.host {
+    case "macmint.co":
+      return parsed.url
+    case "github.com":
+      return isReleaseAsset(parsed.segments, allowLatest: false) ? parsed.url : nil
+    default:
+      return nil
+    }
+  }
+
+  /// Sparkle feeds and update archives: QuntmTech/mac-mint GitHub release assets only, at a
+  /// fixed tag (`releases/download/<tag>/<asset>`) or in the newest stable release
+  /// (`releases/latest/download/<asset>`). Sparkle additionally requires each archive's
+  /// EdDSA signature from the key in Info.plist.
+  public static func trustedUpdateURL(_ string: String?) -> URL? {
+    guard let parsed = plainHTTPSURL(string), parsed.host == "github.com",
+      isReleaseAsset(parsed.segments, allowLatest: true)
+    else { return nil }
+    return parsed.url
+  }
+
+  private static func isReleaseAsset(_ segments: [String], allowLatest: Bool) -> Bool {
+    guard segments.count == 6, segments[0] == "QuntmTech", segments[1] == "mac-mint", segments[2] == "releases",
+      !segments[5].isEmpty
+    else { return false }
+    if segments[3] == "download" { return !segments[4].isEmpty }
+    return allowLatest && segments[3] == "latest" && segments[4] == "download"
+  }
+
+  private static func plainHTTPSURL(_ string: String?) -> (host: String, segments: [String], url: URL)? {
     guard let string, string.count <= 2000, string.hasPrefix("https://"),
       let components = URLComponents(string: string),
       components.user == nil, components.password == nil, components.port == nil,
       components.query == nil, components.fragment == nil,
       components.percentEncodedHost?.contains("%") == false,
-      let host = components.host?.lowercased()
+      let host = components.host?.lowercased(), let url = components.url
     else { return nil }
     let path = components.percentEncodedPath
     let pathCharacters = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~+/-")
     guard path.hasPrefix("/"), path.allSatisfy(pathCharacters.contains) else { return nil }
     let segments = path.split(separator: "/", omittingEmptySubsequences: false).dropFirst().map(String.init)
     guard !segments.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
-    switch host {
-    case "macmint.co":
-      break
-    case "github.com":
-      guard segments.count == 6, segments[0] == "QuntmTech", segments[1] == "mac-mint",
-        segments[2] == "releases", segments[3] == "download", !segments[4].isEmpty, !segments[5].isEmpty
-      else { return nil }
-    default:
-      return nil
-    }
-    return components.url
+    return (host, segments, url)
   }
 
   private struct ListResponse: Decodable { let items: [ReleaseInfo] }

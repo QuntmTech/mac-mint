@@ -15,6 +15,8 @@ jobs:
           node-version: '22'
       - name: Installer notarization failure checks
         run: python3 -m unittest discover -s tests -p 'test_notarization.py'
+      - name: Sparkle appcast generation and EdDSA verification checks
+        run: node --test tests/sparkle_appcast.test.mjs
       - name: Backend unit checks
         run: node --test backend/tests/*.test.cjs
       - name: Install pinned PocketBase test runtime
