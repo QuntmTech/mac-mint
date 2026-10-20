@@ -74,7 +74,7 @@ const PlanCard = ({ account, checkoutResult, onRefresh }: { account: AccountSnap
   )
 }
 
-const VerificationCard = ({ email, onRefresh }: { email: string; onRefresh: () => void }) => {
+const VerificationCard = ({ email, hasPlan, onRefresh }: { email: string; hasPlan: boolean; onRefresh: () => void }) => {
   const [busy, setBusy] = useState(false)
   const [requested, setRequested] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -93,7 +93,7 @@ const VerificationCard = ({ email, onRefresh }: { email: string; onRefresh: () =
   }
   return <Card title="Verify your email">
     <div className="space-y-3">
-      <p>Verify {email} before purchasing. Local scanning and recovery remain available.</p>
+      <p>{hasPlan ? `Verify ${email} so you can recover your account by email. Your plan and Macs keep working meanwhile.` : `Verify ${email} before purchasing. Local scanning and recovery remain available.`}</p>
       {requested && <Alert tone="info">Verification email requested. Check your inbox and spam folder, then open the link.</Alert>}
       {error && <Alert>{error}</Alert>}
       <div className="flex flex-wrap gap-3">
@@ -365,7 +365,7 @@ export const Account = () => {
         </div>
       ) : visibleAccount ? (
         <div className="space-y-6">
-          {!visibleAccount.user.verified && <VerificationCard email={visibleAccount.user.email} onRefresh={load} />}
+          {!visibleAccount.user.verified && <VerificationCard email={visibleAccount.user.email} hasPlan={visibleAccount.entitlement.active} onRefresh={load} />}
           <PlanCard account={visibleAccount} checkoutResult={checkoutResult} onRefresh={load} />
           <RedeemCard key={visibleAccount.user.id} initialCode={params.get('code') ?? ''} hasPlan={visibleAccount.entitlement.active} onRedeemed={snapshot => {
             if (snapshot.user.id !== userId || pb.authStore.record?.id !== userId) return

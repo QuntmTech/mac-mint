@@ -4,6 +4,9 @@
 // Prices and links come only from the server's commerce configuration; a browser never
 // supplies an amount, Price, link or ownership.
 const CLAIM_MILLIS = 72 * 3600000
+// /welcome can arrive before the webhook. Stripe is asked directly only once the webhook is
+// plausibly late, and at most once per minute per session; unknown IDs are cached as misses.
+const LATE_MILLIS = 10000, RETRY_MILLIS = 60000, LOOKUP_KEY = "macmint_claim_lookups", LOOKUP_CAP = 5000
 const EMAIL = /^[^\s@"<>()\[\],;:\\]{1,64}@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
 const SESSION = /^cs_[A-Za-z0-9_]{8,200}$/
 const REFERENCE = /^[A-Za-z0-9_-]{1,200}$/
@@ -48,6 +51,12 @@ function plans(app) {
 
 function usersByEmail(app, email) {
   return app.findRecordsByFilter("users", "email:lower = {:e}", "created", 2, 0, { e: email }) || []
+}
+// A purchase is attached automatically only to a verified account for its billing email.
+// Anyone can register an unverified account under someone else's address.
+function ownerDecision(owner) {
+  if (!owner) return "none"
+  return owner.get("verified") === true ? "link" : "unverified_owner"
 }
 function claimRows(app, filter, params, limit = 20) {
   return app.findRecordsByFilter("purchase_claims", filter, "created", limit, 0, params) || []
@@ -121,8 +130,9 @@ function saveClaim(app, full, verdict) {
       billing_email: verdict.email || "", customer_id: String(id(full.customer) || ""), subscription_id: String(id(full.subscription) || ""),
       expires_at: new Date(Date.now() + CLAIM_MILLIS).toISOString() })) claim.set(key, value)
     const duplicate = !mismatch && tier.trial_days > 0 && eligibility(tx, verdict.email, full.id) !== "eligible"
+    const unverified = ownerDecision(usersByEmail(tx, verdict.email)[0]) === "unverified_owner"
     claim.set("state", mismatch ? "attention" : "pending")
-    claim.set("attention", mismatch ? "terms_mismatch" : duplicate ? "duplicate_trial" : "")
+    claim.set("attention", mismatch ? "terms_mismatch" : duplicate ? "duplicate_trial" : unverified ? "unverified_owner" : "")
     tx.save(claim)
     shared().logEvent(tx, mismatch ? "payment_link_mismatch" : "purchase_recorded", "", { session: full.id, tier: tier.tier, attention: claim.get("attention") })
   })
@@ -172,7 +182,7 @@ function recordSession(app, stub) {
   let claim = saveClaim(app, full, verdict)
   if (claim.get("state") === "pending") {
     const owner = usersByEmail(app, claim.get("billing_email"))[0]
-    if (owner) link(app, cfg, claim.id, owner.id)
+    if (ownerDecision(owner) === "link") link(app, cfg, claim.id, owner.id)
     claim = app.findRecordById("purchase_claims", claim.id)
   }
   if (claim.get("order")) billing().fulfill(app, full)
@@ -184,22 +194,54 @@ function plan(claim) {
     trial_days: claim.get("trial_days"), billing_interval: String(claim.get("billing_interval") || "year") }
 }
 const PUBLIC_STATE = { claimable: "ready", existing_account: "existing_account", already_claimed: "claimed", expired: "expired", attention: "attention" }
-function locate(app, sessionId) {
+// Bounded per-process memory of sessions not (yet) recorded by a webhook.
+function lookups(app, now) {
+  const stored = app.store().get(LOOKUP_KEY)
+  const kept = {}
+  let count = 0
+  if (stored && typeof stored === "object") {
+    for (const key of Object.keys(stored)) {
+      const entry = stored[key]
+      if (entry && entry.first + CLAIM_MILLIS > now && count < LOOKUP_CAP) { kept[key] = entry; count++ }
+    }
+  }
+  return { entries: kept, count }
+}
+// Pure: whether to ask Stripe now for a session the webhook has not recorded.
+function lookupDecision(entry, now) {
+  if (!entry) return "wait"
+  return entry.next <= now ? "ask" : "wait"
+}
+function locate(app, sessionId, now = Date.now()) {
   let claim = claimForSession(app, sessionId)
   if (claim) return { claim }
-  // The browser can arrive before the webhook. Ask Stripe directly; nothing is granted
-  // unless that authoritative session is a complete, configured Payment Link purchase.
-  const result = recordSession(app, { id: sessionId })
-  if (result.result === "ignored") return { state: "not_found" }
+  const memory = lookups(app, now)
+  const entry = memory.entries[sessionId]
+  if (!entry) {
+    if (memory.count >= LOOKUP_CAP) return { state: "processing" }
+    memory.entries[sessionId] = { first: now, next: now + LATE_MILLIS, state: "processing" }
+    app.store().set(LOOKUP_KEY, memory.entries)
+    return { state: "processing" }
+  }
+  if (lookupDecision(entry, now) === "wait") return { state: entry.state }
+  // The webhook is late: ask Stripe directly. Nothing is granted unless that authoritative
+  // session is a complete, configured Payment Link purchase.
+  let result
+  try { result = recordSession(app, { id: sessionId }) } catch (_) { result = { result: "unavailable" } }
   claim = claimForSession(app, sessionId)
-  return claim ? { claim } : { state: "processing" }
+  if (claim) return { claim }
+  memory.entries[sessionId] = { first: entry.first, next: now + RETRY_MILLIS, state: result.result === "ignored" ? "not_found" : "processing" }
+  app.store().set(LOOKUP_KEY, memory.entries)
+  return { state: memory.entries[sessionId].state }
 }
 function status(app, sessionId, now = Date.now()) {
   if (!validSessionId(sessionId)) throw { code: "bad_request" }
   let found
   try { found = locate(app, sessionId) } catch (_) { return { state: "processing" } }
   if (!found.claim) return { state: found.state }
-  return { state: PUBLIC_STATE[claimDecision(snapshot(found.claim), now)], email: String(found.claim.get("billing_email")), plan: plan(found.claim) }
+  const result = { state: PUBLIC_STATE[claimDecision(snapshot(found.claim), now)], email: String(found.claim.get("billing_email")), plan: plan(found.claim) }
+  if (result.state === "ready" && found.claim.get("attention") === "unverified_owner") result.owner_unverified = true
+  return result
 }
 // Single use: the pending → claimed transition, account creation and order binding share
 // one transaction. An existing account for the billing email is linked, never replaced.
@@ -226,14 +268,17 @@ function claim(app, input, now = Date.now()) {
     const current = tx.findRecordById("purchase_claims", found.claim.id)
     const decision = claimDecision(snapshot(current), now)
     if (decision !== "claimable") throw { code: decision }
-    const owner = usersByEmail(tx, billingEmail)[0]
-    if (owner) { outcome = linkInTransaction(tx, cfg, current, owner.id, "linked") === "linked" ? "existing_account" : "attention"; return }
+    const owner = usersByEmail(tx, billingEmail)[0], ownership = ownerDecision(owner)
+    if (ownership === "link") { outcome = linkInTransaction(tx, cfg, current, owner.id, "linked") === "linked" ? "existing_account" : "attention"; return }
+    // An unverified account holds the billing email: never attach to it or create a
+    // case-variant duplicate. Its owner can verify and attach; the buyer can pick another email.
+    if (ownership === "unverified_owner" && email === billingEmail) throw { code: "unverified_owner" }
     if (email !== billingEmail && usersByEmail(tx, email).length) throw { code: "email_taken" }
     const user = new Record(tx.findCollectionByNameOrId("users"))
     user.set("email", email); user.setPassword(password); user.set("emailVisibility", false)
-    // Keeping the Stripe email: that address completed checkout and no account owned it.
-    // A different sign-in address follows the normal verification-email policy.
-    user.set("verified", email === billingEmail)
+    // Stripe never proves mailbox ownership: every claimed account starts unverified and
+    // gets the normal verification email. The purchase itself does not require verification.
+    user.set("verified", false)
     tx.save(user)
     userId = user.id
     outcome = linkInTransaction(tx, cfg, current, user.id, "claimed") === "claimed" ? "claimed" : "attention"
@@ -242,7 +287,30 @@ function claim(app, input, now = Date.now()) {
   if (outcome !== "attention") {
     try { billing().fulfill(app, full) } catch (_) { syncPending = true }
   }
+  if (outcome === "claimed") {
+    // Best effort: delivery starts working once SMTP is configured; the claim never waits on it.
+    try { $mails.sendRecordVerification(app, app.findRecordById("users", userId)) } catch (_) {}
+  }
   return { outcome, userId, email: outcome === "existing_account" ? billingEmail : email, syncPending, plan: plan(found.claim) }
+}
+// A signed-in, verified account whose email is the purchase's billing email attaches a
+// pending purchase explicitly (the case an unverified holder of that address blocked).
+function attach(app, user, sessionId, now = Date.now()) {
+  if (!validSessionId(sessionId)) throw { code: "bad_request" }
+  const claim = claimForSession(app, sessionId)
+  if (!claim) throw { code: "not_found" }
+  if (user.get("verified") !== true) throw { code: "verify_email" }
+  if (normalizeEmail(user.get("email")) !== String(claim.get("billing_email"))) throw { code: "email_mismatch" }
+  if (claim.get("state") !== "pending" || claim.get("order")) throw { code: claimDecision(snapshot(claim), now) }
+  const cfg = knownConfiguration(app)
+  if (!cfg) throw Error("Commerce configuration unavailable")
+  const full = payments().authoritativeSession(app, { id: sessionId })
+  if (classifySession(cfg, full).result !== "accepted") throw { code: "attention" }
+  const state = link(app, cfg, claim.id, user.id)
+  if (state !== "linked") throw { code: "attention" }
+  let syncPending = false
+  try { billing().fulfill(app, full) } catch (_) { syncPending = true }
+  return { state: "linked", sync_pending: syncPending }
 }
 // Superuser recovery for a claim that expired or arrived without a matching account.
 function adminLink(app, sessionId, userId) {
@@ -262,4 +330,4 @@ function refresh(app, userId) {
   return rows.length
 }
 module.exports = { normalizeEmail, validSessionId, publicPlans, paymentLinkURL, tierByName, tierForLink, classifySession, claimDecision,
-  plans, start, eligibility, recordSession, status, claim, adminLink, refresh, CLAIM_MILLIS }
+  ownerDecision, lookupDecision, plans, start, eligibility, recordSession, status, claim, attach, adminLink, refresh, CLAIM_MILLIS }

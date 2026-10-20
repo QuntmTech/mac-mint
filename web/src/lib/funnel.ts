@@ -13,7 +13,7 @@ export type Tier = {
 export type Plans = { enabled: boolean; tiers?: Tier[] }
 export type ClaimPlan = Pick<Tier, 'tier' | 'devices' | 'amount_minor' | 'currency' | 'trial_days' | 'billing_interval'>
 export type ClaimState = 'processing' | 'ready' | 'existing_account' | 'claimed' | 'expired' | 'attention' | 'not_found'
-export type ClaimStatus = { state: ClaimState; email?: string; plan?: ClaimPlan }
+export type ClaimStatus = { state: ClaimState; email?: string; plan?: ClaimPlan; owner_unverified?: boolean }
 export type Download = {
   source: 'feed' | 'github' | 'none'
   version?: string
@@ -45,8 +45,13 @@ export const startTrial = async (email: string, tier: string) => {
   return destination.href
 }
 
+// POST keeps the Stripe session ID out of URLs and server access logs.
 export const fetchClaim = (sessionId: string) =>
-  pb.send<ClaimStatus>('/api/macmint/purchase/claim', { method: 'GET', query: { session_id: sessionId } })
+  pb.send<ClaimStatus>('/api/macmint/purchase/status', { method: 'POST', headers: json, body: JSON.stringify({ session_id: sessionId }) })
+
+/** A signed-in, verified owner of the billing email adds the purchase to this account. */
+export const attachPurchase = (sessionId: string) =>
+  pb.send<{ state: 'linked'; sync_pending: boolean }>('/api/macmint/purchase/attach', { method: 'POST', headers: json, body: JSON.stringify({ session_id: sessionId }) })
 
 export type ClaimResult =
   | { state: 'existing_account'; email: string }

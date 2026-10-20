@@ -4,8 +4,10 @@
 const RULES = [
   // Each call can redirect to Stripe and reveals trial eligibility for an email address.
   { label: "/api/macmint/trial/start", maxRequests: 10, duration: 600 },
-  // GET polls while the webhook lands (may ask Stripe); POST creates the account.
-  { label: "/api/macmint/purchase/claim", maxRequests: 60, duration: 600 },
+  // /welcome polls status while the webhook lands (may ask Stripe); claim creates the account.
+  { label: "/api/macmint/purchase/status", maxRequests: 60, duration: 600 },
+  { label: "/api/macmint/purchase/claim", maxRequests: 20, duration: 600 },
+  { label: "/api/macmint/purchase/attach", maxRequests: 10, duration: 600 },
   { label: "/api/macmint/billing/refresh", maxRequests: 10, duration: 600 },
 ]
 

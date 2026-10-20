@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Alert, AuthCard, Button, Field } from '../components/Form'
-import { claimPurchase, fetchClaim, refreshBilling, type ClaimStatus } from '../lib/funnel'
+import { useAuth } from '../hooks/useAuth'
+import { attachPurchase, claimPurchase, fetchClaim, refreshBilling, type ClaimStatus } from '../lib/funnel'
 import { formatMinor } from '../lib/offers'
 import { errorMessage, pb } from '../lib/pb'
 
@@ -30,6 +31,7 @@ const SignInLink = ({ children = 'Sign in' }: { children?: string }) =>
 
 export const Welcome = () => {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [sessionId] = useState(takeSession)
   const [status, setStatus] = useState<ClaimStatus | null>(null)
   const [stalled, setStalled] = useState(false)
@@ -78,6 +80,29 @@ export const Welcome = () => {
     return () => { active = false; clearTimeout(timer) }
   }, [sessionId, revision])
 
+  const finish = async (syncPending: boolean) => {
+    forget()
+    if (syncPending) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { await refreshBilling(); break } catch { await new Promise(resolve => setTimeout(resolve, 1500)) }
+      }
+    }
+    if (alive.current) navigate('/download?welcome=1', { replace: true })
+  }
+
+  const attach = async () => {
+    if (busy) return
+    setBusy(true); setError(null)
+    try {
+      const result = await attachPurchase(sessionId)
+      if (alive.current) await finish(result.sync_pending)
+    } catch (err) {
+      if (alive.current) setError(errorMessage(err, 'The purchase could not be added. Please try again.'))
+    } finally {
+      if (alive.current) setBusy(false)
+    }
+  }
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (busy) return
@@ -89,19 +114,14 @@ export const Welcome = () => {
       if (!alive.current) return
       if ('state' in result) { forget(); setLinkedEmail(result.email); return }
       pb.authStore.save(result.token, result.record as never)
-      forget()
-      if (result.meta.sync_pending) {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try { await refreshBilling(); break } catch { await new Promise(resolve => setTimeout(resolve, 1500)) }
-        }
-      }
-      if (alive.current) navigate('/download?welcome=1', { replace: true })
+      await finish(result.meta.sync_pending)
     } catch (err) {
       if (!alive.current) return
       const code = (err as { response?: { error?: string } })?.response?.error
       if (code === 'already_claimed') setStatus(current => current && { ...current, state: 'claimed' })
       else if (code === 'expired') setStatus(current => current && { ...current, state: 'expired' })
       else if (code === 'attention') setStatus(current => current && { ...current, state: 'attention' })
+      else if (code === 'unverified_owner') { setStatus(current => current && { ...current, owner_unverified: true }); setOtherEmail(true) }
       setError(errorMessage(err, 'Your account could not be created. Please try again.'))
     } finally {
       if (alive.current) setBusy(false)
@@ -145,8 +165,14 @@ export const Welcome = () => {
   }
 
   const plan = status.plan
+  const ownsBillingEmail = Boolean(user && user.verified && String(user.email ?? '').toLowerCase() === status.email)
   return <AuthCard title="Create your password" subtitle="Your free trial is active. Set a password to finish your MacMint account.">
     <form onSubmit={submit} className="space-y-4">
+      {status.owner_unverified && <Alert tone="info">
+        An unverified MacMint account already uses {status.email}, so this purchase wasn’t added to it. Create your account with a different sign-in email below,
+        or sign in to that account, verify its email and come back to this page to add the purchase.
+      </Alert>}
+      {status.owner_unverified && ownsBillingEmail && <Button type="button" variant="secondary" busy={busy} className="w-full" onClick={attach}>Add this purchase to my account</Button>}
       {plan && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-200">
         MacMint Pro for {plan.devices} {plan.devices === 1 ? 'Mac' : 'Macs'} · {plan.trial_days}-day trial, then {formatMinor(plan.amount_minor, plan.currency)}/{plan.billing_interval}
       </div>}

@@ -41,7 +41,7 @@ export const Start = () => {
   const [email, setEmail] = useState(() => readEmail() || String(user?.email ?? ''))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [refusal, setRefusal] = useState<'trial_used' | 'active_plan' | null>(null)
+  const [refusal, setRefusal] = useState(false)
   const [today] = useState(() => Date.now())
 
   useEffect(() => {
@@ -54,7 +54,7 @@ export const Start = () => {
 
   const selected = tiers?.find(tier => tier.tier === params.get('tier')) ?? tiers?.[0]
   const choose = (tier: Tier) => {
-    setRefusal(null); setError(null)
+    setRefusal(false); setError(null)
     // Keeps the tier in the address so returning from Stripe lands on the same choice.
     setParams(current => { current.set('tier', tier.tier); return current }, { replace: true })
   }
@@ -62,14 +62,14 @@ export const Start = () => {
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!selected || busy) return
-    setBusy(true); setError(null); setRefusal(null)
+    setBusy(true); setError(null); setRefusal(false)
     const address = email.trim()
     saveEmail(address)
     try {
       window.location.assign(await startTrial(address, selected.tier))
     } catch (err) {
       const code = (err as { response?: { error?: string } })?.response?.error
-      if (code === 'trial_used' || code === 'active_plan') setRefusal(code)
+      if (code === 'sign_in_required') setRefusal(true)
       else setError(errorMessage(err, 'Checkout could not be opened. Please try again.'))
       setBusy(false)
     }
@@ -154,9 +154,8 @@ export const Start = () => {
               <Field label="Email" type="email" autoComplete="email" required maxLength={254} value={email}
                 hint="We’ll fill it in at Stripe. It becomes your MacMint sign-in." onChange={event => setEmail(event.target.value)} />
               {refusal && <Alert tone="info">
-                {refusal === 'trial_used' ? 'This email has already used its free trial.' : 'This email already has an active MacMint plan.'}{' '}
-                <Link to="/login?next=/account" className="font-semibold underline">Sign in</Link>
-                {refusal === 'trial_used' ? ' to buy MacMint Pro without a trial.' : ' to manage it.'}
+                This email can’t start another free trial. <Link to="/login?next=/account" className="font-semibold underline">Sign in</Link> to continue;
+                you can manage your plan or buy MacMint Pro without a trial from your account.
               </Alert>}
               {error && <Alert>{error}</Alert>}
               <Button type="submit" busy={busy} className="w-full py-3 text-base">Start free trial</Button>

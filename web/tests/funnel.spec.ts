@@ -16,11 +16,12 @@ async function backend(page: Page) {
     .map(value => Buffer.from(JSON.stringify(value)).toString('base64url')).join('.') + '.fixture'
   const state = {
     plans: { enabled: true, tiers: tiers() } as { enabled: boolean; tiers?: ReturnType<typeof tiers> },
-    startError: '' as '' | 'trial_used' | 'active_plan',
+    startError: '' as '' | 'sign_in_required',
     startRequests: [] as Record<string, unknown>[],
     claimStates: ['processing', 'ready'] as string[],
     claimRequests: [] as Record<string, unknown>[],
     claimResult: 'claimed' as 'claimed' | 'existing_account',
+    ownerUnverified: false, attachRequests: 0,
     download: { source: 'github', version: '1.4.0', url: DMG, size_bytes: 23456789, sha256: null, min_os: '14.0', notarized: false } as Record<string, unknown>,
     stripeVisits: [] as string[], refreshes: 0, unexpected: [] as string[], origins: new Set<string>(),
   }
@@ -44,14 +45,20 @@ async function backend(page: Page) {
       const tier = { mac1: 'test_one111', mac2: 'test_two222', mac5: 'test_five55' }[body.tier as string]
       return respond({ url: `https://buy.stripe.com/${tier}?prefilled_email=${encodeURIComponent(body.email)}&client_reference_id=mmt_fixture` })
     }
-    if (path === '/api/macmint/purchase/claim' && route.request().method() === 'GET') {
-      expect(url.searchParams.get('session_id')).toBe(SESSION)
+    if (path === '/api/macmint/purchase/status') {
+      // The session ID travels in the POST body, never in a backend URL.
+      expect(route.request().method()).toBe('POST')
+      expect(url.search).toBe('')
+      expect(route.request().postDataJSON()).toEqual({ session_id: SESSION })
       const current = state.claimStates.length > 1 ? state.claimStates.shift()! : state.claimStates[0]
-      return respond({ state: current, email: 'new.buyer@example.invalid', plan: { tier: 'mac2', devices: 2, amount_minor: 5995, currency: 'usd', trial_days: 7, billing_interval: 'year' } })
+      return respond({ state: current, email: 'new.buyer@example.invalid', owner_unverified: state.ownerUnverified || undefined,
+        plan: { tier: 'mac2', devices: 2, amount_minor: 5995, currency: 'usd', trial_days: 7, billing_interval: 'year' } })
     }
+    if (path === '/api/macmint/purchase/attach') { state.attachRequests++; return respond({ state: 'linked', sync_pending: false }) }
     if (path === '/api/macmint/purchase/claim') {
       state.claimRequests.push(route.request().postDataJSON())
       if (state.claimResult === 'existing_account') return respond({ state: 'existing_account', email: 'new.buyer@example.invalid' })
+      if (state.ownerUnverified && !route.request().postDataJSON().email) return respond({ error: 'unverified_owner', message: 'An unverified MacMint account already uses this email.' }, 409)
       return respond({ token, record: user, meta: { state: 'claimed', sync_pending: true } })
     }
     if (path === '/api/macmint/billing/refresh') { state.refreshes++; return respond({ refreshed: 1 }) }
@@ -201,19 +208,34 @@ test('an existing account is linked, not duplicated, and the buyer is asked to s
   expect(state.unexpected).toEqual([])
 })
 
-test('a used trial is refused before Stripe with a sign-in path', async ({ page }) => {
+test('a used trial or existing plan is refused before Stripe with a generic sign-in path', async ({ page }) => {
   const state = await backend(page)
-  state.startError = 'trial_used'
+  state.startError = 'sign_in_required'
   await page.goto('/start')
   await page.getByLabel('Email').fill('veteran@example.invalid')
   await page.getByRole('button', { name: 'Start free trial' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'already used its free trial' })).toBeVisible()
-  await expect(page.getByRole('status').getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login?next=/account')
+  const notice = page.getByRole('status').filter({ hasText: 'can’t start another free trial' })
+  await expect(notice).toBeVisible()
+  await expect(notice.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login?next=/account')
   expect(state.stripeVisits).toEqual([])
-  state.startError = 'active_plan'
-  await page.getByRole('button', { name: 'Start free trial' }).click()
-  await expect(page.getByRole('status').filter({ hasText: 'already has an active MacMint plan' })).toBeVisible()
   expect(state.unexpected).toEqual([])
+})
+
+test('a purchase blocked by an unverified account for the email offers another sign-in email', async ({ page }) => {
+  const state = await backend(page)
+  state.claimStates = ['ready']; state.ownerUnverified = true
+  await page.goto(`/welcome?session_id=${SESSION}`)
+  await expect(page.getByRole('status').filter({ hasText: 'An unverified MacMint account already uses new.buyer@example.invalid' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add this purchase to my account' })).toHaveCount(0)
+  await page.getByLabel('Password', { exact: true }).fill('a-strong-password-1')
+  await page.getByLabel('Confirm password').fill('a-strong-password-1')
+  await page.getByRole('button', { name: 'Create account and continue' }).click()
+  await expect(page.getByRole('alert')).toContainText('unverified MacMint account')
+  await page.getByLabel('Sign-in email').fill('real.buyer@example.invalid')
+  await page.getByRole('button', { name: 'Create account and continue' }).click()
+  await expect(page).toHaveURL('http://127.0.0.1:4173/download?welcome=1')
+  expect(state.claimRequests.at(-1)).toEqual({ session_id: SESSION, password: 'a-strong-password-1', email: 'real.buyer@example.invalid' })
+  expect(state.attachRequests).toBe(0); expect(state.unexpected).toEqual([])
 })
 
 test('the plan, welcome and download pages fit a phone viewport', async ({ page }) => {

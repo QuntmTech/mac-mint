@@ -22,6 +22,19 @@ onRecordAfterCreateSuccess((e) => {
   e.next()
 }, "users")
 
+// Account emails are case-insensitive: store them lowercase and refuse case variants, so
+// a purchase or sign-in for an address can only ever match one account.
+onRecordCreate((e) => { require(`${__hooks}/macmint_lib.js`).uniqueEmail(e); e.next() }, "users")
+onRecordUpdate((e) => { require(`${__hooks}/macmint_lib.js`).uniqueEmail(e, e.record.original().get("email")); e.next() }, "users")
+// Sign-in matches the address case-insensitively when exactly one account has it.
+onRecordAuthWithPasswordRequest((e) => {
+  if (!e.record && (!e.identityField || e.identityField === "email")) {
+    const matches = e.app.findRecordsByFilter("users", "email:lower = {:e}", "", 2, 0, { e: String(e.identity || "").trim().toLowerCase() }) || []
+    if (matches.length === 1) e.record = matches[0]
+  }
+  e.next()
+}, "users")
+
 onRecordCreateRequest((e) => {
   if (e.auth && e.auth.collection().name === "users") {
     e.record.set("user", e.auth.id)

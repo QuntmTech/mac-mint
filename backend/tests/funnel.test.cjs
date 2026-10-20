@@ -207,3 +207,18 @@ test('download source prefers a validated DMG feed and only trusts the project\'
   assert.equal(feed({ download_url: 'https://github.com/QuntmTech/mac-mint/releases/download/v1.2.0/MacMint.zip' }), null)
   assert.equal(feed({ download_url: 'https://macmint.co/downloads/MacMint.dmg' }).url, 'https://macmint.co/downloads/MacMint.dmg')
 })
+
+test('purchases attach automatically only to a verified owner of the billing email', () => {
+  assert.equal(funnel.ownerDecision(null), 'none')
+  assert.equal(funnel.ownerDecision(new Row('users', { verified: true })), 'link')
+  assert.equal(funnel.ownerDecision(new Row('users', { verified: false })), 'unverified_owner', 'Anyone can register an unverified account under a victim\'s address')
+  assert.equal(funnel.ownerDecision(new Row('users', {})), 'unverified_owner')
+})
+
+test('unknown sessions wait for the webhook, then ask Stripe at most once per retry window', () => {
+  const now = 1_000_000
+  assert.equal(funnel.lookupDecision(undefined, now), 'wait', 'The first sighting only starts the late-webhook timer')
+  assert.equal(funnel.lookupDecision({ first: now - 5000, next: now + 5000 }, now), 'wait')
+  assert.equal(funnel.lookupDecision({ first: now - 10000, next: now }, now), 'ask')
+  assert.equal(funnel.lookupDecision({ first: now - 70000, next: now + 1 }, now), 'wait', 'A cached miss is not retried early')
+})

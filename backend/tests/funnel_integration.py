@@ -96,8 +96,10 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
     shutil.copytree(ROOT / 'backend/pocketbase/pb_hooks', folder / 'hooks')
     shutil.copytree(ROOT / 'backend/pocketbase/pb_migrations', folder / 'migrations')
     # Redirect ONLY the copied test clients. Production code calls Stripe and GitHub over HTTPS.
+    # The funnel's late-webhook timers are shortened for the fixture (10 s -> 1 s, 60 s -> 2 s).
     for name, old, new in [('macmint_payments_lib.js', 'https://api.stripe.com/v1/', fixture_origin + '/v1/'),
-                           ('macmint_download.js', 'https://api.github.com/', fixture_origin + '/')]:
+                           ('macmint_download.js', 'https://api.github.com/', fixture_origin + '/'),
+                           ('macmint_funnel.js', 'LATE_MILLIS = 10000, RETRY_MILLIS = 60000', 'LATE_MILLIS = 1000, RETRY_MILLIS = 2000')]:
         target = folder / 'hooks' / name
         text = target.read_text()
         assert old in text
@@ -113,6 +115,7 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
     (folder / 'hooks/fixture.pb.js').write_text('''routerAdd("POST","/__test/state",e=>{
       const data=e.requestInfo().body,lib=require(`${__hooks}/macmint_lib.js`)
       if(data.trialUsed){const u=e.app.findFirstRecordByFilter("users","email={:e}",{e:data.trialUsed});const r=lib.ensureEntitlement(e.app,u.id);r.set("subscription_trial_used",true);e.app.save(r)}
+      if(data.verify){const u=e.app.findFirstRecordByFilter("users","email={:e}",{e:data.verify});u.set("verified",true);e.app.save(u)}
       if(data.expire){const r=e.app.findFirstRecordByFilter("purchase_claims","session_id={:s}",{s:data.expire});r.set("expires_at","2020-01-01 00:00:00.000Z");e.app.save(r)}
       if(data.dmg){const r=new Record(e.app.findCollectionByNameOrId("app_releases"));for(const [k,v] of Object.entries({version:"1.5.0",build:15,channel:"stable",min_os:"14.0",size_bytes:34567890,sha256:"f".repeat(64),download_url:"https://github.com/QuntmTech/mac-mint/releases/download/v1.5.0/MacMint.dmg",validated:true,notarized:true,published:true,published_at:"2026-10-20 00:00:00.000Z"}))r.set(k,v);e.app.save(r)}
       return e.json(200,{ok:true})
@@ -155,7 +158,18 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
         return dict(id=session['id'], object='checkout.session', payment_link=session['payment_link'], metadata={})
 
     def status_of(session_id, ip=None):
-        return api('/api/macmint/purchase/claim?session_id=' + session_id, ip=ip)
+        return api('/api/macmint/purchase/status', dict(session_id=session_id), ip=ip)
+
+    def stripe_reads(session_id):
+        return sum(f'/v1/checkout/sessions/{session_id}' in path for path in requests)
+
+    def late_status(session_id):
+        """Poll like /welcome until the late-webhook window lets the server ask Stripe."""
+        for _ in range(40):
+            status, value = status_of(session_id)
+            if value.get('state') != 'processing': return status, value
+            time.sleep(.25)
+        return status, value
 
     with (folder / 'server.log').open('w') as log:
         process = subprocess.Popen(base + ['serve', '--http', f'127.0.0.1:{port}'], stdout=log, stderr=log,
@@ -194,19 +208,20 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             assert api('/api/macmint/trial/start', dict(email='x@example.invalid', tier='plink_two'))[0] == 400
             open_session = purchase('openone1', TIERS[1], 'new.buyer@example.invalid', complete=False)
             assert status_of(open_session['id'])[1]['state'] == 'processing'
+            assert stripe_reads(open_session['id']) == 0, 'A fresh unknown session waits for the webhook before asking Stripe'
             assert api('/api/macmint/purchase/claim', dict(session_id=open_session['id'], password='a-strong-password-1'))[0] == 202
             session = purchase('newbuyer1', TIERS[1], 'new.buyer@example.invalid', reference=params['client_reference_id'][0])
             for kind, obj in [('customer.subscription.created', dict(id=session['subscription'])), ('checkout.session.completed', session_event(session)),
                               ('checkout.session.completed', session_event(session)), ('invoice.paid', dict(id='in_newbuyer1'))]:
                 assert webhook(kind, obj)[0] == 200, kind
-            status, claim_state, headers = call('/api/macmint/purchase/claim?session_id=' + session['id'])
+            status, claim_state, headers = call('/api/macmint/purchase/status', dict(session_id=session['id']))
             assert status == 200 and claim_state['state'] == 'ready' and claim_state['email'] == 'new.buyer@example.invalid', claim_state
             assert claim_state['plan']['devices'] == 2 and claim_state['plan']['amount_minor'] == 5995
             assert headers.get('Referrer-Policy') == 'no-referrer' and 'no-store' in headers.get('Cache-Control', '')
             assert api('/api/macmint/purchase/claim', dict(session_id=session['id'], password='short'))[0] == 400
             status, claimed = api('/api/macmint/purchase/claim', dict(session_id=session['id'], password='a-strong-password-1'))
             assert status == 200 and claimed['meta']['state'] == 'claimed', (status, claimed, (folder / 'server.log').read_text()[-3000:])
-            assert claimed['record']['email'] == 'new.buyer@example.invalid' and claimed['record']['verified'] is True
+            assert claimed['record']['email'] == 'new.buyer@example.invalid' and claimed['record']['verified'] is False, 'Stripe never proves the mailbox'
             account = me(claimed['token'])
             assert account['entitlement']['active'] is True and account['entitlement']['source'] == 'subscription_trial', account
             assert account['entitlement']['max_devices'] == 2
@@ -242,12 +257,12 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             print('PASS: an existing-email purchase links to that account without a duplicate, password change or sign-in')
 
             # 4. Trial abuse: used trials and active plans are refused up front; a slipped-through trial is held.
-            for email, reason in [('new.buyer@example.invalid', 'active_plan'), ('OWNER@example.invalid', 'active_plan')]:
+            for email in ['new.buyer@example.invalid', 'OWNER@example.invalid']:
                 refused = api('/api/macmint/trial/start', dict(email=email, tier='mac5'))
-                assert refused[0] == 409 and refused[1]['error'] == reason, refused
+                assert refused[0] == 409 and refused[1]['error'] == 'sign_in_required', refused
             assert api('/__test/state', dict(trialUsed='veteran@example.invalid'))[0] == 200
             refused = api('/api/macmint/trial/start', dict(email='veteran@example.invalid', tier='mac1'))
-            assert refused[0] == 409 and refused[1]['error'] == 'trial_used', refused
+            assert refused[0] == 409 and refused[1] == dict(error='sign_in_required', message=refused[1]['message']), refused
             veteran_session = purchase('veteran1', TIERS[0], 'veteran@example.invalid')
             assert webhook('checkout.session.completed', session_event(veteran_session))[0] == 200
             veteran_token = api('/api/collections/users/auth-with-password', dict(identity='veteran@example.invalid', password='fixture-password-123'))[1]['token']
@@ -262,8 +277,10 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
 
             # 5. Webhook after redirect, a different sign-in email, and an occupied email.
             billing_session = purchase('billing01', TIERS[2], 'billing@example.invalid')
-            ready = status_of(billing_session['id'])
+            assert status_of(billing_session['id'])[1]['state'] == 'processing' and stripe_reads(billing_session['id']) == 0
+            ready = late_status(billing_session['id'])
             assert ready[1]['state'] == 'ready' and ready[1]['email'] == 'billing@example.invalid', ready
+            assert stripe_reads(billing_session['id']) == 1, 'Exactly one authoritative read once the webhook is late'
             taken = api('/api/macmint/purchase/claim', dict(session_id=billing_session['id'], password='a-strong-password-3', email='owner@example.invalid'))
             assert taken[0] == 409 and taken[1]['error'] == 'email_taken', taken
             assert api('/api/macmint/purchase/claim', dict(session_id=billing_session['id'], password='a-strong-password-3', email='not an email'))[0] == 400
@@ -276,7 +293,7 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             assert webhook('checkout.session.completed', session_event(billing_session))[0] == 200, 'A late webhook is idempotent'
             assert len(users_named('signin@example.invalid')) == 1 and not users_named('billing@example.invalid')
             refused = api('/api/macmint/trial/start', dict(email='billing@example.invalid', tier='mac1'))
-            assert refused[0] == 409 and refused[1]['error'] == 'trial_used', 'The billing email has used its trial'
+            assert refused[0] == 409 and refused[1]['error'] == 'sign_in_required', 'The billing email has used its trial'
             assert api('/api/macmint/billing/refresh', {}, chosen['token'])[1]['refreshed'] == 1
             print('PASS: the redirect can arrive before the webhook; a different sign-in email keeps Stripe\'s billing email')
 
@@ -284,7 +301,9 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             foreign = dict(purchase('foreign01', TIERS[0], 'foreign@example.invalid'), payment_link='plink_not_macmint')
             sessions[foreign['id']] = foreign
             assert webhook('checkout.session.completed', session_event(foreign))[0] == 200
-            assert status_of(foreign['id'])[1]['state'] == 'not_found'
+            assert late_status(foreign['id'])[1]['state'] == 'not_found'
+            reads = stripe_reads(foreign['id'])
+            assert [status_of(foreign['id'])[1]['state'] for _ in range(3)] == ['not_found'] * 3 and stripe_reads(foreign['id']) == reads, 'Misses are cached'
             tampered = purchase('tamper01', TIERS[0], 'tamper@example.invalid')
             tampered['line_items']['data'][0]['price'] = price_for(TIERS[0]) | dict(unit_amount=1)
             assert webhook('checkout.session.completed', session_event(tampered))[0] == 200
@@ -301,6 +320,41 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             assert relinked[0] == 200 and relinked[1]['state'] == 'attention', 'An account with an ongoing subscription cannot bind a second one'
             print('PASS: unknown links are ignored, changed terms and expired claims grant nothing, and recovery respects one subscription')
 
+            # 7a. An attacker who pre-registers the buyer's email (unverified) never receives the purchase.
+            signup = dict(email='Victim@Example.invalid', password='attacker-password-1', passwordConfirm='attacker-password-1')
+            assert api('/api/collections/users/records', signup)[0] == 200
+            variant = dict(signup, email='VICTIM@example.invalid')
+            assert api('/api/collections/users/records', variant)[0] == 400, 'Case-variant duplicate signups are refused'
+            assert [u['email'] for u in users_named('victim@example.invalid')] == ['victim@example.invalid']
+            attacker = api('/api/collections/users/auth-with-password', dict(identity='VICTIM@example.invalid', password='attacker-password-1'))
+            assert attacker[0] == 200, 'Sign-in matches the stored address case-insensitively'
+            attacker_token = attacker[1]['token']
+            victim_session = purchase('victim01', TIERS[0], 'victim@example.invalid')
+            assert webhook('checkout.session.completed', session_event(victim_session))[0] == 200
+            assert me(attacker_token)['entitlement']['active'] is False and me(attacker_token)['billing']['subscription'] is None
+            ready = status_of(victim_session['id'])[1]
+            assert ready['state'] == 'ready' and ready['owner_unverified'] is True, ready
+            stolen = api('/api/macmint/purchase/attach', dict(session_id=victim_session['id']), attacker_token)
+            assert stolen[0] == 403 and stolen[1]['error'] == 'verify_email', stolen
+            blocked = api('/api/macmint/purchase/claim', dict(session_id=victim_session['id'], password='victim-password-1'))
+            assert blocked[0] == 409 and blocked[1]['error'] == 'unverified_owner', blocked
+            status, victim = api('/api/macmint/purchase/claim', dict(session_id=victim_session['id'], password='victim-password-1', email='victim.real@example.invalid'))
+            assert status == 200 and me(victim['token'])['entitlement']['active'] is True, victim
+            assert me(attacker_token)['entitlement']['active'] is False
+            # A verified owner of the billing email can attach explicitly; another account cannot.
+            assert api('/api/collections/users/records', dict(email='later@example.invalid', password='later-password-1', passwordConfirm='later-password-1'))[0] == 200
+            later_session = purchase('later001', TIERS[0], 'later@example.invalid')
+            assert webhook('checkout.session.completed', session_event(later_session))[0] == 200
+            later_token = api('/api/collections/users/auth-with-password', dict(identity='later@example.invalid', password='later-password-1'))[1]['token']
+            assert api('/api/macmint/purchase/attach', dict(session_id=later_session['id']), later_token)[1]['error'] == 'verify_email'
+            assert api('/__test/state', dict(verify='later@example.invalid'))[0] == 200
+            assert api('/api/macmint/purchase/attach', dict(session_id=later_session['id']), owner_token)[1]['error'] == 'email_mismatch'
+            later_token = api('/api/collections/users/auth-with-password', dict(identity='later@example.invalid', password='later-password-1'))[1]['token']
+            attached = api('/api/macmint/purchase/attach', dict(session_id=later_session['id']), later_token)
+            assert attached[0] == 200 and attached[1]['state'] == 'linked' and me(later_token)['entitlement']['active'] is True, attached
+            assert api('/api/macmint/purchase/attach', dict(session_id=later_session['id']), later_token)[0] == 409
+            print('PASS: purchases attach only to verified owners; an unverified squatter gets nothing and case-variant signups are refused')
+
             # 7. Download: GitHub fallback until a validated DMG feed entry exists.
             status, fallback = api('/api/macmint/download')
             assert status == 200 and fallback['source'] == 'github' and fallback['url'] == 'https://github.com/QuntmTech/mac-mint/releases/download/v1.4.0/MacMint.dmg', fallback
@@ -316,6 +370,7 @@ with tempfile.TemporaryDirectory(prefix='pb-funnel-', dir=ROOT / '.build') as ra
             assert starts == [200] * 10 + [429], starts
             assert api('/api/macmint/trial/start', dict(email='burst@example.invalid', tier='mac1'), ip='198.51.100.21')[0] == 200
             polls = [status_of('cs_test_unknownsession', ip='198.51.100.22')[0] for _ in range(61)]
+            assert stripe_reads('cs_test_unknownsession') <= 1
             assert polls[-1] == 429 and polls.count(429) == 1, polls
             print('PASS: trial start and claim polling are rate limited per client')
             print('PASS: funnel migration reapplies safely and purchase claims stay private')
