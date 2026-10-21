@@ -114,10 +114,13 @@ final class HealthMonitor: ObservableObject {
 
   nonisolated static func read() -> Reading {
     func rounded(_ bytes: Int64?) -> Int64? {
-      bytes.map { ($0 + 25 * 1_048_576) / (50 * 1_048_576) * (50 * 1_048_576) }
+      let step: Int64 = 52_428_800  // 50 MB
+      guard let bytes else { return nil }
+      return (bytes + step / 2) / step * step
     }
     var loads = [Double](repeating: 0, count: 3)
-    let load = getloadavg(&loads, 3) == 3 ? (loads[0] * 10).rounded() / 10 : nil
+    var load: Double?
+    if getloadavg(&loads, 3) == 3 { load = (loads[0] * 10).rounded() / 10 }
     return Reading(memoryUsed: rounded(ResourceSampler.memoryUsed()),
       physicalMemory: Int64(ProcessInfo.processInfo.physicalMemory), pressure: ResourceSampler.pressure(),
       swapUsed: rounded(ResourceSampler.swapUsed()), load: load,
@@ -183,15 +186,17 @@ struct SystemHealthRow: View {
       cards.append(Card(title: "Disk", symbol: "internaldrive.fill", swatch: .indigo, value: "—",
         detail: "Disk space unavailable", fraction: nil))
     }
-    let memoryFraction = reading.flatMap { reading in
-      reading.memoryUsed.map { min(1, Double($0) / Double(max(reading.physicalMemory, 1))) }
+    var memoryFraction: Double?
+    if let reading, let used = reading.memoryUsed, reading.physicalMemory > 0 {
+      memoryFraction = min(1, Double(used) / Double(reading.physicalMemory))
     }
     let swap = reading?.swapUsed.map { " · swap " + ByteFormatter.string($0) } ?? ""
     cards.append(Card(title: "Memory", symbol: "memorychip.fill", swatch: .violet,
       value: memoryFraction.map { "\(Int(($0 * 100).rounded()))%" } ?? "—",
       detail: reading.map { "Pressure \($0.pressure.rawValue.lowercased())" + swap } ?? "Reading…",
       fraction: memoryFraction))
-    let loadFraction = reading.flatMap { reading in reading.load.map { min(1, $0 / Double(max(reading.cores, 1))) } }
+    var loadFraction: Double?
+    if let reading, let load = reading.load, reading.cores > 0 { loadFraction = min(1, load / Double(reading.cores)) }
     cards.append(Card(title: "CPU load", symbol: "cpu.fill", swatch: .sky,
       value: reading?.load.map { String(format: "%.1f", $0) } ?? "—",
       detail: reading.map { "1-minute average on \($0.cores) cores" } ?? "Reading…", fraction: loadFraction))
@@ -282,10 +287,7 @@ struct StorageOverviewCard: View {
             ForEach(categories) { category in
               legend(category.title, ByteFormatter.string(category.bytes), fill: AnyShapeStyle(category.swatch.gradient))
             }
-            legend("Everything else", ByteFormatter.string(max(0, volume.used - categories.reduce(Int64(0)) {
-              OverviewPresentation.add($0, $1.bytes)
-            }))),
-              fill: AnyShapeStyle(Color.secondary.opacity(0.35)))
+            legend("Everything else", ByteFormatter.string(otherUsed), fill: AnyShapeStyle(Color.secondary.opacity(0.35)))
             legend("Free", ByteFormatter.string(volume.free), fill: AnyShapeStyle(AppTheme.panel))
           }
         }
@@ -295,6 +297,12 @@ struct StorageOverviewCard: View {
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }
+  }
+
+  /// Used space outside the colored categories.
+  private var otherUsed: Int64 {
+    let found = categories.reduce(Int64(0)) { OverviewPresentation.add($0, $1.bytes) }
+    return max(0, volume.used - found)
   }
 
   private func legend(_ title: String, _ value: String, fill: AnyShapeStyle) -> some View {
