@@ -19,11 +19,22 @@ final class OverviewPresentationTests: XCTestCase {
 
     XCTAssertEqual(categories.map(\.destination), [.trash, .cleaner])
     XCTAssertEqual(categories.map(\.bytes), [400 * megabyte, 75 * megabyte])
-    XCTAssertEqual(categories[1].title, "App caches")
+    XCTAssertEqual(categories[1].title, "Caches & cleanup")
     XCTAssertEqual(categories[1].detail, "2 items · rebuildable")
     XCTAssertEqual(categories[0].detail, "Empty the Trash to free this space")
     XCTAssertEqual(categories[1].swatch, AppTheme.Swatch.sky)
     XCTAssertTrue(OverviewPresentation.categories([]).isEmpty)
+  }
+
+  func testAGroupMixingRebuildableAndReviewOnlyFindingsSaysSo() throws {
+    var inputs = RecommendationEngine.Inputs()
+    inputs.cleanupTargets = [cache("com.example.one", 30),
+      CleanupTarget(category: .installers, url: URL(fileURLWithPath: "/Users/test/Downloads/Tool.dmg"),
+        displayName: "Tool.dmg", size: 40 * megabyte, risk: .review, reason: "Installer")]
+    let cleaner = try XCTUnwrap(OverviewPresentation.categories(RecommendationEngine.recommend(inputs)).first)
+    XCTAssertEqual(cleaner.destination, .cleaner)
+    XCTAssertEqual(cleaner.bytes, 70 * megabyte)
+    XCTAssertEqual(cleaner.detail, "2 items · some need review")
   }
 
   private func category(_ destination: Recommendation.Destination, _ bytes: Int64) -> OverviewPresentation.Category {

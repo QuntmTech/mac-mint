@@ -191,6 +191,8 @@ extension UpdaterController: SPUUpdaterDelegate {
   }
 
   func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+    // A check that started on the other channel finishes after the toggle; don't offer it.
+    guard checkedChannel == channel else { return }
     availableUpdate = Update(item)
     lastResult = nil
   }

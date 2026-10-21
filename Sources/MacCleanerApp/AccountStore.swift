@@ -185,7 +185,13 @@ final class AccountStore: ObservableObject {
       let session = try await self.client.signUp(email: email, password: password, name: name)
       try await self.adopt(session, generation: generation)
       guard generation == self.sessionGeneration, session.user.verified != true else { return }
-      self.infoMessage = "Account created. Open the verification link sent to \(session.user.email) before buying Pro."
+      // Same as the website's sign-up: buying Pro needs a verified address. A failed request
+      // doesn't undo the account, and macmint.co/account can send the link again.
+      let requested = (try? await self.client.requestVerification(email: session.user.email)) != nil
+      guard generation == self.sessionGeneration else { return }
+      self.infoMessage = requested
+        ? "Account created. Check \(session.user.email) for a verification link; you need it before buying Pro."
+        : "Account created, but the verification email couldn't be requested. Send it again from your account at macmint.co."
     }
   }
 

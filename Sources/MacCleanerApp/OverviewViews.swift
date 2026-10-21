@@ -19,7 +19,7 @@ enum OverviewPresentation {
   static func style(_ destination: Recommendation.Destination) -> (title: String, symbol: String, swatch: AppTheme.Swatch) {
     switch destination {
     case .developer: return ("Developer", "hammer.fill", AppTheme.Swatch.orange)
-    case .cleaner: return ("App caches", "archivebox.fill", AppTheme.Swatch.sky)
+    case .cleaner: return ("Caches & cleanup", "archivebox.fill", AppTheme.Swatch.sky)
     case .downloads: return ("Downloads", "arrow.down.circle.fill", AppTheme.Swatch.teal)
     case .removedApps: return ("Removed-app data", "folder.badge.questionmark", AppTheme.Swatch.rose)
     case .applications: return ("Unused apps", "app.dashed", AppTheme.Swatch.violet)
@@ -39,9 +39,11 @@ enum OverviewPresentation {
       let look = Self.style(destination)
       let bytes = group.reduce(Int64(0)) { add($0, $1.bytes) }
       let count = group.reduce(0) { $0 + $1.count }
-      let confidence = group.map(\.confidence).max() ?? .review
+      // A group mixing rebuildable and review-only findings must not read as all rebuildable.
+      let levels = Set(group.map(\.confidence))
+      let safety = levels.count == 1 ? (levels.first?.label.lowercased() ?? "") : "some need review"
       let detail = destination == .trash ? "Empty the Trash to free this space"
-        : (count == 1 ? "1 item" : "\(count) items") + " · " + confidence.label.lowercased()
+        : (count == 1 ? "1 item" : "\(count) items") + " · " + safety
       return Category(destination: destination, title: look.title, symbol: look.symbol, swatch: look.swatch,
         bytes: bytes, detail: detail)
     }.sorted { $0.bytes != $1.bytes ? $0.bytes > $1.bytes : $0.title < $1.title }
