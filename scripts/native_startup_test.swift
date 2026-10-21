@@ -146,6 +146,7 @@ private struct NativeStartupTest {
     let label = performance ? "live Performance view" : "menu bar \(menuBarInserted ? "on" : "off")"
     let options = LaunchOptions(label: label, menuBarInserted: menuBarInserted, onboardingDone: performance,
       activates: performance, extraArguments: performance ? ["--performance"] : [])
+    let checkedBefore = lastUpdateCheck(target.identifier)
     try withLaunchedApp(target, options) { app in
       try settle(app, label: label, seconds: settleSeconds)
       let cpu = try measureCPU(app, label: label, seconds: sampleSeconds)
@@ -153,6 +154,14 @@ private struct NativeStartupTest {
       log(String(format: "%@: settled physical footprint %.1f MiB", label, memory.currentMiB))
       log(String(format: "%@: idle CPU %.2f%% of one core over %.1fs (limit %.1f%%)", label, cpu.average * 100,
         cpu.seconds, maximumAverageCores * 100))
+      // Report-only: where in the window the CPU went (seconds after settling began) and whether
+      // Sparkle's automatic update check finished during this launch (a fresh machine's first launches).
+      let series = cpu.perSecond.enumerated().map { index, cores in
+        String(format: "+%.0fs %.2f%%", settleSeconds + Double(index + 1), cores * 100)
+      }
+      let checkedAfter = lastUpdateCheck(target.identifier)
+      log("TRACE \(label): per-second CPU " + series.joined(separator: ", ")
+        + "; update check finished during launch: " + (checkedAfter != nil && checkedAfter != checkedBefore ? "yes" : "no"))
       guard cpu.average <= maximumAverageCores else {
         throw ProbeFailure(description: "\(label): idle CPU after launch is above budget (a feedback loop or polling).")
       }
@@ -271,6 +280,12 @@ private struct NativeStartupTest {
     guard !waitUntil(seconds: seconds, { app.isTerminated }) else {
       throw ProbeFailure(description: "\(label): process exited while settling.")
     }
+  }
+
+  /// Sparkle's last update-check time from the app's preferences, read-only.
+  private static func lastUpdateCheck(_ identifier: String) -> Date? {
+    CFPreferencesAppSynchronize(identifier as CFString)
+    return CFPreferencesCopyAppValue("SULastCheckTime" as CFString, identifier as CFString) as? Date
   }
 
   /// Cumulative CPU over the whole window, plus the busiest one-second interval.
