@@ -94,11 +94,13 @@ struct RootView: View {
       }
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
-      // Only a paid action's gate returns to its review; opening the account never does.
-      if model.accountPurpose == .paidAction, account.isUnlocked, let plan = model.deferredPlan {
-        model.deferredPlan = nil
+      // Only a paid action's gate returns to its review; opening the account never does. A
+      // gate closed without access drops its plan (the selections stay in the review queue).
+      guard model.accountPurpose == .paidAction else { return }
+      if account.isUnlocked, let plan = model.deferredPlan {
         model.pendingPlan = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered, ignoredPaths: model.ignoredPaths)
       }
+      model.deferredPlan = nil
     }) { AccountAccessSheet(purpose: model.accountPurpose, hasDeferredPlan: model.deferredPlan != nil) }
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

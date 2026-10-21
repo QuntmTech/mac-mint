@@ -13,12 +13,22 @@ struct VolumeSummary: Equatable, Sendable {
   var isMeasured: Bool { total > 0 }
 
   static func read(_ url: URL = FileManager.default.homeDirectoryForCurrentUser) -> VolumeSummary {
+    let reading = capacity(url)
+    return summary(name: reading.name, total: reading.total, free: reading.free)
+  }
+
+  /// The one capacity reading of the startup (Data) volume used by the menu bar, the sidebar,
+  /// Overview, history and low-space alerts: space for important use (which includes space
+  /// macOS can purge), else plain available space. Missing values stay nil, never zero.
+  static func capacity(_ url: URL = FileManager.default.homeDirectoryForCurrentUser)
+    -> (name: String?, free: Int64?, total: Int64?) {
     let values = try? url.resourceValues(forKeys: [
       .volumeLocalizedNameKey, .volumeTotalCapacityKey,
       .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
     ])
-    return summary(name: values?.volumeLocalizedName, total: values?.volumeTotalCapacity.map(Int64.init),
-      free: values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init))
+    return (values?.volumeLocalizedName,
+      values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init),
+      values?.volumeTotalCapacity.map(Int64.init))
   }
 
   /// True when the sidebar and Overview would show the same text and state.

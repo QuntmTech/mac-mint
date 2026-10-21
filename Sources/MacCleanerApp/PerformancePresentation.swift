@@ -162,7 +162,10 @@ enum PerformancePresentation {
     let memoryFraction: Double?
     let fallbackSymbol: String
     let control: Control
-    /// Empty when the app has no measured helpers.
+    /// Measured helpers, which decide whether the row can be expanded.
+    let helperCount: Int
+    let expanded: Bool
+    /// Built only for expanded rows, so collapsed rows don't format or compare helper lines.
     let breakdown: [BreakdownLine]
   }
 
@@ -184,6 +187,7 @@ enum PerformancePresentation {
     var physicalMemory: Int64
     var logicalCPUCount: Int
     var controllable: Set<ProcessID>
+    var expanded: Set<ProcessID> = []
   }
 
   static func quantized(_ fraction: Double?) -> Double? {
@@ -221,7 +225,8 @@ enum PerformancePresentation {
         fallbackSymbol: app.fallbackSymbol,
         control: Control(id: app.id, name: app.name, bundleID: app.bundleID, slowed: receipt != nil,
           excepted: excepted, canControl: inputs.controllable.contains(app.id)),
-        breakdown: breakdown(app))
+        helperCount: helperCount, expanded: inputs.expanded.contains(app.id) && helperCount > 0,
+        breakdown: inputs.expanded.contains(app.id) ? breakdown(app) : [])
     }
   }
 

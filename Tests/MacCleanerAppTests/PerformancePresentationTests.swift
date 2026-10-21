@@ -66,9 +66,14 @@ final class PerformancePresentationTests: XCTestCase {
       .init(pid: 22, name: "GPU", memoryBytes: 200, cpuPercent: nil),
     ])
     browser.ownMemoryBytes = 300; browser.ownCPUPercent = 5
+    let collapsed = try XCTUnwrap(PerformancePresentation.rows(.init(apps: [browser], query: "", sort: .init(),
+      taming: TamingState(), physicalMemory: 16_000, logicalCPUCount: 8, controllable: [browser.id])).first)
+    XCTAssertEqual(collapsed.helperCount, 3)
+    XCTAssertTrue(collapsed.breakdown.isEmpty, "Collapsed rows don't build helper lines")
     let rows = PerformancePresentation.rows(.init(apps: [browser], query: "", sort: .init(), taming: TamingState(),
-      physicalMemory: 16_000, logicalCPUCount: 8, controllable: [browser.id]))
+      physicalMemory: 16_000, logicalCPUCount: 8, controllable: [browser.id], expanded: [browser.id]))
     let row = try XCTUnwrap(rows.first)
+    XCTAssertTrue(row.expanded)
     XCTAssertEqual(row.detail, "PID 9 · with 3 helpers")
     XCTAssertEqual(row.breakdown.map(\.id), ["app", "pid-21", "pid-22", "rest"])
     XCTAssertEqual(row.breakdown.first?.cpuText, "5.0%")

@@ -13,6 +13,7 @@ struct StartupItemsView: View {
       : model.startupItems.filter {
         $0.label.localizedCaseInsensitiveContains(search)
           || ($0.program?.localizedCaseInsensitiveContains(search) ?? false)
+          || ($0.targetPath?.localizedCaseInsensitiveContains(search) ?? false)
           || $0.scope.localizedCaseInsensitiveContains(search)
       }
     return matching.filter(\.needsAttention) + matching.filter { !$0.needsAttention }

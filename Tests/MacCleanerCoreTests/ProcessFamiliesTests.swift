@@ -85,6 +85,7 @@ final class ProcessFamiliesTests: XCTestCase {
     XCTAssertEqual(helpers.count, 4)
     XCTAssertEqual(helpers.memoryBytes, 1_200)
     XCTAssertEqual(helpers.cpuPercent, 15)
+    XCTAssertEqual(helpers.cpuMeasured, 2, "Helpers without two samples are not counted as measured")
     XCTAssertEqual(helpers.largest.map(\.pid), [6, 5, 7])
     XCTAssertEqual(ProcessFamilies.Helpers([]), .none)
   }

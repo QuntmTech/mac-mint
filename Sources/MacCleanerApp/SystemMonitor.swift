@@ -40,7 +40,12 @@ final class SystemMonitor: ObservableObject {
     var canControl: Bool { ProcessControlPolicy.allows(pid: id, bundleID: bundleID) }
     /// The app and its helpers together, for display only.
     var totalMemoryBytes: Int64 { ProcessFamilies.add(memoryBytes, helpers?.memoryBytes ?? 0) }
-    var totalCPUPercent: Double? { cpuPercent.map { $0 + (helpers?.cpuPercent ?? 0) } }
+    /// Unknown until at least one helper has two samples, rather than the app's CPU alone.
+    var totalCPUPercent: Double? {
+      guard let own = cpuPercent else { return nil }
+      guard let helpers, helpers.count > 0 else { return own }
+      return helpers.cpuMeasured > 0 ? own + helpers.cpuPercent : nil
+    }
   }
   struct Reading: Equatable {
     var snapshot = Snapshot()
@@ -130,7 +135,6 @@ final class SystemMonitor: ObservableObject {
     if tamingController.needsMonitoring { start(lease: tamingLease, interval: 8, kind: .control) }
     else { stop(lease: tamingLease) }
   }
-  var topApps: [AppUsage] { Array(apps.sorted { $0.totalMemoryBytes > $1.totalMemoryBytes }.prefix(8)) }
   private var timer: Timer?
   private struct Lease { var interval: TimeInterval; var kind: LeaseKind }
   private var leases: [UUID: Lease] = [:]
@@ -159,9 +163,10 @@ final class SystemMonitor: ObservableObject {
   var publishesReadings: Bool {
     leases.isEmpty || leases.values.contains { $0.kind == .popover || ($0.kind == .window && isForeground) }
   }
-  /// Helper processes are listed only for the visible Performance list, which shows per-app
-  /// rows; the menu bar popover and Auto Tame don't need them.
-  var listsHelpers: Bool { isForeground && leases.values.contains { $0.kind == .window } }
+  /// Helper processes are listed whenever readings reach an open Performance list, which shows
+  /// per-app totals (also while the popover keeps sampling with the workspace in the back).
+  /// The popover alone and Auto Tame don't need them.
+  var listsHelpers: Bool { publishesReadings && leases.values.contains { $0.kind == .window } }
   private func foregroundChanged(_ foreground: Bool) {
     guard foreground != isForeground else { return }
     let wasPublishing = publishesReadings
@@ -375,11 +380,9 @@ actor ResourceSampler {
 
   /// Nil when either capacity is missing: a missing value is not a measured zero.
   nonisolated static func startupDisk() -> (free: Int64, total: Int64)? {
-    guard let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
-      .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
-    ]), let free = values.volumeAvailableCapacityForImportantUsage, let total = values.volumeTotalCapacity,
-      total > 0 else { return nil }
-    return (free: free, total: Int64(total))
+    let reading = VolumeSummary.capacity()
+    guard let free = reading.free, let total = reading.total, total > 0 else { return nil }
+    return (free: free, total: total)
   }
   nonisolated static func cpuPercent(previousCPU: UInt64, currentCPU: UInt64, previousTime: UInt64, currentTime: UInt64, sameProcess: Bool) -> Double? {
     guard sameProcess, currentTime > previousTime, currentCPU >= previousCPU else { return nil }

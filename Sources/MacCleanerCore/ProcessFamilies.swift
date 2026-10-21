@@ -77,30 +77,35 @@ public enum ProcessFamilies {
     public let memoryBytes: Int64
     /// Sum over helpers with a CPU reading; helpers seen for the first time add nothing yet.
     public let cpuPercent: Double
+    /// Helpers with a CPU reading (zero on the first sample after helpers start being listed).
+    public let cpuMeasured: Int
     /// The largest helpers by memory, for display.
     public var largest: [Usage]
 
     public static let none = Helpers(count: 0, memoryBytes: 0, cpuPercent: 0, largest: [])
 
-    public init(count: Int, memoryBytes: Int64, cpuPercent: Double, largest: [Usage]) {
+    public init(count: Int, memoryBytes: Int64, cpuPercent: Double, largest: [Usage], cpuMeasured: Int? = nil) {
       self.count = count
       self.memoryBytes = memoryBytes
       self.cpuPercent = cpuPercent
+      self.cpuMeasured = cpuMeasured ?? count
       self.largest = largest
     }
 
     public init(_ usages: [Usage], keep limit: Int = 5) {
       let measured = usages.filter { $0.memoryBytes >= 0 }
+      let cpu = measured.compactMap { usage -> Double? in
+        guard let cpu = usage.cpuPercent, cpu.isFinite, cpu >= 0 else { return nil }
+        return cpu
+      }
       self.init(
         count: measured.count,
         memoryBytes: measured.reduce(Int64(0)) { ProcessFamilies.add($0, $1.memoryBytes) },
-        cpuPercent: measured.reduce(0) { total, usage in
-          guard let cpu = usage.cpuPercent, cpu.isFinite, cpu >= 0 else { return total }
-          return total + cpu
-        },
+        cpuPercent: cpu.reduce(0, +),
         largest: Array(measured.sorted {
           $0.memoryBytes != $1.memoryBytes ? $0.memoryBytes > $1.memoryBytes : $0.pid < $1.pid
-        }.prefix(max(0, limit))))
+        }.prefix(max(0, limit))),
+        cpuMeasured: cpu.count)
     }
   }
 

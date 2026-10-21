@@ -68,6 +68,15 @@ struct UpdatesSettingsCard: View {
       case .newest:
         Label("This is the newest build on the \(channelName) channel.", systemImage: "checkmark.circle.fill")
           .foregroundStyle(AppTheme.accentText)
+      case .newerThanChannel:
+        Label("This build is newer than anything on the \(channelName) channel.", systemImage: "checkmark.circle")
+          .foregroundStyle(.secondary)
+      case .needsNewerMacOS:
+        Label("A newer version is available but needs a newer version of macOS.", systemImage: "exclamationmark.circle")
+          .foregroundStyle(AppTheme.warning)
+      case .unsupportedMacOS:
+        Label("The newest version on this channel doesn't support this version of macOS yet.", systemImage: "exclamationmark.circle")
+          .foregroundStyle(AppTheme.warning)
       case .failed:
         Label(updater.channel == .stable
           ? "Couldn't check the Stable channel: no stable release feed was found, or it couldn't be reached. Developer builds can be turned on below."

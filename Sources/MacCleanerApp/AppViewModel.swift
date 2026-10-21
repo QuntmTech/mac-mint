@@ -86,6 +86,8 @@ final class AppViewModel: ObservableObject {
     guard requireExclusions(), requireRecoveryReady() else { return false }
     guard authorizeRemoval() else {
       statusMessage = "Sign in with an active plan to move items. Your selections are kept."
+      // This gate is for the action just attempted, not an earlier review.
+      deferredPlan = nil
       accountPurpose = .paidAction
       showingAccount = true
       return false

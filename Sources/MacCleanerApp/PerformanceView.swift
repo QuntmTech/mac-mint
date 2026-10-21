@@ -36,6 +36,7 @@ struct PerformanceView: View {
   @State private var forceQuit = false
   @State private var insights: DiskInsights?
   @State private var showingExceptions = false
+  @State private var expandedRows: Set<PerformancePresentation.ProcessID> = []
 
   private var paused: Bool { preview.map { previewPaused ?? $0.paused } ?? (pausedReading != nil) }
   private var tamingDisplay: SystemMonitor.TamingDisplay { preview?.taming ?? monitor.taming }
@@ -151,7 +152,10 @@ struct PerformanceView: View {
       slow: { id, duration in if let usage = usage(id) { monitor.slowApp(usage, duration: duration) } },
       restore: { id in if let usage = usage(id) { monitor.restoreApp(usage) } },
       quit: { id, force in if let usage = usage(id) { forceQuit = force; pendingQuit = usage } },
-      neverSlow: { bundleID, name, protected in monitor.setNeverSlow(bundleID: bundleID, name: name, protected: protected) })
+      neverSlow: { bundleID, name, protected in monitor.setNeverSlow(bundleID: bundleID, name: name, protected: protected) },
+      toggleBreakdown: { id in
+        if expandedRows.contains(id) { expandedRows.remove(id) } else { expandedRows.insert(id) }
+      })
   }
 
   private func processCard(_ feed: PerformanceFeed) -> some View {
@@ -190,7 +194,7 @@ struct PerformanceView: View {
         }
         Divider()
         PerformanceProcessRows(live: monitor.live, feed: feed, query: search, sort: sort, taming: tamingDisplay.state,
-          actions: rowActions, clearSearch: { search = "" }, selectSort: { sort.select($0, toggle: true) })
+          expanded: expandedRows, actions: rowActions, clearSearch: { search = "" }, selectSort: { sort.select($0, toggle: true) })
         Text("App CPU: 100% = one core and values can exceed 100%. Bars show the share of this Mac's total CPU capacity or installed RAM.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         Text("Slowdown lowers CPU, disk and network priority, not a CPU/RAM cap. Auto Tame checks sustained background load every ~8 seconds; foreground apps and exceptions stay protected. Pause freezes readings; enabled controls continue in the background.")
@@ -292,6 +296,7 @@ struct PerformanceRowActions {
   let restore: (PerformancePresentation.ProcessID) -> Void
   let quit: (PerformancePresentation.ProcessID, Bool) -> Void
   let neverSlow: (String, String, Bool) -> Void
+  let toggleBreakdown: (PerformancePresentation.ProcessID) -> Void
 }
 
 private struct PerformanceCards: View {
@@ -398,7 +403,8 @@ private struct PerformanceSupportingMetrics: View {
   var body: some View {
     let snapshot = feed.snapshot(live)
     let swap = snapshot.swapUsedBytes.map(ByteFormatter.string) ?? "—"
-    let free = snapshot.totalBytes > 0 ? ByteFormatter.string(snapshot.freeBytes) : "—"
+    let free = snapshot.hasDiskReading
+      ? ByteFormatter.string(snapshot.freeBytes) + (snapshot.diskStale ? " (earlier reading)" : "") : "—"
     ViewThatFits(in: .horizontal) {
       HStack(spacing: 18) { metric("Swap", value: swap, icon: "arrow.left.arrow.right"); metric("Free disk", value: free, icon: "internaldrive") }
       VStack(alignment: .leading, spacing: 8) { metric("Swap", value: swap, icon: "arrow.left.arrow.right"); metric("Free disk", value: free, icon: "internaldrive") }
@@ -455,6 +461,7 @@ private struct PerformanceProcessRows: View {
   let query: String
   let sort: PerformancePresentation.Sort
   let taming: TamingState
+  let expanded: Set<PerformancePresentation.ProcessID>
   let actions: PerformanceRowActions
   let clearSearch: () -> Void
   let selectSort: (PerformancePresentation.SortKey) -> Void
@@ -463,7 +470,8 @@ private struct PerformanceProcessRows: View {
   var body: some View {
     let snapshot = feed.snapshot(live)
     let rows = cache.rows(.init(apps: feed.apps(live), query: query, sort: sort, taming: taming,
-      physicalMemory: snapshot.physicalMemory, logicalCPUCount: feed.logicalCPUCount, controllable: feed.controllable(live)))
+      physicalMemory: snapshot.physicalMemory, logicalCPUCount: feed.logicalCPUCount, controllable: feed.controllable(live),
+      expanded: expanded))
     let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
     if rows.isEmpty {
       VStack(spacing: 8) {
@@ -528,7 +536,6 @@ private struct PerformanceRowView: View, Equatable {
   let row: PerformancePresentation.Row
   let application: NSRunningApplication?
   let actions: PerformanceRowActions
-  @State private var expanded = false
   // The row ID carries the PID and kernel start time, so it identifies the same process.
   nonisolated static func == (left: Self, right: Self) -> Bool { left.row == right.row }
 
@@ -542,14 +549,14 @@ private struct PerformanceRowView: View, Equatable {
             Text(row.detail)
               .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
           }
-          if !row.breakdown.isEmpty {
-            Button { expanded.toggle() } label: {
-              Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
+          if row.helperCount > 0 {
+            Button { actions.toggleBreakdown(row.id) } label: {
+              Image(systemName: row.expanded ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary).frame(width: 16, height: 16).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(expanded ? "Hide helper processes" : "Show helper processes")
-            .accessibilityLabel(expanded ? "Hide helper processes of " + row.name : "Show helper processes of " + row.name)
+            .help(row.expanded ? "Hide helper processes" : "Show helper processes")
+            .accessibilityLabel(row.expanded ? "Hide helper processes of " + row.name : "Show helper processes of " + row.name)
           }
           Spacer(minLength: 0)
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -560,7 +567,7 @@ private struct PerformanceRowView: View, Equatable {
           label: "Memory footprint", value: row.memoryAccessibility).frame(width: 104)
         PerformanceRowControls(control: row.control, actions: actions).equatable()
       }
-      if expanded && !row.breakdown.isEmpty {
+      if row.expanded && !row.breakdown.isEmpty {
         PerformanceBreakdown(lines: row.breakdown).padding(.leading, 40)
       }
     }

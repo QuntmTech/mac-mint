@@ -104,9 +104,11 @@ final class AppEfficiencyTests: XCTestCase {
     monitor.start(lease: popover, interval: 15, kind: .popover)
     XCTAssertEqual(monitor.samplingInterval, 15, "An open menu bar popover keeps its own live readings")
     XCTAssertTrue(monitor.publishesReadings)
-    XCTAssertFalse(monitor.listsHelpers, "The popover shows no per-app rows")
+    XCTAssertTrue(monitor.listsHelpers, "The open Performance list behind it still shows totals with helpers")
+    monitor.stop(lease: window)
+    XCTAssertFalse(monitor.listsHelpers, "The popover alone shows no per-app rows")
     monitor.stop(lease: popover); XCTAssertNil(monitor.samplingInterval)
-    monitor.stop(lease: window); XCTAssertEqual(monitor.activeLeaseCount, 0)
+    XCTAssertEqual(monitor.activeLeaseCount, 0)
   }
 
   func testAutoTameAddsNoPollingWhileOffAndSharesTheSamplerSilentlyWhileOn() throws {

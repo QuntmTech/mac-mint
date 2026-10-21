@@ -30,15 +30,20 @@ public actor StartupItemScanner {
       (URL(fileURLWithPath: "/Library/LaunchAgents"), "System LaunchAgent"),
       (URL(fileURLWithPath: "/Library/LaunchDaemons"), "System LaunchDaemon"),
     ]
-    let launchd = await readLaunchd?()
+    // launchd is asked while the property lists are read, not before.
+    let reader = readLaunchd
+    async let launchdState: LaunchdSnapshot? = reader?()
+    let volumes = Self.volumes(fileManager)
+    let protectedFolders = Self.protectedFolders(home: homeDirectory)
+    var parsed: [Parsed] = []
     var items: [StartupItem] = []
     var issues: [ScanIssue] = []
 
     for (root, scope) in roots {
       if Task.isCancelled {
         return ScanReport(
-          value: sort(items), issues: issues, duration: Date().timeIntervalSince(started),
-          wasCancelled: true)
+          value: sort(parsed.map { $0.item(launchd: nil) }), issues: issues,
+          duration: Date().timeIntervalSince(started), wasCancelled: true)
       }
       guard !FileSystem.isIgnored(root, ignoredPaths: ignoredPaths), fileManager.fileExists(atPath: root.path) else { continue }
       do {
@@ -63,26 +68,10 @@ public actor StartupItemScanner {
           let runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
           let keepAlive = parseBooleanish(plist["KeepAlive"])
           let disabled = (plist["Disabled"] as? Bool) ?? false
-          let target = Self.resolveTarget(program: program, arguments: arguments) { [fileManager] path in
-            fileManager.fileExists(atPath: path)
-          }
-          // Agents load into the user's session; daemons into the system domain, whose
-          // jobs an unprivileged reader can't list.
-          let domain = scope.contains("Daemon") ? launchd?.system : launchd?.user
-          items.append(
-            StartupItem(
-              url: url,
-              label: label,
-              program: program,
-              runAtLoad: runAtLoad,
-              keepAlive: keepAlive,
-              disabled: disabled,
-              scope: scope,
-              target: target.target,
-              targetPath: target.path,
-              disabledOverride: domain?.overrides[label],
-              live: domain?.jobs.map { StartupLiveState(job: $0[label]) }
-            ))
+          let target = Self.resolveTarget(program: program, arguments: arguments, volumes: volumes,
+            protectedFolders: protectedFolders, exists: Self.fileExists)
+          parsed.append(Parsed(url: url, label: label, program: program, runAtLoad: runAtLoad,
+            keepAlive: keepAlive, disabled: disabled, scope: scope, target: target))
         }
       } catch {
         issues.append(
@@ -90,42 +79,122 @@ public actor StartupItemScanner {
       }
     }
 
+    let launchd = await launchdState
+    items = parsed.map { $0.item(launchd: launchd) }
     return ScanReport(
       value: sort(items), issues: issues, duration: Date().timeIntervalSince(started))
   }
 
-  /// Programs that run another file or an inline command. The file they run is what has to exist.
-  static let launchers: Set<String> = [
-    "/bin/sh", "/bin/bash", "/bin/zsh", "/bin/dash", "/bin/ksh", "/bin/csh", "/bin/tcsh",
-    "/usr/bin/env", "/usr/bin/open", "/usr/bin/osascript", "/usr/bin/python3", "/usr/bin/perl",
-    "/usr/bin/ruby", "/usr/bin/arch", "/usr/bin/nice",
+  /// A property list read during the scan, joined with launchd's state afterwards.
+  private struct Parsed {
+    let url: URL
+    let label: String
+    let program: String?
+    let runAtLoad: Bool
+    let keepAlive: Bool
+    let disabled: Bool
+    let scope: String
+    let target: (target: StartupTarget, path: String?)
+
+    func item(launchd: LaunchdSnapshot?) -> StartupItem {
+      // Agents load into the user's session; daemons into the system domain, whose
+      // jobs an unprivileged reader can't list.
+      let domain = scope.contains("Daemon") ? launchd?.system : launchd?.user
+      return StartupItem(
+        url: url, label: label, program: program, runAtLoad: runAtLoad, keepAlive: keepAlive,
+        disabled: disabled, scope: scope, target: target.target, targetPath: target.path,
+        disabledOverride: domain?.overrides[label],
+        live: domain?.jobs.map { StartupLiveState(job: $0[label]) })
+    }
+  }
+
+  /// Connected volumes, and names in /Volumes that point back at the startup disk.
+  public struct Volumes: Sendable {
+    public var mounted: Set<String>
+    public var startupAliases: Set<String>
+
+    public init(mounted: Set<String> = [], startupAliases: Set<String> = []) {
+      self.mounted = mounted
+      self.startupAliases = startupAliases
+    }
+  }
+
+  /// Read from the mount table and /Volumes itself, never from inside another disk.
+  static func volumes(_ fileManager: FileManager) -> Volumes {
+    let mounted = (fileManager.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: []) ?? [])
+      .map { $0.standardizedFileURL.path }
+    let aliases = ((try? fileManager.contentsOfDirectory(atPath: "/Volumes")) ?? []).map { "/Volumes/" + $0 }
+      .filter { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path == "/" }
+    return Volumes(mounted: Set(mounted), startupAliases: Set(aliases))
+  }
+
+  /// Privacy-protected folders. Checking a file there could ask the person for access in the
+  /// middle of a scan, so programs there are left unresolved instead.
+  static func protectedFolders(home: URL) -> [String] {
+    ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Library/Mobile Documents",
+      "Library/CloudStorage"].map { home.appendingPathComponent($0).standardizedFileURL.path }
+  }
+
+  /// True or false when the file system answers; nil when it refuses (for example, no access).
+  static func fileExists(_ path: String) -> Bool? {
+    var info = stat()
+    if stat(path, &info) == 0 { return true }
+    return errno == ENOENT || errno == ENOTDIR ? false : nil
+  }
+
+  /// Programs that run another file or an inline command, with the option letters that make
+  /// them run an inline command (`zsh -lc "…"`, `osascript -e "…"`). The file they run is
+  /// what has to exist.
+  static let launchers: [String: Set<Character>] = [
+    "/bin/sh": ["c"], "/bin/bash": ["c"], "/bin/zsh": ["c"], "/bin/dash": ["c"], "/bin/ksh": ["c"],
+    "/bin/csh": ["c"], "/bin/tcsh": ["c"], "/usr/bin/python3": ["c"], "/usr/bin/perl": ["e", "E"],
+    "/usr/bin/ruby": ["e"], "/usr/bin/osascript": ["e"], "/usr/bin/env": ["S"],
+    "/usr/bin/open": [], "/usr/bin/arch": [], "/usr/bin/nice": [],
   ]
 
   /// Where a declared program points, without running it. `arguments` is ProgramArguments
-  /// (argv, including argv[0]). An inline command (`sh -c`, `osascript -e`) or a name looked
-  /// up on PATH is reported as unresolved rather than guessed.
+  /// (argv, including argv[0]). An inline command, a name looked up on PATH, a file in a
+  /// privacy-protected folder or a file the system won't describe is reported as unresolved
+  /// rather than guessed. Files on other disks are never opened.
   public static func resolveTarget(
-    program: String?, arguments: [String], exists: (String) -> Bool
+    program: String?, arguments: [String], volumes: Volumes = Volumes(), protectedFolders: [String] = [],
+    exists: (String) -> Bool?
   ) -> (target: StartupTarget, path: String?) {
     guard var path = program, !path.isEmpty else { return (.unresolved, nil) }
-    if launchers.contains(path) {
-      let rest = arguments.dropFirst()
-      if rest.contains("-c") || rest.contains("-e") { return (.unresolved, nil) }
-      guard let file = rest.first(where: { $0.hasPrefix("/") }) else { return (.unresolved, nil) }
+    if let inline = launchers[path] {
+      var file: String?
+      for argument in arguments.dropFirst() {
+        if argument.count > 1, argument.hasPrefix("-") {
+          if !argument.hasPrefix("--"), argument.dropFirst().contains(where: inline.contains) { return (.unresolved, nil) }
+          continue
+        }
+        file = argument
+        break
+      }
+      guard let file else { return (.unresolved, nil) }
       path = file
     }
     guard path.hasPrefix("/") else { return (.unresolved, nil) }
-    let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
-    if [path, resolved].contains(where: { $0.contains("/.Trash/") || $0.contains("/.Trashes/") }) {
-      return (.inTrash, path)
-    }
-    let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+    func inTrash(_ value: String) -> Bool { value.contains("/.Trash/") || value.contains("/.Trashes/") }
+    if inTrash(path) { return (.inTrash, path) }
+    // Nothing below touches another disk or a privacy-protected folder.
+    var components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
     if components.count > 2, components[1] == "Volumes" {
       let volume = "/Volumes/" + components[2]
-      guard exists(volume) else { return (.volumeNotMounted, path) }
-      return (exists(path) ? .otherVolume : .missing, path)
+      if volumes.startupAliases.contains(volume) {
+        components = ["/"] + components.dropFirst(3)  // "/Volumes/Macintosh HD/…" is the startup disk.
+      } else {
+        return (volumes.mounted.contains(volume) ? .otherVolume : .volumeNotMounted, path)
+      }
     }
-    return (exists(path) ? .present : .missing, path)
+    let local = components.count > 1 ? "/" + components.dropFirst().joined(separator: "/") : "/"
+    if protectedFolders.contains(where: { local == $0 || local.hasPrefix($0 + "/") }) { return (.unresolved, path) }
+    if inTrash(URL(fileURLWithPath: local).resolvingSymlinksInPath().path) { return (.inTrash, path) }
+    switch exists(local) {
+    case true?: return (.present, path)
+    case false?: return (.missing, path)
+    case nil: return (.unresolved, path)
+    }
   }
 
   private func parseBooleanish(_ value: Any?) -> Bool {

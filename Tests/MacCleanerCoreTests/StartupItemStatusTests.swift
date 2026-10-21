@@ -5,9 +5,13 @@ import XCTest
 final class StartupItemStatusTests: XCTestCase {
   private let fm = FileManager.default
 
-  private func resolve(_ program: String?, _ arguments: [String] = [], existing: Set<String> = [])
-    -> (target: StartupTarget, path: String?) {
-    StartupItemScanner.resolveTarget(program: program, arguments: arguments) { existing.contains($0) }
+  private func resolve(_ program: String?, _ arguments: [String] = [], existing: Set<String> = [],
+    mounted: Set<String> = [], aliases: Set<String> = [], unreadable: Set<String> = [],
+    protected: [String] = []) -> (target: StartupTarget, path: String?) {
+    StartupItemScanner.resolveTarget(program: program, arguments: arguments,
+      volumes: .init(mounted: mounted, startupAliases: aliases), protectedFolders: protected) { path in
+      unreadable.contains(path) ? nil : existing.contains(path)
+    }
   }
 
   func testDeletedAppsTrashAndEjectedInstallerDisksAreBrokenTargets() {
@@ -19,8 +23,14 @@ final class StartupItemStatusTests: XCTestCase {
     let installer = resolve("/Volumes/Miller Installer/Miller.app/Contents/MacOS/Miller")
     XCTAssertEqual(installer.target, .volumeNotMounted)
     XCTAssertEqual(installer.path, "/Volumes/Miller Installer/Miller.app/Contents/MacOS/Miller")
-    XCTAssertEqual(resolve("/Volumes/Work/Tool", existing: ["/Volumes/Work", "/Volumes/Work/Tool"]).target, .otherVolume)
-    XCTAssertEqual(resolve("/Volumes/Work/Tool", existing: ["/Volumes/Work"]).target, .missing)
+    XCTAssertEqual(resolve("/Volumes/Work/Tool", mounted: ["/Volumes/Work"]).target, .otherVolume,
+      "Another disk is never opened, so its files are not called missing")
+    XCTAssertEqual(resolve("/Volumes/Work/Tool", existing: ["/Volumes/Work"]).target, .volumeNotMounted,
+      "An empty mount-point folder left behind is not a connected disk")
+    XCTAssertEqual(resolve("/Volumes/Macintosh HD/Applications/Gone.app/Contents/MacOS/Gone", aliases: ["/Volumes/Macintosh HD"]).target,
+      .missing, "The startup disk's /Volumes name is the startup disk")
+    XCTAssertEqual(resolve("/Volumes/Macintosh HD/usr/local/bin/agent", existing: ["/usr/local/bin/agent"],
+      aliases: ["/Volumes/Macintosh HD"]).target, .present)
     XCTAssertEqual(resolve("/usr/local/bin/agent", existing: ["/usr/local/bin/agent"]).target, .present)
     XCTAssertTrue(StartupTarget.volumeNotMounted.isBroken)
     XCTAssertFalse(StartupTarget.otherVolume.isBroken)
@@ -33,9 +43,18 @@ final class StartupItemStatusTests: XCTestCase {
     XCTAssertEqual(script.path, "/Users/me/bin/sync.sh")
     XCTAssertEqual(resolve("/bin/sh", ["/bin/sh", "/opt/run.sh"], existing: ["/opt/run.sh"]).target, .present)
     XCTAssertEqual(resolve("/bin/sh", ["/bin/sh", "-c", "/Applications/Gone.app/run --flag"]).target, .unresolved)
+    XCTAssertEqual(resolve("/bin/zsh", ["/bin/zsh", "-lc", "/Users/me/bin/sync.sh --quiet"]).target, .unresolved,
+      "Combined shell options that include c run an inline command")
+    XCTAssertEqual(resolve("/bin/bash", ["/bin/bash", "-e", "/opt/run.sh"], existing: ["/opt/run.sh"]).target, .present,
+      "bash -e is errexit, not an inline command")
+    XCTAssertEqual(resolve("/usr/bin/env", ["/usr/bin/env", "-S", "node server.js"]).target, .unresolved)
     XCTAssertEqual(resolve("/usr/bin/osascript", ["/usr/bin/osascript", "-e", "tell app \"X\""]).target, .unresolved)
     XCTAssertEqual(resolve("/usr/bin/env", ["/usr/bin/env", "node", "server.js"]).target, .unresolved)
     XCTAssertEqual(resolve("relative-tool").target, .unresolved)
+    XCTAssertEqual(resolve("/Users/me/Documents/backup.sh", protected: ["/Users/me/Documents"]).target, .unresolved,
+      "Privacy-protected folders are not checked during a scan")
+    XCTAssertEqual(resolve("/opt/agent", unreadable: ["/opt/agent"]).target, .unresolved,
+      "A file the system won't describe is not called missing")
     XCTAssertEqual(resolve(nil).target, .unresolved)
     XCTAssertEqual(resolve("").target, .unresolved)
   }

@@ -21,7 +21,6 @@ struct AppTheme {
   static let danger = adaptive("Danger", light: 0xB33430, dark: 0xFF958D)
   static let info = adaptive("Info", light: 0x1C65A6, dark: 0x8AC4F4)
   static let violet = adaptive("Violet", light: 0x754B9B, dark: 0xCBB0EF)
-  static let hero = adaptive("Hero", light: 0xEEEEF2, dark: 0x26262D)
   /// The Overview hero's soft wash: mint into sky into lavender, deep tones in Dark Mode.
   static let heroStart = adaptive("HeroStart", light: 0xE4F7EE, dark: 0x0F2B25)
   static let heroMiddle = adaptive("HeroMiddle", light: 0xE8F1FD, dark: 0x132238)
@@ -227,7 +226,8 @@ struct StorageRing: View {
       Circle()
         .trim(from: 0, to: fraction)
         .stroke(AngularGradient(colors: [AppTheme.brand, Color(red: 0.05, green: 0.58, blue: 0.53), Color(red: 0.15, green: 0.39, blue: 0.92)],
-          center: .center, startAngle: .degrees(0), endAngle: .degrees(360 * max(fraction, 0.01))),
+          // Starting a little before 12 o'clock keeps the rounded start cap mint, not the end colour.
+          center: .center, startAngle: .degrees(-10), endAngle: .degrees(360 * max(fraction, 0.01))),
           style: StrokeStyle(lineWidth: 12, lineCap: .round))
         .rotationEffect(.degrees(-90))
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: fraction)
@@ -243,7 +243,9 @@ struct StorageRing: View {
     .frame(width: 148, height: 148)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Storage usage")
-    .accessibilityValue("\(Int(fraction * 100)) percent used. \(centerValue) \(centerLabel). \(ByteFormatter.string(used)) of \(ByteFormatter.string(total)) used.")
+    .accessibilityValue(total > 0
+      ? "\(Int(fraction * 100)) percent used. \(centerValue) \(centerLabel). \(ByteFormatter.string(used)) of \(ByteFormatter.string(total)) used."
+      : "Disk space unavailable")
   }
 }
 
