@@ -180,15 +180,15 @@ struct RootView: View {
             Button { model.selectedSection = section } label: {
               HStack(spacing: 6) {
                 if selected {
-                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 18)
+                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 16)
                 } else {
                   Image(systemName: section.icon).font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.secondary).frame(width: 18, height: 18)
+                    .foregroundStyle(Color.secondary).frame(width: 16, height: 16)
                 }
                 Text(section.rawValue).font(.system(size: 12, weight: selected ? .semibold : .medium))
                   .foregroundStyle(selected ? AppTheme.ink : Color.secondary)
               }
-              .padding(.horizontal, 13).padding(.vertical, 6)
+              .padding(.horizontal, 12).padding(.vertical, 5)
               .background {
                 if selected { Capsule().fill(AppTheme.surface).shadow(color: .black.opacity(0.12), radius: 2, y: 1) }
               }
@@ -196,7 +196,8 @@ struct RootView: View {
             }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
           }
         }
-        .padding(3)
+        // 30 pt tall, no taller than the plain tabs it replaced, so pages keep their first fold.
+        .padding(2)
         .background(AppTheme.panel, in: Capsule())
       }
       Spacer(minLength: 8)
