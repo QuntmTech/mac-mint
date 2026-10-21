@@ -56,6 +56,18 @@ struct PerformanceView: View {
         diskInsightsCard
         SurfaceCard {
           VStack(alignment: .leading, spacing: 10) {
+            Label("What these numbers mean", systemImage: "questionmark.circle").font(.headline)
+            ForEach(Self.meanings, id: \.title) { meaning in
+              VStack(alignment: .leading, spacing: 2) {
+                Text(meaning.title).font(.callout.weight(.medium))
+                Text(meaning.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+              }
+              .accessibilityElement(children: .combine)
+            }
+          }
+        }
+        SurfaceCard {
+          VStack(alignment: .leading, spacing: 10) {
             Label("When to take action", systemImage: "info.circle").font(.headline)
             Text("Short CPU spikes during builds or photo analysis are normal. Quit unused apps when memory pressure stays Elevated or High. High memory use by itself is normal: macOS keeps useful caches in RAM.")
               .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -107,6 +119,15 @@ struct PerformanceView: View {
       Text(forceQuit ? "Unsaved changes may be lost. Use Force Quit only when normal Quit has not worked." : "The app is asked to quit normally, so it can prompt you to save any unsaved work.")
     }
   }
+
+  private struct Meaning: Sendable { let title: String; let detail: String }
+  /// Short, plain explanations: memory and disk space are different things.
+  private static let meanings = [
+    Meaning(title: "Memory (RAM) is your desk", detail: "It holds the apps and windows you have open right now. macOS keeps it nearly full on purpose; the pressure label tells you when it is actually short."),
+    Meaning(title: "Swap is overflow onto the disk", detail: "When memory is short, macOS moves some of it to the SSD. A few GB is normal. If swap keeps growing while pressure stays Elevated or High, close something you are not using."),
+    Meaning(title: "Disk space (SSD) is your filing cabinet", detail: "It stores files and apps. More free space does not make apps faster, but very little free space slows updates, builds and swap."),
+    Meaning(title: "CPU is how hard the Mac is working", detail: "Short bursts during builds or photo analysis are normal. One app at 100% is using one of this Mac's cores."),
+  ]
 
   private func updateMonitoring() {
     guard preview == nil else { return }
