@@ -3,6 +3,7 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
+  @Environment(\.colorSchemeContrast) private var contrast
 
   var body: some View {
     ScrollView {
@@ -11,13 +12,13 @@ struct DashboardView: View {
         hero
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
           MetricCard(title: "Rebuildable data", value: scannedValue(model.reclaimableBytes),
-            subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath",
+            subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath", swatch: AppTheme.Swatch.mint,
             action: { model.selectedSection = .cleaner })
           MetricCard(title: "A closer look", value: scannedValue(model.reviewableBytes),
-            subtitle: "Items that need your judgment", icon: "eye",
+            subtitle: "Items that need your judgment", icon: "eye", swatch: AppTheme.Swatch.amber,
             action: { model.selectedSection = .cleaner })
           MetricCard(title: "Installed apps", value: model.lastScanDate == nil && model.apps.isEmpty ? "—" : "\(model.apps.count)",
-            subtitle: "Inspect apps and related files", icon: "square.grid.2x2",
+            subtitle: "Inspect apps and related files", icon: "square.grid.2x2", swatch: AppTheme.Swatch.violet,
             action: { model.selectedSection = .applications })
         }
         if !model.recommendations.isEmpty { SmartCareList() }
@@ -79,7 +80,9 @@ struct DashboardView: View {
     }
     .padding(28).frame(maxWidth: .infinity, alignment: .leading)
     .background {
-      RoundedRectangle(cornerRadius: 22).fill(AppTheme.hero)
+      RoundedRectangle(cornerRadius: 22).fill(LinearGradient(
+        colors: [AppTheme.heroStart, AppTheme.heroMiddle, AppTheme.heroEnd],
+        startPoint: .topLeading, endPoint: .bottomTrailing))
         .overlay(alignment: .topTrailing) {
           Circle().fill(AppTheme.ink.opacity(0.025)).frame(width: 280, height: 280)
             .offset(x: 75, y: -100).allowsHitTesting(false)
@@ -113,27 +116,38 @@ struct DashboardView: View {
         Text("Your files. Your decisions.").font(.caption).foregroundStyle(.secondary)
       }
       LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-        tool("Explore storage", detail: "See what’s taking up room, folder by folder.", symbol: "chart.pie", tint: AppTheme.accentText, section: .storage)
-        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", tint: AppTheme.info, section: .applications)
-        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", tint: AppTheme.violet, section: .photos)
-        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", tint: AppTheme.warning, section: .developer)
+        tool("Explore storage", detail: "See what’s taking up room, folder by folder.", symbol: "chart.pie", section: .storage)
+        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", section: .applications)
+        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", section: .photos)
+        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", section: .developer)
       }
     }
   }
 
-  private func tool(_ title: String, detail: String, symbol: String, tint: Color, section: AppViewModel.Section) -> some View {
-    Button { model.selectedSection = section } label: {
-      SurfaceCard {
-        HStack(alignment: .top, spacing: 13) {
-          IconTile(symbol: symbol, tint: tint)
-          VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink)
-            Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          }.frame(maxWidth: .infinity, alignment: .leading)
-          Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+  /// A colored tile in its area's sidebar color; white text meets WCAG AA on every swatch.
+  private func tool(_ title: String, detail: String, symbol: String, section: AppViewModel.Section) -> some View {
+    let swatch = section.swatch
+    let shape = RoundedRectangle(cornerRadius: AppTheme.corner, style: .continuous)
+    return Button { model.selectedSection = section } label: {
+      HStack(alignment: .top, spacing: 13) {
+        Image(systemName: symbol).font(.system(size: 17, weight: .semibold))
+          .frame(width: 40, height: 40)
+          .background(Color.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 5) {
+          Text(title).font(.system(size: 13, weight: .semibold))
+          Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+        Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
       }
-    }.buttonStyle(CardButtonStyle()).accessibilityElement(children: .combine)
+      .foregroundStyle(.white)
+      .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+      .padding(AppTheme.cardPadding)
+      .background(swatch.gradient, in: shape)
+      .overlay(shape.strokeBorder(Color.white.opacity(contrast == .increased ? 0.7 : 0.12), lineWidth: contrast == .increased ? 2 : 1))
+      .shadow(color: swatch.color.opacity(0.28), radius: 10, y: 5)
+      .contentShape(shape)
+    }.buttonStyle(TileButtonStyle()).accessibilityElement(children: .combine)
   }
 
   private var coverage: some View {
@@ -151,7 +165,7 @@ struct DashboardView: View {
         }.font(.callout).foregroundStyle(.secondary).padding(.top, 12)
       } label: {
         HStack(spacing: 12) {
-          IconTile(symbol: "checklist", size: 34)
+          IconTile(symbol: "checklist", size: 34, swatch: AppTheme.Swatch.slate)
           VStack(alignment: .leading, spacing: 3) {
             Text("Know what’s been checked").font(.system(size: 13, weight: .semibold))
             Text("\(model.scanCompletedAreas.count) completed categories · \(model.ignoredPaths.count) exclusions · \(model.scanIssues.count) issues")
@@ -167,7 +181,7 @@ struct DashboardView: View {
     if let status = model.trashStatus, status.items > 0 || !status.isComplete {
       SurfaceCard {
         HStack(spacing: 14) {
-          IconTile(symbol: "trash")
+          IconTile(symbol: "trash", swatch: AppTheme.Swatch.graphite)
           VStack(alignment: .leading, spacing: 4) {
             Text("Still in the Trash").font(.headline)
             Text(status.isComplete

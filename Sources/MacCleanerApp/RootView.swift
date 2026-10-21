@@ -229,13 +229,12 @@ struct RootView: View {
     let selected = model.selectedSection.parent == section
     return Button { model.selectedSection = lastTabs[section] ?? section } label: {
       HStack(spacing: 11) {
-        Image(systemName: section.icon).font(.system(size: 16, weight: selected ? .semibold : .regular))
-          .frame(width: 22)
+        SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 24)
         Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .medium))
         Spacer(minLength: 0)
         if selected { Circle().fill(AppTheme.accentText).frame(width: 5, height: 5) }
-      }.foregroundStyle(selected ? AppTheme.accentText : AppTheme.ink.opacity(0.8))
-        .padding(.horizontal, 12).padding(.vertical, 11)
+      }.foregroundStyle(selected ? AppTheme.ink : AppTheme.ink.opacity(0.8))
+        .padding(.horizontal, 10).padding(.vertical, 8)
         .background(selected ? AppTheme.selection : hoveredSection == section ? AppTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
     }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }

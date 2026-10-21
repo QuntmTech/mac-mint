@@ -60,11 +60,17 @@ struct IconTile: View {
   let symbol: String
   var tint: Color = AppTheme.accentText
   var size: CGFloat = 40
+  /// A filled, colored badge instead of the quiet tinted tile.
+  var swatch: AppTheme.Swatch? = nil
   var body: some View {
-    Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium))
-      .foregroundStyle(tint).frame(width: size, height: size)
-      .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: size * 0.28))
-      .accessibilityHidden(true)
+    if let swatch {
+      SwatchBadge(symbol: symbol, swatch: swatch, size: size)
+    } else {
+      Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium))
+        .foregroundStyle(tint).frame(width: size, height: size)
+        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: size * 0.28))
+        .accessibilityHidden(true)
+    }
   }
 }
 
@@ -196,6 +202,22 @@ struct AppearanceSettingsCard: View {
 struct CardButtonStyle: ButtonStyle {
   func makeBody(configuration: Configuration) -> some View {
     CardButtonFace(content: configuration.label, pressed: configuration.isPressed)
+  }
+}
+
+/// Colored tiles brighten slightly on hover instead of drawing an accent border.
+struct TileButtonStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    TileButtonFace(content: configuration.label, pressed: configuration.isPressed)
+  }
+}
+
+private struct TileButtonFace<Content: View>: View {
+  let content: Content
+  let pressed: Bool
+  @State private var hovering = false
+  var body: some View {
+    content.brightness(pressed ? -0.05 : hovering ? 0.04 : 0).onHover { hovering = $0 }
   }
 }
 

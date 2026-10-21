@@ -22,6 +22,37 @@ struct AppTheme {
   static let info = adaptive("Info", light: 0x1C65A6, dark: 0x8AC4F4)
   static let violet = adaptive("Violet", light: 0x754B9B, dark: 0xCBB0EF)
   static let hero = adaptive("Hero", light: 0xEEEEF2, dark: 0x26262D)
+  /// The Overview hero's soft wash: mint into sky into lavender, deep tones in Dark Mode.
+  static let heroStart = adaptive("HeroStart", light: 0xE4F7EE, dark: 0x0F2B25)
+  static let heroMiddle = adaptive("HeroMiddle", light: 0xE8F1FD, dark: 0x132238)
+  static let heroEnd = adaptive("HeroEnd", light: 0xF0EBFD, dark: 0x1E1B3A)
+
+  /// One color per area of the app, used for its sidebar badge, tiles and icons. White
+  /// labels meet WCAG AA (at least 4.5:1) on both stops of every swatch.
+  struct Swatch: Equatable, Sendable {
+    let start: Color
+    let end: Color
+    var color: Color { start }
+    var gradient: LinearGradient {
+      LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    static let mint = Swatch(start: rgb(0x047857), end: rgb(0x0F766E))
+    static let sky = Swatch(start: rgb(0x0369A1), end: rgb(0x1D4ED8))
+    static let indigo = Swatch(start: rgb(0x4F46E5), end: rgb(0x7C3AED))
+    static let violet = Swatch(start: rgb(0x7C3AED), end: rgb(0xC026D3))
+    static let pink = Swatch(start: rgb(0xDB2777), end: rgb(0xE11D48))
+    static let orange = Swatch(start: rgb(0xC2410C), end: rgb(0xB45309))
+    static let amber = Swatch(start: rgb(0xB45309), end: rgb(0xA16207))
+    static let slate = Swatch(start: rgb(0x475569), end: rgb(0x334155))
+    static let graphite = Swatch(start: rgb(0x52525B), end: rgb(0x3F3F46))
+    static let iris = Swatch(start: rgb(0x6D28D9), end: rgb(0x2563EB))
+
+    private static func rgb(_ hex: UInt32) -> Color {
+      Color(.sRGB, red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255,
+        blue: Double(hex & 255) / 255)
+    }
+  }
 
   private static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
     Color(nsColor: NSColor(name: "MacMint" + name) { appearance in
@@ -29,6 +60,40 @@ struct AppTheme {
       return NSColor(srgbRed: Double((hex >> 16) & 255) / 255,
         green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, alpha: 1)
     })
+  }
+}
+
+extension AppViewModel.Section {
+  /// Tabs share their workspace's color, so a page always matches its sidebar badge.
+  var swatch: AppTheme.Swatch {
+    switch parent {
+    case .dashboard, .review: return .mint
+    case .cleaner: return .sky
+    case .storage: return .indigo
+    case .applications: return .violet
+    case .photos: return .pink
+    case .developer: return .orange
+    case .assistant: return .iris
+    case .history: return .slate
+    default: return .graphite
+    }
+  }
+}
+
+/// A System Settings–style badge: a white glyph on its area's color.
+struct SwatchBadge: View {
+  let symbol: String
+  let swatch: AppTheme.Swatch
+  var size: CGFloat = 24
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+    Image(systemName: symbol).font(.system(size: size * 0.46, weight: .semibold))
+      .foregroundStyle(.white).frame(width: size, height: size)
+      .background(swatch.gradient, in: shape)
+      .overlay(shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+      .shadow(color: swatch.color.opacity(0.25), radius: 1.5, y: 1)
+      .accessibilityHidden(true)
   }
 }
 
@@ -49,6 +114,7 @@ struct MetricCard: View {
   let value: String
   let subtitle: String
   let icon: String
+  var swatch: AppTheme.Swatch? = nil
   var action: (() -> Void)? = nil
 
   var body: some View {
@@ -62,7 +128,7 @@ struct MetricCard: View {
     SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          IconTile(symbol: icon, size: 34)
+          IconTile(symbol: icon, size: 34, swatch: swatch)
           Spacer()
           if action != nil { Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary) }
         }
@@ -157,9 +223,12 @@ struct StorageRing: View {
     ZStack {
       Circle()
         .stroke(AppTheme.accentText.opacity(0.13), lineWidth: 12)
+      // Mint into teal into blue along the used arc.
       Circle()
         .trim(from: 0, to: fraction)
-        .stroke(AppTheme.accentText, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+        .stroke(AngularGradient(colors: [AppTheme.brand, Color(red: 0.05, green: 0.58, blue: 0.53), Color(red: 0.15, green: 0.39, blue: 0.92)],
+          center: .center, startAngle: .degrees(0), endAngle: .degrees(360 * max(fraction, 0.01))),
+          style: StrokeStyle(lineWidth: 12, lineCap: .round))
         .rotationEffect(.degrees(-90))
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: fraction)
       VStack(spacing: 2) {
