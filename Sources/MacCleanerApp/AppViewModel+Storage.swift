@@ -21,6 +21,13 @@ struct VolumeSummary: Equatable, Sendable {
       free: values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init))
   }
 
+  /// True when the sidebar and Overview would show the same text and state.
+  func displaysSame(as other: VolumeSummary) -> Bool {
+    name == other.name && total == other.total && isMeasured == other.isMeasured
+      && ByteFormatter.string(free) == ByteFormatter.string(other.free)
+      && ByteFormatter.string(used) == ByteFormatter.string(other.used)
+  }
+
   static func summary(name: String?, total: Int64?, free: Int64?) -> VolumeSummary {
     let name = name ?? "Startup Disk"
     guard let total, total > 0, let free, free >= 0 else { return VolumeSummary(name: name) }
@@ -32,7 +39,9 @@ extension AppViewModel {
   @discardableResult
   func refreshVolumeSummary() async -> VolumeSummary {
     let reading = await Task.detached(priority: .utility) { VolumeSummary.read() }.value
-    if reading != volume { volume = reading }
+    // Every view observing the model redraws when `volume` changes, and free space moves by a
+    // few bytes almost every minute; only a change people can see is published.
+    if !reading.displaysSame(as: volume) { volume = reading }
     return reading
   }
 

@@ -77,6 +77,16 @@ final class AppEfficiencyTests: XCTestCase {
     XCTAssertEqual(measured.used, 100); XCTAssertEqual(measured.name, "Data")
   }
 
+  func testVolumeReadingsThatLookTheSameDoNotRedrawTheWorkspace() {
+    let gb: Int64 = 1_000_000_000
+    let shown = VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 92_400_000_000)
+    XCTAssertTrue(shown.displaysSame(as: VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 92_400_004_096)),
+      "A few bytes of change display the same and aren't published")
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 91 * gb)))
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary()), "Becoming unavailable is a visible change")
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary.summary(name: "Data", total: 500 * gb, free: 92_400_000_000)))
+  }
+
   func testWindowLeasesSampleOnlyWhileTheWorkspaceIsInFront() {
     let front = Box(false)
     let activity = AppActivity(center: NotificationCenter(), evaluate: { front.value })
