@@ -231,8 +231,17 @@ public struct StartupItem: Identifiable, Codable, Hashable, Sendable {
   public let program: String?
   public let runAtLoad: Bool
   public let keepAlive: Bool
+  /// The property list's own Disabled key.
   public let disabled: Bool
   public let scope: String
+  /// What the declared program points at; nil when it wasn't checked.
+  public let target: StartupTarget?
+  /// The path that was checked: the program, or the script a shell launcher runs.
+  public let targetPath: String?
+  /// launchd's enable/disable override, which wins over the Disabled key; nil when none was read.
+  public let disabledOverride: Bool?
+  /// launchd's view of the job now; nil when it couldn't be read (system daemons, or no answer).
+  public let live: StartupLiveState?
 
   public init(
     id: UUID = UUID(),
@@ -242,7 +251,11 @@ public struct StartupItem: Identifiable, Codable, Hashable, Sendable {
     runAtLoad: Bool,
     keepAlive: Bool = false,
     disabled: Bool = false,
-    scope: String
+    scope: String,
+    target: StartupTarget? = nil,
+    targetPath: String? = nil,
+    disabledOverride: Bool? = nil,
+    live: StartupLiveState? = nil
   ) {
     self.id = id
     self.url = url
@@ -252,6 +265,135 @@ public struct StartupItem: Identifiable, Codable, Hashable, Sendable {
     self.keepAlive = keepAlive
     self.disabled = disabled
     self.scope = scope
+    self.target = target
+    self.targetPath = targetPath
+    self.disabledOverride = disabledOverride
+    self.live = live
+  }
+
+  /// Turned off by a launchd override, or by its own Disabled key when there is no override.
+  public var isDisabled: Bool { disabledOverride ?? disabled }
+
+  /// The declared program can't run as written (missing, in the Trash, or on a disk that isn't connected).
+  public var hasBrokenTarget: Bool { target?.isBroken ?? false }
+
+  /// Something worth a look: a broken target, or a last run that ended with an error.
+  public var needsAttention: Bool { hasBrokenTarget || (live?.kind == .failed && !isDisabled) }
+}
+
+/// What a startup item's declared program points at, checked without running anything.
+public enum StartupTarget: String, Codable, Hashable, Sendable {
+  case present
+  /// Nothing exists at the path (for example, the app was deleted or moved).
+  case missing
+  /// The path is inside a Trash folder.
+  case inTrash
+  /// The path is under /Volumes on a disk that isn't connected, often an installer disk image.
+  case volumeNotMounted
+  /// The program exists on another connected disk and runs only while that disk is attached.
+  case otherVolume
+  /// No absolute path could be checked: an inline shell command, a name looked up on PATH, or no program key.
+  case unresolved
+
+  public var isBroken: Bool { self == .missing || self == .inTrash || self == .volumeNotMounted }
+}
+
+/// launchd's state for a job in the user's session.
+public struct StartupLiveState: Codable, Hashable, Sendable {
+  public enum Kind: String, Codable, Hashable, Sendable {
+    /// A process is running now.
+    case running
+    /// Loaded and idle: launchd starts it when its trigger fires. Not a problem.
+    case waiting
+    /// Loaded and idle, and its last run exited with an error code.
+    case failed
+    /// Not loaded in this session, so it won't start until the next login (or at all).
+    case notLoaded
+  }
+  public let kind: Kind
+  public let pid: Int32?
+  /// Exit code of the last run; negative values are the signal that ended it.
+  public let lastExitStatus: Int32?
+
+  public init(kind: Kind, pid: Int32? = nil, lastExitStatus: Int32? = nil) {
+    self.kind = kind
+    self.pid = pid
+    self.lastExitStatus = lastExitStatus
+  }
+
+  /// A missing job is not loaded. An exit by signal (for example when macOS stops an idle
+  /// helper) is not counted as a failure; only a positive exit code is.
+  public init(job: LaunchdDomain.Job?) {
+    guard let job else { self.init(kind: .notLoaded); return }
+    if let pid = job.pid { self.init(kind: .running, pid: pid, lastExitStatus: job.lastExitStatus); return }
+    let failed = (job.lastExitStatus ?? 0) > 0
+    self.init(kind: failed ? .failed : .waiting, lastExitStatus: job.lastExitStatus)
+  }
+}
+
+/// launchd's jobs and overrides for one domain, parsed from `launchctl` output.
+public struct LaunchdDomain: Sendable, Equatable {
+  public struct Job: Sendable, Equatable {
+    public let pid: Int32?
+    public let lastExitStatus: Int32?
+
+    public init(pid: Int32?, lastExitStatus: Int32?) {
+      self.pid = pid
+      self.lastExitStatus = lastExitStatus
+    }
+  }
+
+  /// Loaded jobs by label; nil when the job list couldn't be read.
+  public var jobs: [String: Job]?
+  /// Enable/disable overrides by label (true = disabled).
+  public var overrides: [String: Bool]
+
+  public init(jobs: [String: Job]?, overrides: [String: Bool] = [:]) {
+    self.jobs = jobs
+    self.overrides = overrides
+  }
+
+  /// `launchctl list`: tab-separated PID ("-" when not running), last exit status and label.
+  public static func parseJobs(_ text: String) -> [String: Job] {
+    var jobs: [String: Job] = [:]
+    for line in text.split(whereSeparator: \.isNewline) {
+      let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+      guard fields.count == 3, fields[0] != "PID", !fields[2].isEmpty else { continue }
+      let pid = Int32(fields[0]).flatMap { $0 > 0 ? $0 : nil }
+      jobs[String(fields[2])] = Job(pid: pid, lastExitStatus: Int32(fields[1]))
+    }
+    return jobs
+  }
+
+  /// The "disabled services" block of `launchctl print-disabled`, in either the
+  /// `=> disabled/enabled` or the older `=> true/false` form.
+  public static func parseOverrides(_ text: String) -> [String: Bool] {
+    var overrides: [String: Bool] = [:]
+    var inside = false
+    for raw in text.split(whereSeparator: \.isNewline) {
+      let line = raw.trimmingCharacters(in: .whitespaces)
+      if line.hasPrefix("disabled services") { inside = true; continue }
+      if line.hasPrefix("}") { inside = false; continue }
+      guard inside, line.hasPrefix("\""), let arrow = line.range(of: "\" => ") else { continue }
+      let label = String(line[line.index(after: line.startIndex)..<arrow.lowerBound])
+      switch line[arrow.upperBound...] {
+      case "disabled", "true": overrides[label] = true
+      case "enabled", "false": overrides[label] = false
+      default: continue
+      }
+    }
+    return overrides
+  }
+}
+
+/// The user's session domain and the system domain, as far as an unprivileged reader can see.
+public struct LaunchdSnapshot: Sendable, Equatable {
+  public var user: LaunchdDomain?
+  public var system: LaunchdDomain?
+
+  public init(user: LaunchdDomain?, system: LaunchdDomain?) {
+    self.user = user
+    self.system = system
   }
 }
 

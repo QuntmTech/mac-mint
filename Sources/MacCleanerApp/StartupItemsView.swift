@@ -6,23 +6,31 @@ struct StartupItemsView: View {
   @EnvironmentObject private var account: AccountStore
   @SceneStorage("startup.search") private var search = ""
 
+  /// Items that need a look come first; the rest keep the scanner's alphabetical order.
   private var filtered: [StartupItem] {
-    search.isEmpty
+    let matching = search.isEmpty
       ? model.startupItems
       : model.startupItems.filter {
         $0.label.localizedCaseInsensitiveContains(search)
           || ($0.program?.localizedCaseInsensitiveContains(search) ?? false)
           || $0.scope.localizedCaseInsensitiveContains(search)
       }
+    return matching.filter(\.needsAttention) + matching.filter { !$0.needsAttention }
   }
+
+  private var attentionCount: Int { model.startupItems.filter(\.needsAttention).count }
 
   var body: some View {
     VStack(spacing: 0) {
-      PageHeader(title: "Startup Items", subtitle: "Inspect declared launch settings. Open Login Items to manage what starts with your Mac.") {
+      PageHeader(title: "Startup Items", subtitle: "See what each item asks for, whether its program still exists and what launchd says now. Open Login Items to manage what starts with your Mac.") {
         HStack(spacing: 8) {
         StatusPill(
           title: "\(model.startupItems.count) items", icon: "bolt.horizontal.circle",
           tint: AppTheme.accentText)
+        if attentionCount > 0 {
+          StatusPill(title: "\(attentionCount) need a look", icon: "exclamationmark.triangle", tint: AppTheme.warning)
+            .help("Their program is missing, in the Trash or on a disk that isn't connected, or their last run ended with an error.")
+        }
         Button("Open System Settings") { model.openLoginItemsSettings() }
         Button("Refresh") { model.runSmartScan() }
           .disabled(model.isScanning || model.isWorking)
@@ -55,25 +63,33 @@ struct StartupItemsView: View {
           HStack(spacing: 12) {
             ZStack {
               RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill((item.disabled ? Color.secondary : AppTheme.accent).opacity(0.10))
+                .fill((item.isDisabled ? Color.secondary : AppTheme.accent).opacity(0.10))
                 .frame(width: 36, height: 36)
-              Image(systemName: item.disabled ? "pause.fill" : "bolt.fill")
-                .foregroundStyle(item.disabled ? .secondary : AppTheme.accentText)
+              Image(systemName: item.isDisabled ? "pause.fill" : "bolt.fill")
+                .foregroundStyle(item.isDisabled ? .secondary : AppTheme.accentText)
             }
             VStack(alignment: .leading, spacing: 3) {
               Text(item.label).fontWeight(.medium)
-              Text(possibleOwner(item.label)).font(.caption2).foregroundStyle(.secondary)
-              Text(item.program ?? item.url.path)
+              Text(([possibleOwner(item.label)] + Self.requests(item)).joined(separator: " · "))
+                .font(.caption2).foregroundStyle(.secondary)
+              Text(item.targetPath ?? item.program ?? item.url.path)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .truncationMode(.middle)
             }
             Spacer()
-            if item.disabled { StatusPill(title: "Declared disabled", icon: "pause.circle") }
-            if item.runAtLoad {
-              StatusPill(title: "Requests run at load", icon: "arrow.clockwise", tint: AppTheme.warning)
+            if let target = Self.targetPill(item) {
+              StatusPill(title: target.title, icon: target.icon, tint: target.tint).help(target.help)
             }
-            if item.keepAlive { StatusPill(title: "Requests keep alive", icon: "heart.fill", tint: AppTheme.danger) }
+            if item.isDisabled {
+              StatusPill(title: "Turned off", icon: "pause.circle")
+                .help(item.disabledOverride == true ? "Turned off with a launchd override (for example from Login Items)."
+                  : "Its settings file marks it disabled.")
+            } else {
+              let state = Self.statePill(item)
+              StatusPill(title: state.title, icon: state.icon, tint: state.tint).help(state.help)
+            }
             Text(item.scope)
               .font(.caption)
               .foregroundStyle(.secondary)
@@ -103,6 +119,59 @@ struct StartupItemsView: View {
       }
     }
   }
+  private struct Pill {
+    let title: String
+    let icon: String
+    var tint: Color = .secondary
+    let help: String
+  }
+
+  private static func requests(_ item: StartupItem) -> [String] {
+    (item.runAtLoad ? ["starts at login"] : []) + (item.keepAlive ? ["restarted if it quits"] : [])
+  }
+
+  /// Only problems with the declared program get a pill; a program that exists needs none.
+  private static func targetPill(_ item: StartupItem) -> Pill? {
+    switch item.target {
+    case .missing:
+      return Pill(title: "Program missing", icon: "questionmark.app.dashed", tint: AppTheme.danger,
+        help: "Nothing exists at the program path, so this item can't run. The app may have been deleted or moved.")
+    case .inTrash:
+      return Pill(title: "Program in Trash", icon: "trash", tint: AppTheme.danger,
+        help: "The program is in a Trash folder. It stops working when the Trash is emptied.")
+    case .volumeNotMounted:
+      return Pill(title: "Disk not connected", icon: "externaldrive.badge.xmark", tint: AppTheme.warning,
+        help: "The program is on a disk that isn't connected, often an installer disk image that was ejected.")
+    case .otherVolume:
+      return Pill(title: "On another disk", icon: "externaldrive",
+        help: "The program is on another disk and runs only while that disk is connected.")
+    case .present, .unresolved, nil:
+      return nil
+    }
+  }
+
+  private static func statePill(_ item: StartupItem) -> Pill {
+    guard let live = item.live else {
+      return Pill(title: "State unknown", icon: "questionmark.circle",
+        help: item.scope.contains("Daemon") ? "macOS shows system daemons' live state only to administrators."
+          : "launchd's state couldn't be read.")
+    }
+    switch live.kind {
+    case .running:
+      return Pill(title: "Running", icon: "play.circle", tint: AppTheme.accentText,
+        help: live.pid.map { "Running now as process \($0)." } ?? "Running now.")
+    case .waiting:
+      return Pill(title: "Waiting to run", icon: "clock",
+        help: "Loaded. launchd starts it when it is needed; an idle helper is normal.")
+    case .failed:
+      return Pill(title: "Last run failed", icon: "exclamationmark.triangle", tint: AppTheme.warning,
+        help: "Its last run ended with error code \(live.lastExitStatus ?? 0).")
+    case .notLoaded:
+      return Pill(title: "Not loaded", icon: "moon.zzz",
+        help: "Not loaded in this session, so it isn't running now. It may load at the next login or only for other sessions.")
+    }
+  }
+
   private func possibleOwner(_ label: String) -> String {
     let matches = model.apps.filter { app in
       guard let id = app.bundleIdentifier else { return false }

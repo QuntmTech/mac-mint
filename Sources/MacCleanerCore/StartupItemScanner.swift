@@ -1,12 +1,22 @@
 import Foundation
 
 public actor StartupItemScanner {
+  public typealias LaunchdReader = @Sendable () async -> LaunchdSnapshot?
   private let fileManager: FileManager
   private let homeDirectory: URL
+  private let roots: [(URL, String)]?
+  private let readLaunchd: LaunchdReader?
 
-  public init(fileManager: FileManager = .default, homeDirectory: URL? = nil) {
+  /// `launchd` supplies live job state and overrides; without it, items report only what their
+  /// property lists declare and whether their programs exist.
+  public init(
+    fileManager: FileManager = .default, homeDirectory: URL? = nil, roots: [(URL, String)]? = nil,
+    launchd: LaunchdReader? = nil
+  ) {
     self.fileManager = fileManager
     self.homeDirectory = homeDirectory ?? fileManager.homeDirectoryForCurrentUser
+    self.roots = roots
+    self.readLaunchd = launchd
   }
 
   public func scan() async -> [StartupItem] {
@@ -15,11 +25,12 @@ public actor StartupItemScanner {
 
   public func scanReport(ignoredPaths: Set<String> = []) async -> ScanReport<[StartupItem]> {
     let started = Date()
-    let roots: [(URL, String)] = [
+    let roots: [(URL, String)] = self.roots ?? [
       (homeDirectory.appendingPathComponent("Library/LaunchAgents"), "User LaunchAgent"),
       (URL(fileURLWithPath: "/Library/LaunchAgents"), "System LaunchAgent"),
       (URL(fileURLWithPath: "/Library/LaunchDaemons"), "System LaunchDaemon"),
     ]
+    let launchd = await readLaunchd?()
     var items: [StartupItem] = []
     var issues: [ScanIssue] = []
 
@@ -47,11 +58,17 @@ public actor StartupItemScanner {
             continue
           }
           let label = (plist["Label"] as? String) ?? url.deletingPathExtension().lastPathComponent
-          let program =
-            (plist["Program"] as? String) ?? (plist["ProgramArguments"] as? [String])?.first
+          let arguments = (plist["ProgramArguments"] as? [String]) ?? []
+          let program = (plist["Program"] as? String) ?? arguments.first
           let runAtLoad = (plist["RunAtLoad"] as? Bool) ?? false
           let keepAlive = parseBooleanish(plist["KeepAlive"])
           let disabled = (plist["Disabled"] as? Bool) ?? false
+          let target = Self.resolveTarget(program: program, arguments: arguments) { [fileManager] path in
+            fileManager.fileExists(atPath: path)
+          }
+          // Agents load into the user's session; daemons into the system domain, whose
+          // jobs an unprivileged reader can't list.
+          let domain = scope.contains("Daemon") ? launchd?.system : launchd?.user
           items.append(
             StartupItem(
               url: url,
@@ -60,7 +77,11 @@ public actor StartupItemScanner {
               runAtLoad: runAtLoad,
               keepAlive: keepAlive,
               disabled: disabled,
-              scope: scope
+              scope: scope,
+              target: target.target,
+              targetPath: target.path,
+              disabledOverride: domain?.overrides[label],
+              live: domain?.jobs.map { StartupLiveState(job: $0[label]) }
             ))
         }
       } catch {
@@ -71,6 +92,40 @@ public actor StartupItemScanner {
 
     return ScanReport(
       value: sort(items), issues: issues, duration: Date().timeIntervalSince(started))
+  }
+
+  /// Programs that run another file or an inline command. The file they run is what has to exist.
+  static let launchers: Set<String> = [
+    "/bin/sh", "/bin/bash", "/bin/zsh", "/bin/dash", "/bin/ksh", "/bin/csh", "/bin/tcsh",
+    "/usr/bin/env", "/usr/bin/open", "/usr/bin/osascript", "/usr/bin/python3", "/usr/bin/perl",
+    "/usr/bin/ruby", "/usr/bin/arch", "/usr/bin/nice",
+  ]
+
+  /// Where a declared program points, without running it. `arguments` is ProgramArguments
+  /// (argv, including argv[0]). An inline command (`sh -c`, `osascript -e`) or a name looked
+  /// up on PATH is reported as unresolved rather than guessed.
+  public static func resolveTarget(
+    program: String?, arguments: [String], exists: (String) -> Bool
+  ) -> (target: StartupTarget, path: String?) {
+    guard var path = program, !path.isEmpty else { return (.unresolved, nil) }
+    if launchers.contains(path) {
+      let rest = arguments.dropFirst()
+      if rest.contains("-c") || rest.contains("-e") { return (.unresolved, nil) }
+      guard let file = rest.first(where: { $0.hasPrefix("/") }) else { return (.unresolved, nil) }
+      path = file
+    }
+    guard path.hasPrefix("/") else { return (.unresolved, nil) }
+    let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+    if [path, resolved].contains(where: { $0.contains("/.Trash/") || $0.contains("/.Trashes/") }) {
+      return (.inTrash, path)
+    }
+    let components = URL(fileURLWithPath: path).standardizedFileURL.pathComponents
+    if components.count > 2, components[1] == "Volumes" {
+      let volume = "/Volumes/" + components[2]
+      guard exists(volume) else { return (.volumeNotMounted, path) }
+      return (exists(path) ? .otherVolume : .missing, path)
+    }
+    return (exists(path) ? .present : .missing, path)
   }
 
   private func parseBooleanish(_ value: Any?) -> Bool {

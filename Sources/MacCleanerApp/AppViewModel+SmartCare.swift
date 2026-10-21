@@ -31,7 +31,10 @@ extension AppViewModel {
     currentTask = Task { [weak self] in
       guard let self else { return }
       await withTaskGroup(of: QuickScanResult.self) { group in
-        group.addTask { .base(await SmartScanService().scan(ignoredPaths: ignored)) }
+        group.addTask {
+          let startup = StartupItemScanner(launchd: { await LaunchdStateReader.snapshot() })
+          return .base(await SmartScanService(startupScanner: startup).scan(ignoredPaths: ignored))
+        }
         // Deep project enumeration is a separate, deliberate Developer scan.
         group.addTask { .developer(await DeveloperStorageScanner().scan(ignoredPaths: ignored)) }
         group.addTask { .leftovers(await OrphanScanner().scan(knownBundleIDs: running, ignoredPaths: ignored)) }
