@@ -98,4 +98,14 @@ final class UpdaterTests: XCTestCase {
     XCTAssertEqual(installs, 1, "The install continues once, after the operation ends")
     XCTAssertFalse(controller.isWaitingForWork)
   }
+
+  func testCheckResultsSeparateNewestFromAMissingFeed() {
+    let domain = "SUSparkleErrorDomain"
+    XCTAssertEqual(UpdaterController.checkResult(for: NSError(domain: domain, code: 1001)), .newest)
+    XCTAssertEqual(UpdaterController.checkResult(for: NSError(domain: domain, code: 1002)), .failed)
+    XCTAssertEqual(UpdaterController.checkResult(for: NSError(domain: domain, code: 1000)), .failed)
+    XCTAssertNil(UpdaterController.checkResult(for: NSError(domain: domain, code: 4007)), "A cancelled install says nothing new")
+    XCTAssertNil(UpdaterController.checkResult(for: NSError(domain: NSURLErrorDomain, code: -1009)))
+    XCTAssertNil(UpdaterController.checkResult(for: nil))
+  }
 }

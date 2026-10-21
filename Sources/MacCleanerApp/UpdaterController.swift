@@ -35,12 +35,22 @@ final class UpdaterController: NSObject, ObservableObject {
   @Published private(set) var reminder: Update?
   /// Install and Relaunch was chosen while files were being moved; it continues when they finish.
   @Published private(set) var isWaitingForWork = false
+  /// What the last finished check of the selected channel found, so Settings can say it
+  /// plainly instead of only Sparkle's "up to date" window.
+  enum CheckResult: Equatable {
+    /// The channel's newest build is not newer than this one.
+    case newest
+    /// The channel's feed was missing, unreachable or unreadable.
+    case failed
+  }
+  @Published private(set) var lastResult: CheckResult?
   @Published var channel: UpdateChannel {
     didSet {
       guard channel != oldValue else { return }
       channel.save(in: defaults)
       availableUpdate = nil
       reminder = nil
+      lastResult = nil
       // The feed URL changed, so Sparkle checks the new channel straight away.
       controller?.updater.resetUpdateCycleAfterShortDelay()
     }
@@ -173,6 +183,7 @@ extension UpdaterController: SPUUpdaterDelegate {
 
   func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
     availableUpdate = Update(item)
+    lastResult = nil
   }
 
   func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -182,7 +193,20 @@ extension UpdaterController: SPUUpdaterDelegate {
 
   func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
     lastCheck = updater.lastUpdateCheckDate ?? lastCheck
+    if let result = Self.checkResult(for: error) { lastResult = result }
     if updateCheck != .updateInformation { onCycleFinished?() }
+  }
+
+  /// Sparkle reports "no update" and feed problems as errors in its domain (SUErrors.h):
+  /// 1001 is SUNoUpdateError; 1000 and 1002 are an unreadable or unreachable appcast.
+  /// Cancellations and install errors leave the last result as it was.
+  nonisolated static func checkResult(for error: (any Error)?) -> CheckResult? {
+    guard let error = error as NSError?, error.domain == "SUSparkleErrorDomain" else { return nil }
+    switch error.code {
+    case 1001: return .newest
+    case 1000, 1002: return .failed
+    default: return nil
+    }
   }
 
   func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
