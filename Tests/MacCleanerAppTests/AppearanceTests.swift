@@ -16,7 +16,7 @@ final class AppearanceTests: XCTestCase {
           }
         }
         XCTAssertGreaterThanOrEqual(contrast(.white, AppTheme.accent), 4.5, "Primary button label")
-        for swatch in [AppTheme.Swatch.mint, .sky, .indigo, .violet, .pink, .orange, .amber, .slate, .graphite, .iris] {
+        for swatch in [AppTheme.Swatch.mint, .sky, .indigo, .violet, .pink, .orange, .amber, .slate, .graphite, .iris, .teal, .rose] {
           XCTAssertGreaterThanOrEqual(contrast(.white, swatch.start), 4.5, "White on a colored tile")
           XCTAssertGreaterThanOrEqual(contrast(.white, swatch.end), 4.5, "White on a colored tile")
         }

@@ -10,17 +10,10 @@ struct DashboardView: View {
       VStack(alignment: .leading, spacing: 24) {
         PageHeader("Overview", subtitle: "Understand your storage. Choose what to keep.", eyebrow: "A little more breathing room")
         hero
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
-          MetricCard(title: "Rebuildable data", value: scannedValue(model.reclaimableBytes),
-            subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath", swatch: AppTheme.Swatch.mint,
-            action: { model.selectedSection = .cleaner })
-          MetricCard(title: "A closer look", value: scannedValue(model.reviewableBytes),
-            subtitle: "Items that need your judgment", icon: "eye", swatch: AppTheme.Swatch.amber,
-            action: { model.selectedSection = .cleaner })
-          MetricCard(title: "Installed apps", value: model.lastScanDate == nil && model.apps.isEmpty ? "—" : "\(model.apps.count)",
-            subtitle: "Inspect apps and related files", icon: "square.grid.2x2", swatch: AppTheme.Swatch.violet,
-            action: { model.selectedSection = .applications })
-        }
+        SystemHealthRow(volume: model.volume) { model.selectedSection = .performance }
+        let categories = OverviewPresentation.categories(model.recommendations)
+        StorageOverviewCard(categories: categories, volume: model.volume, scanned: model.lastScanDate != nil)
+        if categories.isEmpty { metrics } else { categoryTiles(categories) }
         if !model.recommendations.isEmpty { SmartCareList() }
         tools
         coverage
@@ -32,6 +25,38 @@ struct DashboardView: View {
     .onAppear {
       guard !SmokeTest.isRequested else { return }
       model.refreshTrashStatus(); model.recordFreeSpace(); model.refreshRecommendations()
+    }
+  }
+
+  private var metrics: some View {
+    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
+      MetricCard(title: "Rebuildable data", value: scannedValue(model.reclaimableBytes),
+        subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath", swatch: AppTheme.Swatch.mint,
+        action: { model.selectedSection = .cleaner })
+      MetricCard(title: "A closer look", value: scannedValue(model.reviewableBytes),
+        subtitle: "Items that need your judgment", icon: "eye", swatch: AppTheme.Swatch.amber,
+        action: { model.selectedSection = .cleaner })
+      MetricCard(title: "Installed apps", value: model.lastScanDate == nil && model.apps.isEmpty ? "—" : "\(model.apps.count)",
+        subtitle: "Inspect apps and related files", icon: "square.grid.2x2", swatch: AppTheme.Swatch.violet,
+        action: { model.selectedSection = .applications })
+    }
+  }
+
+  /// What Quick Scan found, one colored tile per area, largest first.
+  private func categoryTiles(_ categories: [OverviewPresentation.Category]) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Where space can come back").font(.system(size: 18, weight: .semibold)).tracking(-0.3)
+        Spacer()
+        Text("Estimates · you review everything first").font(.caption).foregroundStyle(.secondary)
+      }
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
+        ForEach(categories) { category in
+          CategoryTile(category: category) {
+            if category.destination == .trash { model.emptyTrash() } else { model.open(category.destination) }
+          }
+        }
+      }
     }
   }
 

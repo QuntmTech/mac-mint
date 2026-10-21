@@ -285,7 +285,7 @@ actor ResourceSampler {
     if let capacity = diskCapacity() {
       next.totalBytes = capacity.total; next.freeBytes = capacity.free; next.diskStale = diskStale
     }
-    next.cpuUsage = cpuUsage(); next.memoryUsedBytes = memoryUsed(); next.swapUsedBytes = swapUsed(); next.pressure = pressure()
+    next.cpuUsage = cpuUsage(); next.memoryUsedBytes = Self.memoryUsed(); next.swapUsedBytes = Self.swapUsed(); next.pressure = Self.pressure()
     var readings: [pid_t: AppReading] = [:], updated: [pid_t: Baseline] = [:]
     let listing = families ? Self.listProcesses() : []
     let members = families ? ProcessFamilies.members(of: Set(pids), in: listing) : [:]
@@ -410,7 +410,8 @@ actor ResourceSampler {
     guard let previous = previousTicks, total > previous.total, busy >= previous.busy else { return nil }
     return min(1, Double(busy - previous.busy) / Double(total - previous.total))
   }
-  private func memoryUsed() -> Int64? {
+  /// App memory + wired + compressed: what Activity Monitor calls Memory Used.
+  nonisolated static func memoryUsed() -> Int64? {
     var size = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride)
     var stats = vm_statistics64_data_t()
     let host = mach_host_self()
@@ -422,11 +423,11 @@ actor ResourceSampler {
     let pages = Int64(stats.internal_page_count) - Int64(stats.purgeable_count) + Int64(stats.wire_count) + Int64(stats.compressor_page_count)
     return max(0, pages) * Int64(getpagesize())
   }
-  private func swapUsed() -> Int64? {
+  nonisolated static func swapUsed() -> Int64? {
     var usage = xsw_usage(); var size = MemoryLayout<xsw_usage>.size
     return sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 ? Int64(clamping: usage.xsu_used) : nil
   }
-  private func pressure() -> SystemMonitor.Pressure {
+  nonisolated static func pressure() -> SystemMonitor.Pressure {
     var level: Int32 = 0; var size = MemoryLayout<Int32>.size
     guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else { return .unknown }
     switch level { case 1: return .normal; case 2: return .warning; case 4: return .critical; default: return .unknown }

@@ -46,6 +46,8 @@ struct AppTheme {
     static let slate = Swatch(start: rgb(0x475569), end: rgb(0x334155))
     static let graphite = Swatch(start: rgb(0x52525B), end: rgb(0x3F3F46))
     static let iris = Swatch(start: rgb(0x6D28D9), end: rgb(0x2563EB))
+    static let teal = Swatch(start: rgb(0x0F766E), end: rgb(0x0E7490))
+    static let rose = Swatch(start: rgb(0xBE123C), end: rgb(0x9F1239))
 
     private static func rgb(_ hex: UInt32) -> Color {
       Color(.sRGB, red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255,
@@ -226,7 +228,7 @@ struct StorageRing: View {
       Circle()
         .trim(from: 0, to: fraction)
         .stroke(AngularGradient(colors: [AppTheme.brand, Color(red: 0.05, green: 0.58, blue: 0.53), Color(red: 0.15, green: 0.39, blue: 0.92)],
-          // Starting a little before 12 o'clock keeps the rounded start cap mint, not the end colour.
+          // Starting a little before 12 o'clock keeps the rounded start cap mint, not the end color.
           center: .center, startAngle: .degrees(-10), endAngle: .degrees(360 * max(fraction, 0.01))),
           style: StrokeStyle(lineWidth: 12, lineCap: .round))
         .rotationEffect(.degrees(-90))

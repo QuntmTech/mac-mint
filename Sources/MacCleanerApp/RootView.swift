@@ -172,17 +172,32 @@ struct RootView: View {
       if model.selectedSection.tabs.isEmpty {
         Label("Your workspace", systemImage: "square.grid.2x2").font(.caption).foregroundStyle(.secondary)
       } else {
-        ForEach(model.selectedSection.tabs) { section in
-          Button { model.selectedSection = section } label: {
-            HStack(spacing: 6) {
-              Image(systemName: section.icon).font(.system(size: 11))
-              Text(section.rawValue).font(.system(size: 12, weight: model.selectedSection == section ? .semibold : .medium))
-            }.padding(.horizontal, 11).padding(.vertical, 8)
-              .foregroundStyle(model.selectedSection == section ? AppTheme.accentText : Color.secondary)
-              .background(model.selectedSection == section ? AppTheme.surface : .clear, in: RoundedRectangle(cornerRadius: 8))
-              .contentShape(RoundedRectangle(cornerRadius: 8))
-          }.buttonStyle(.plain).accessibilityAddTraits(model.selectedSection == section ? .isSelected : [])
+        // One pill-shaped segmented control; the selected tab is a raised capsule with its
+        // area's color badge, which reads in both Light and Dark Mode.
+        HStack(spacing: 2) {
+          ForEach(model.selectedSection.tabs) { section in
+            let selected = model.selectedSection == section
+            Button { model.selectedSection = section } label: {
+              HStack(spacing: 6) {
+                if selected {
+                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 18)
+                } else {
+                  Image(systemName: section.icon).font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.secondary).frame(width: 18, height: 18)
+                }
+                Text(section.rawValue).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                  .foregroundStyle(selected ? AppTheme.ink : Color.secondary)
+              }
+              .padding(.horizontal, 13).padding(.vertical, 6)
+              .background {
+                if selected { Capsule().fill(AppTheme.surface).shadow(color: .black.opacity(0.12), radius: 2, y: 1) }
+              }
+              .contentShape(Capsule())
+            }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+          }
         }
+        .padding(3)
+        .background(AppTheme.panel, in: Capsule())
       }
       Spacer(minLength: 8)
       if account.aiAvailable {
