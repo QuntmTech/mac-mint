@@ -2,6 +2,20 @@
 
 Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
 
+## Owner-report fixes and Overview redesign — 2026-10-21 (later)
+
+- **Account** (`AccountViews.swift`, `RootView.swift`): the profile button opens an account overview (plan, devices, sign out). The purchase gate appears only for a paid action, and dismissing it never resumes or runs a deferred plan.
+- **Updates** (`UpdaterController.swift`, `UpdatesSettingsCard.swift`): Settings shows the build, the channel checked and what Sparkle found (newest on this channel, newer than the channel, needs a newer macOS, or the feed couldn't be read). Before, it said "up to date" in every case.
+- **Overview** (`OverviewViews.swift`, `DashboardView.swift`): a system-health row (disk, Memory Used, pressure and swap, load average, battery), a whole-disk bar with Quick Scan's findings in each area's color, and colored category tiles. The workspace tabs are now a pill control. The health readings are one-shot reads about once a minute while MacMint is in front; no sampler runs for them.
+- **Installer** (`scripts/build_dmg.sh`, `scripts/dmg_settings.py`): a designed drag-to-Applications window using pinned dmgbuild. The app's extension is not hidden, because the FinderInfo that hiding writes fails `codesign --verify --strict`.
+- **Sign-up** (`Account.swift`): in-app sign-up now requests the verification email, as the website does.
+- **Resource probe**: the heavy-session hidden window now starts 5 s after hiding, like scenario (c). The trace showed the overage was the hide itself (one second at about 10% of a core). Budgets are unchanged. See [Performance interface notes](docs/PERFORMANCE_UX.md).
+- **Backend, read-only audit** (owner actions, not code):
+  - No email is delivered. PocketBase SMTP is off, with the placeholder `smtp.example.com`. Verification and password-reset mails fail.
+  - No installer can be downloaded. `app_releases` is empty, and every GitHub release is a pre-release.
+  - Checkout is closed: no Stripe key and no webhook secret, and commerce is in test mode.
+  - Sign-in, refresh, `/me` and activation work, and the collection rules are correct.
+
 ## Workload clarity pass — 2026-10-21
 
 Driven by an owner workload audit of a heavy developer setup (many editor, browser and AI-agent windows; recurring SSD and memory pressure). Three read-only changes, each with fixtures; nothing gains new delete, quit or throttle authority.
