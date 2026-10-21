@@ -261,7 +261,16 @@ public struct AccountClient: Sendable {
         "email": trimmedEmail, "password": password, "passwordConfirm": password,
         "name": name.trimmingCharacters(in: .whitespaces),
       ])
+    // Same as the website's sign-up. Buying Pro needs a verified address; a failed send
+    // doesn't undo the account, and the link can be requested again later.
+    try? await requestVerification(email: trimmedEmail)
     return try await signIn(email: trimmedEmail, password: password)
+  }
+
+  public func requestVerification(email: String) async throws {
+    let _: EmptyResponse = try await send(
+      "POST", "/api/collections/users/request-verification",
+      body: ["email": email.trimmingCharacters(in: .whitespaces)])
   }
 
   public func refresh(token: String) async throws -> AuthSession {

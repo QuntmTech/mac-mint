@@ -115,6 +115,27 @@ final class AccountTests: XCTestCase {
     XCTAssertEqual(body, ["code": "MINT-1", "device_id": "ABCDEF0123456789"])
   }
 
+  func testSignUpAsksForTheVerificationEmailAndAFailedSendDoesNotBlockSignIn() async throws {
+    for verificationStatus in [204, 500] {
+      let paths = PathLog()
+      let client = AccountClient(baseURL: base) { request in
+        let path = request.url!.path
+        paths.append(path)
+        let reply: (status: Int, json: String) = switch path {
+        case "/api/collections/users/records": (200, #"{"id":"u1","email":"new@b.co","verified":false}"#)
+        case "/api/collections/users/request-verification": (verificationStatus, verificationStatus == 204 ? "" : #"{"message":"Failed"}"#)
+        default: (200, #"{"token":"t","record":{"id":"u1","email":"new@b.co","verified":false}}"#)
+        }
+        return (Data(reply.json.utf8),
+          HTTPURLResponse(url: request.url!, statusCode: reply.status, httpVersion: nil, headerFields: nil)!)
+      }
+      let session = try await client.signUp(email: " new@b.co ", password: "password1", name: "New")
+      XCTAssertEqual(session.token, "t")
+      XCTAssertEqual(paths.all, ["/api/collections/users/records", "/api/collections/users/request-verification",
+        "/api/collections/users/auth-with-password"])
+    }
+  }
+
   func testTransportFailuresAreClassifiedWithoutMakingCancellationOrTLSOfflineEligible() async {
     let cases: [(Error, String)] = [
       (CancellationError(), "cancelled"), (URLError(.cancelled), "cancelled"),
@@ -257,5 +278,22 @@ final class ReleaseCheckerTests: XCTestCase {
     guard case .available(let release) = status else { return XCTFail("expected update, got \(status)") }
     XCTAssertEqual(release.version, "0.7.0")
     XCTAssertEqual(release.downloadUrl, "https://dl/MacMint.zip")
+  }
+}
+
+final class PathLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var paths: [String] = []
+
+  func append(_ path: String) {
+    lock.lock()
+    paths.append(path)
+    lock.unlock()
+  }
+
+  var all: [String] {
+    lock.lock()
+    defer { lock.unlock() }
+    return paths
   }
 }

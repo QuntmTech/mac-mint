@@ -184,6 +184,8 @@ final class AccountStore: ObservableObject {
     await perform(replacingSession: true) { generation in
       let session = try await self.client.signUp(email: email, password: password, name: name)
       try await self.adopt(session, generation: generation)
+      guard generation == self.sessionGeneration, session.user.verified != true else { return }
+      self.infoMessage = "Account created. Open the verification link sent to \(session.user.email) before buying Pro."
     }
   }
 
