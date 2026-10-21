@@ -159,6 +159,9 @@ final class SystemMonitor: ObservableObject {
   var publishesReadings: Bool {
     leases.isEmpty || leases.values.contains { $0.kind == .popover || ($0.kind == .window && isForeground) }
   }
+  /// Helper processes are listed only for the visible Performance list, which shows per-app
+  /// rows; the menu bar popover and Auto Tame don't need them.
+  var listsHelpers: Bool { isForeground && leases.values.contains { $0.kind == .window } }
   private func foregroundChanged(_ foreground: Bool) {
     guard foreground != isForeground else { return }
     let wasPublishing = publishesReadings
@@ -194,8 +197,7 @@ final class SystemMonitor: ObservableObject {
     let pids = applications.map(\.processIdentifier)
     let token = generation
     let sampler = sampler
-    // Helper processes are only listed for readings someone can see, not for Auto Tame alone.
-    let families = publishesReadings
+    let families = listsHelpers
     samplingTask = Task { [weak self] in
       let work = Task.detached(priority: .utility) { await sampler.read(pids: pids, families: families) }
       let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
