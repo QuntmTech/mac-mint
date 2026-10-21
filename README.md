@@ -57,7 +57,7 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 - Each item says whether it rebuilds, re-downloads, or needs review. Recently changed data is treated conservatively; activity evidence and modification dates are distinguished.
 
 ### Performance, menu bar, and reminders
-- **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
+- **Performance:** memory pressure (the signal macOS itself uses), CPU, swap, free space, and the apps using the most memory, each counted with the helper processes it started (browser tabs, editor extensions and their tools) and an expandable breakdown. "Quit…" asks an app to quit normally so it can prompt you to save. There's no fake RAM purge.
 - **Optional menu bar companion** with the same readings and quick actions. It only samples while it's open.
 - **Opt-in low-space alerts and weekly scan reminders:** at most once a day, never 10 pm–8 am, and they never clean anything automatically.
 - **Resumable first-run setup** with installation guidance, optional permission instructions and same-account purchase connection. An optional "Open at login" setting uses SMAppService.
@@ -135,7 +135,8 @@ V2 keeps the working V1 core (cleanup catalog, Trash-first deletion, streaming S
 
 ### Startup Items
 - Read-only inventory of user/system LaunchAgents and LaunchDaemons.
-- Shows label, program, scope, RunAtLoad, KeepAlive, and disabled state.
+- Shows label, program, scope, RunAtLoad, KeepAlive, and disabled state (including launchctl overrides).
+- Flags programs that are missing, in the Trash, or on a disk that isn't connected, and shows launchd's state: Running, Waiting to run, Last run failed or Not loaded. Items that need a look are listed first.
 - Direct Finder reveal and System Settings access.
 - No fake privileged mutation from the base app.
 

@@ -2,6 +2,16 @@
 
 Updated 2026-10-19. This is the entry point for Claude Code or another reviewer. Start with [installation and first-run setup](docs/INSTALLATION_AND_ONBOARDING.md), then the [earlier six-phase delivery checklist](docs/UNINSTALL_AND_TAMING.md) and [PR #33](https://github.com/QuntmTech/mac-mint/pull/33). The complete earlier change history and architecture are in [docs/CLAUDE_CODE_HANDOFF.md](docs/CLAUDE_CODE_HANDOFF.md).
 
+## Workload clarity pass — 2026-10-21
+
+Driven by an owner workload audit of a heavy developer setup (many editor, browser and AI-agent windows; recurring SSD and memory pressure). Three read-only changes, each with fixtures; nothing gains new delete, quit or throttle authority.
+
+- **Disk readings** (`SystemMonitor.swift`, `AppViewModel+Storage.swift`): a failed or partial capacity read no longer becomes `(0, 0)`. The sampler keeps the last good reading marked stale; menu bar, sidebar and Overview say Unavailable instead of "Zero KB free" / "Everything looks healthy" or a full disk.
+- **Helper processes** (`ProcessFamilies.swift`, `ResourceSampler`): Performance rows total each app with the processes in its own tree and show a breakdown. See the inventory boundary in [Performance interface notes](docs/PERFORMANCE_UX.md).
+- **Startup items** (`StartupItemScanner.swift`, `LaunchdStateReader.swift`): each item reports whether its program exists (missing, in Trash, on an unmounted installer disk; inline shell commands stay unresolved) and launchd's state from `launchctl list` / `print-disabled` (Running, Waiting to run, Last run failed, Not loaded, Turned off, or unknown for system daemons). Problems sort first. Nothing is loaded, unloaded or changed.
+
+Still open from that audit, in suggested order: separate RAM / SSD / CPU / swap explanations with swap change rates; storage classification for recovery history (editor snapshots), VM images, Docker's sparse disk and locked tool caches (`uv`, `pnpm`); bounded regrowth tracking for chosen folders; a short plain-language action list; scan-stage stall reporting for cloud placeholders; and Auto Tame scope/state wording. Representative before/after workload measurements on the owner's Mac are still needed before any performance claim.
+
 ## Free-trial checkout funnel — 2026-10-20
 
 Every homepage call-to-action now opens `/start`, a plan page for MacMint Pro, Annual (7-day free trial; 1/2/5 Macs at US$39.95/59.95/99.95 per year, from server configuration). "Start free trial" goes to the tier's Stripe Payment Link; the signed webhook records a private purchase claim; `/welcome` creates the account once (or links an existing account for that email) and `/download` serves the validated DMG. This supersedes the earlier US$39.99/three-day/three-Mac offer. Read the funnel section and go-live checklist in [Stripe setup](docs/STRIPE_SETUP.md), `macmint_funnel.js`, `macmint_download.js` and `backend/tests/funnel_integration.py`. Nothing was configured in Stripe or deployed.
@@ -58,7 +68,7 @@ The shared Linux source path is `/home/qrkit/src/mac-mint`. `/home/qrkit/macmint
 | Photos | Folder files use filesystem review/Trash. Photo-library assets use PhotoKit confirmation and Recently Deleted. Deck swipes change selections; they do not immediately delete. |
 | AI and Organizer | Desktop requests go to authenticated PocketBase routes; the Anthropic key stays server-side. Explain/Review/Ask are advisory. Organizer previews proposed names/moves, then requires approval and local policy checks; it has its own durable Undo records. |
 | Account and purchase | `AccountStore` manages session/entitlement/offline grace. Hosted Stripe Checkout is fulfilled through verified, idempotent server handling; a browser return URL grants no access. Live pricing/setup is pending. |
-| Performance | A utility sampler uses visible-consumer leases and adaptive cadence. Main-process Quit/Force Quit and reversible background priority recheck identity/owner. Opt-in Auto Tame reuses sampling; exceptions persist and restoration is journaled. Hard CPU/RAM caps, GPU data and grouped helper totals remain unimplemented. |
+| Performance | A utility sampler uses visible-consumer leases and adaptive cadence. Main-process Quit/Force Quit and reversible background priority recheck identity/owner. Opt-in Auto Tame reuses sampling; exceptions persist and restoration is journaled. While the Performance list is visible, rows include helper processes from each app's own process tree (read-only; controls stay on the main process). Hard CPU/RAM caps and GPU data remain unimplemented. |
 
 Source map: `Sources/MacCleanerCore` for portable policy/engines; `Sources/MacCleanerApp` for native UI/adapters/coordinators; `backend/pocketbase/pb_hooks` and `pb_migrations` for PocketBase/Goja; `web` for Vite/React account/checkout; `ChatGPT sites the homepage V1` for the separate homepage/demo. Read section 15 of the detailed handoff for exact review files and tests.
 
