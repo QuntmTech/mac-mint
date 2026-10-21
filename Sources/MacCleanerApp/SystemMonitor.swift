@@ -13,12 +13,18 @@ final class SystemMonitor: ObservableObject {
   struct Snapshot: Equatable, Sendable {
     var freeBytes: Int64 = 0
     var totalBytes: Int64 = 0
+    /// The latest disk read failed; the capacity shown is the last good reading.
+    var diskStale = false
     var cpuUsage: Double?
     var memoryUsedBytes: Int64?
     var physicalMemory: Int64 = Int64(ProcessInfo.processInfo.physicalMemory)
     var swapUsedBytes: Int64?
     var pressure: Pressure = .unknown
-    var diskUsedFraction: Double { totalBytes > 0 ? min(1, max(0, Double(totalBytes - freeBytes) / Double(totalBytes))) : 0 }
+    /// False until macOS has reported a capacity. Zero free bytes is then unknown, not a full disk.
+    var hasDiskReading: Bool { totalBytes > 0 }
+    var diskUsedFraction: Double? {
+      hasDiskReading ? min(1, max(0, Double(totalBytes - freeBytes) / Double(totalBytes))) : nil
+    }
   }
   struct AppUsage: Identifiable, Equatable {
     let id: pid_t
@@ -238,7 +244,10 @@ actor ResourceSampler {
   private struct Baseline { let started: UInt64; let cpu: UInt64; let time: UInt64 }
   private var baselines: [pid_t: Baseline] = [:]
   private var previousTicks: (busy: UInt64, total: UInt64)?
-  private var disk: (free: Int64, total: Int64, readAt: TimeInterval)?
+  /// The last good capacity; a failed read keeps it (marked stale) instead of reporting zero.
+  private var disk: (free: Int64, total: Int64)?
+  private var diskCheckedAt: TimeInterval?
+  private var diskStale = false
   private let readDisk: DiskReader
   private let clock: @Sendable () -> TimeInterval
   private(set) var diskReads = 0
@@ -252,8 +261,9 @@ actor ResourceSampler {
 
   func read(pids: [pid_t]) -> Result {
     var next = SystemMonitor.Snapshot()
-    let capacity = diskCapacity()
-    next.totalBytes = capacity.total; next.freeBytes = capacity.free
+    if let capacity = diskCapacity() {
+      next.totalBytes = capacity.total; next.freeBytes = capacity.free; next.diskStale = diskStale
+    }
     next.cpuUsage = cpuUsage(); next.memoryUsedBytes = memoryUsed(); next.swapUsedBytes = swapUsed(); next.pressure = pressure()
     var readings: [pid_t: AppReading] = [:], updated: [pid_t: Baseline] = [:]
     for pid in pids {
@@ -273,20 +283,25 @@ actor ResourceSampler {
     return Result(snapshot: next, apps: readings)
   }
 
-  private func diskCapacity() -> (free: Int64, total: Int64) {
+  private func diskCapacity() -> (free: Int64, total: Int64)? {
     let now = clock()
-    if let disk, now >= disk.readAt, now - disk.readAt < Self.diskInterval { return (free: disk.free, total: disk.total) }
-    diskReads += 1
-    let value = readDisk() ?? (free: 0, total: 0)
-    disk = (free: value.free, total: value.total, readAt: now)
-    return value
+    if let checked = diskCheckedAt, now >= checked, now - checked < Self.diskInterval { return disk }
+    diskReads += 1; diskCheckedAt = now
+    if let value = readDisk(), value.total > 0, value.free >= 0 {
+      disk = value; diskStale = false
+    } else {
+      diskStale = disk != nil
+    }
+    return disk
   }
 
+  /// Nil when either capacity is missing: a missing value is not a measured zero.
   nonisolated static func startupDisk() -> (free: Int64, total: Int64)? {
     guard let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
       .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey,
-    ]) else { return nil }
-    return (free: values.volumeAvailableCapacityForImportantUsage ?? 0, total: Int64(values.volumeTotalCapacity ?? 0))
+    ]), let free = values.volumeAvailableCapacityForImportantUsage, let total = values.volumeTotalCapacity,
+      total > 0 else { return nil }
+    return (free: free, total: Int64(total))
   }
   nonisolated static func cpuPercent(previousCPU: UInt64, currentCPU: UInt64, previousTime: UInt64, currentTime: UInt64, sameProcess: Bool) -> Double? {
     guard sameProcess, currentTime > previousTime, currentCPU >= previousCPU else { return nil }

@@ -70,8 +70,10 @@ struct DashboardView: View {
       }.frame(maxWidth: .infinity, alignment: .leading)
       VStack(spacing: 18) {
         StorageRing(used: stats.used, total: stats.total,
-          centerValue: ByteFormatter.string(stats.free), centerLabel: "available")
-        Text("\(ByteFormatter.string(stats.used)) of \(ByteFormatter.string(stats.total)) used")
+          centerValue: stats.isMeasured ? ByteFormatter.string(stats.free) : "—",
+          centerLabel: stats.isMeasured ? "available" : "unavailable")
+        Text(stats.isMeasured ? "\(ByteFormatter.string(stats.used)) of \(ByteFormatter.string(stats.total)) used"
+          : "macOS did not report this disk's capacity")
           .font(.caption).foregroundStyle(AppTheme.ink.opacity(0.82)).monospacedDigit()
       }.padding(.horizontal, 12)
     }

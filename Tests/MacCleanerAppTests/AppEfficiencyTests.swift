@@ -46,6 +46,37 @@ final class AppEfficiencyTests: XCTestCase {
     XCTAssertEqual(diskReads, 2)
   }
 
+  func testFailedDiskReadsAreUnknownOrStaleNeverAFabricatedZero() async {
+    let now = LockedValue<TimeInterval>(0)
+    let next = LockedValue<(free: Int64, total: Int64)?>(nil)
+    let sampler = ResourceSampler(readDisk: { next.value }, clock: { now.value })
+    var snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertFalse(snapshot.hasDiskReading); XCTAssertNil(snapshot.diskUsedFraction)
+    XCTAssertFalse(snapshot.diskStale, "Nothing was ever measured, so nothing is stale")
+    next.value = (free: 0, total: 0); now.value = 60
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertFalse(snapshot.hasDiskReading, "A zero capacity is a missing reading, not a full disk")
+    next.value = (free: 40, total: 100); now.value = 120
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 40); XCTAssertEqual(snapshot.diskUsedFraction, 0.6); XCTAssertFalse(snapshot.diskStale)
+    next.value = nil; now.value = 180
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 40, "A failed read keeps the last good capacity")
+    XCTAssertEqual(snapshot.totalBytes, 100); XCTAssertTrue(snapshot.diskStale)
+    next.value = (free: 30, total: 100); now.value = 240
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 30); XCTAssertFalse(snapshot.diskStale)
+  }
+
+  func testVolumeSummaryTreatsMissingCapacityAsUnmeasured() {
+    XCTAssertFalse(VolumeSummary.summary(name: nil, total: nil, free: 5).isMeasured)
+    XCTAssertFalse(VolumeSummary.summary(name: "Data", total: 100, free: nil).isMeasured)
+    XCTAssertFalse(VolumeSummary.summary(name: "Data", total: 0, free: 0).isMeasured)
+    let measured = VolumeSummary.summary(name: "Data", total: 100, free: 0)
+    XCTAssertTrue(measured.isMeasured, "A measured zero is a real full disk")
+    XCTAssertEqual(measured.used, 100); XCTAssertEqual(measured.name, "Data")
+  }
+
   func testWindowLeasesSampleOnlyWhileTheWorkspaceIsInFront() {
     let front = Box(false)
     let activity = AppActivity(center: NotificationCenter(), evaluate: { front.value })

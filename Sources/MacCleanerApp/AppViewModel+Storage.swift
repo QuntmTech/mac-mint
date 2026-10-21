@@ -9,16 +9,22 @@ struct VolumeSummary: Equatable, Sendable {
   var used: Int64 = 0
   var free: Int64 = 0
   var total: Int64 = 0
+  /// False when macOS did not report both capacities; the zeros are then unknown, not empty.
+  var isMeasured: Bool { total > 0 }
 
   static func read(_ url: URL = FileManager.default.homeDirectoryForCurrentUser) -> VolumeSummary {
     let values = try? url.resourceValues(forKeys: [
       .volumeLocalizedNameKey, .volumeTotalCapacityKey,
       .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
     ])
-    let total = Int64(values?.volumeTotalCapacity ?? 0)
-    let free = values?.volumeAvailableCapacityForImportantUsage ?? Int64(values?.volumeAvailableCapacity ?? 0)
-    return VolumeSummary(name: values?.volumeLocalizedName ?? "Startup Disk",
-      used: max(0, total - free), free: max(0, free), total: max(0, total))
+    return summary(name: values?.volumeLocalizedName, total: values?.volumeTotalCapacity.map(Int64.init),
+      free: values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init))
+  }
+
+  static func summary(name: String?, total: Int64?, free: Int64?) -> VolumeSummary {
+    let name = name ?? "Startup Disk"
+    guard let total, total > 0, let free, free >= 0 else { return VolumeSummary(name: name) }
+    return VolumeSummary(name: name, used: max(0, total - free), free: free, total: total)
   }
 }
 

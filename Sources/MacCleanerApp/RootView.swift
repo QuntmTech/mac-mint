@@ -256,10 +256,10 @@ struct RootView: View {
           .overlay(alignment: .leading) {
             Capsule().fill(AppTheme.accentText).frame(width: geometry.size.width * fraction)
           }
-      }.frame(height: 5).accessibilityLabel("Disk \(Int(fraction * 100)) percent used")
+      }.frame(height: 5).accessibilityLabel(stats.isMeasured ? "Disk \(Int(fraction * 100)) percent used" : "Disk space unavailable")
       HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Text(stats.total > 0 ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
-        Text("available").font(.caption).foregroundStyle(.secondary)
+        Text(stats.isMeasured ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
+        Text(stats.isMeasured ? "available" : "unavailable").font(.caption).foregroundStyle(.secondary)
       }
     }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
   }
