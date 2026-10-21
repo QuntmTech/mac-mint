@@ -221,6 +221,24 @@ final class AppReliabilityTests: XCTestCase {
 
   // MARK: Helpers
 
+  func testProfileOpensTheAccountAndOnlyPaidActionsOpenTheGate() async throws {
+    let (model, folder) = try await readyModel()
+    defer { try? FileManager.default.removeItem(at: folder) }
+    model.openAccount()
+    XCTAssertTrue(model.showingAccount)
+    XCTAssertEqual(model.accountPurpose, .account)
+    XCTAssertNil(model.pendingPlan, "Opening the account never starts or resumes a review")
+    model.showingAccount = false
+    try await waitUntil { model.recoveryReady }
+    model.authorizeRemoval = { false }
+    XCTAssertFalse(model.requirePaidAccess())
+    XCTAssertTrue(model.showingAccount)
+    XCTAssertEqual(model.accountPurpose, .paidAction)
+    model.showingAccount = false
+    model.openAccount()
+    XCTAssertEqual(model.accountPurpose, .account, "A later profile tap is not treated as the earlier gate")
+  }
+
   private func readyModel() async throws -> (AppViewModel, URL) {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MacMintReliability-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

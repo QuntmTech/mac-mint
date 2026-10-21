@@ -70,14 +70,23 @@ final class AppViewModel: ObservableObject {
   }
 
   @Published var showingAccount = false
+  /// Set with `showingAccount`: the account itself, or the gate of a paid action.
+  @Published var accountPurpose: AccountSheetPurpose = .account
   @Published var showingHelp = false
   @Published var deferredPlan: OperationPlan?
   var authorizeRemoval: () -> Bool = { false }
+
+  /// The profile button and "Connect account": shows the account, never a pending review.
+  func openAccount() {
+    accountPurpose = .account
+    showingAccount = true
+  }
 
   func requirePaidAccess() -> Bool {
     guard requireExclusions(), requireRecoveryReady() else { return false }
     guard authorizeRemoval() else {
       statusMessage = "Sign in with an active plan to move items. Your selections are kept."
+      accountPurpose = .paidAction
       showingAccount = true
       return false
     }

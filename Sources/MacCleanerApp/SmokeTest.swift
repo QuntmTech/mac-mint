@@ -223,7 +223,12 @@ enum SmokeTest {
     }
     scheme = .light
     render("Help", HelpView())
-    render("Account access", AccountAccessSheet())
+    render("Account access", AccountAccessSheet(), width: 560, height: 620)
+    render("Account paid action", AccountAccessSheet(purpose: .paidAction, hasDeferredPlan: true), width: 560, height: 620)
+    render("Account overview", AccountOverviewPanel(details: .init(email: "owner@example.com",
+      plan: "Pro • Access until Oct 20, 2027", planActive: true, devices: "2 of 3 in use",
+      thisMac: "Example MacBook Pro", offline: false), refresh: {}, manage: {}, signOut: {}).padding(24),
+      width: 560, height: 360)
     render("Command palette", CommandPalette())
 
     let seconds = Date().timeIntervalSince(started)

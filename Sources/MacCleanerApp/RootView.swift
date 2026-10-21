@@ -94,11 +94,12 @@ struct RootView: View {
       }
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
-      if account.isUnlocked, let plan = model.deferredPlan {
+      // Only a paid action's gate returns to its review; opening the account never does.
+      if model.accountPurpose == .paidAction, account.isUnlocked, let plan = model.deferredPlan {
         model.deferredPlan = nil
         model.pendingPlan = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered, ignoredPaths: model.ignoredPaths)
       }
-    }) { AccountAccessSheet() }
+    }) { AccountAccessSheet(purpose: model.accountPurpose, hasDeferredPlan: model.deferredPlan != nil) }
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       guard !SmokeTest.isRequested else { return }
@@ -202,7 +203,7 @@ struct RootView: View {
           .background(model.queuedCount > 0 || model.selectedSection == .review ? AppTheme.selection : AppTheme.surface,
             in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8))
       }.buttonStyle(.plain).help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
-      Button { model.showingAccount = true } label: {
+      Button { model.openAccount() } label: {
         Image(systemName: "person.crop.circle").font(.system(size: 19)).frame(width: 32, height: 32)
       }.buttonStyle(.plain).foregroundStyle(.secondary)
         .help(account.isUnlocked ? "Account" : "Connect your MacMint account")

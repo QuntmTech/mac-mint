@@ -81,7 +81,7 @@ struct OrganizerView: View {
     .onChange(of: model.aiEnabled) { _, enabled in if !enabled { cancelRequest() } }
     .onChange(of: account.isUnlocked) { _, unlocked in if !unlocked { cancelRequest() } }
     .onDisappear { cancelRequest() }
-    .sheet(isPresented: $showingActivation) { AccountAccessSheet() }
+    .sheet(isPresented: $showingActivation) { AccountAccessSheet(purpose: .paidAction) }
     .sheet(isPresented: $consentSheet) { consentView }
     .alert("Apply \(selected.count) reviewed changes?", isPresented: $confirmation) {
       Button("Cancel", role: .cancel) {}
