@@ -20,6 +20,12 @@ hdiutil verify "$DMG"
 hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT" -quiet
 ATTACHED=1
 [[ -d "$MOUNT/MacMint.app" && -f "$MOUNT/Install MacMint.txt" && -L "$MOUNT/Applications" ]]
+if [[ "${REQUIRE_STYLED_INSTALLER:-0}" == "1" || "${REQUIRE_NOTARIZATION:-0}" == "1" ]]; then
+  # The designed window: Finder layout, background image and volume icon.
+  [[ -f "$MOUNT/.DS_Store" ]] || { echo "The installer window layout (.DS_Store) is missing." >&2; exit 1; }
+  ls "$MOUNT"/.background.* >/dev/null 2>&1 || { echo "The installer window background is missing." >&2; exit 1; }
+  [[ -f "$MOUNT/.VolumeIcon.icns" ]] || { echo "The installer volume icon is missing." >&2; exit 1; }
+fi
 [[ "$(readlink "$MOUNT/Applications")" == "/Applications" ]]
 [[ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$MOUNT/MacMint.app/Contents/Info.plist")" == "co.macmint.MacMint" ]]
 codesign --verify --strict --verbose=2 "$MOUNT/MacMint.app"

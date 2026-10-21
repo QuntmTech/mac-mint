@@ -60,6 +60,7 @@ jobs:
           NO_OPEN: "1"
           MACMINT_ARCHS: "arm64 x86_64"
           REQUIRE_NOTARIZATION: ${{ env.HAS_SIGNING == 'true' && '1' || '0' }}
+          REQUIRE_STYLED_INSTALLER: "1"
           SIGN_IDENTITY: ${{ env.HAS_SIGNING == 'true' && secrets.DEVELOPER_ID_IDENTITY || '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -70,7 +71,7 @@ jobs:
         id: mode
         run: |
           ./scripts/smoke_test.sh dist/MacMint.app
-          EXPECTED_ARCHS="arm64 x86_64" REQUIRE_NOTARIZATION="${{ env.HAS_SIGNING == 'true' && '1' || '0' }}" ./scripts/verify_installer.sh dist/MacMint.dmg
+          EXPECTED_ARCHS="arm64 x86_64" REQUIRE_STYLED_INSTALLER=1 REQUIRE_NOTARIZATION="${{ env.HAS_SIGNING == 'true' && '1' || '0' }}" ./scripts/verify_installer.sh dist/MacMint.dmg
           if [[ "$HAS_SIGNING" == "true" ]]; then
             xcrun stapler validate dist/MacMint.app
             spctl --assess --type execute --verbose=2 dist/MacMint.app
