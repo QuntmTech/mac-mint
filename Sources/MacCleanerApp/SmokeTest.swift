@@ -246,9 +246,17 @@ enum SmokeTest {
       swapUsedBytes: 512_000_000, pressure: .normal)
     let rows: [PerformancePresentation.App] = [
       .init(id: .init(pid: 401, started: 1), name: "Code Studio", bundleID: "example.code-studio",
-        memoryBytes: 3 * gb, cpuPercent: 185.4, fallbackSymbol: "hammer.fill"),
+        memoryBytes: 3 * gb, cpuPercent: 185.4, fallbackSymbol: "hammer.fill",
+        helpers: ProcessFamilies.Helpers(count: 6, memoryBytes: 2 * gb, cpuPercent: 120.2, largest: [
+          .init(pid: 501, name: "Code Studio Helper (Plugin)", memoryBytes: 900_000_000, cpuPercent: 96.3),
+          .init(pid: 502, name: "language-server", memoryBytes: 600_000_000, cpuPercent: 20.1),
+        ]), ownMemoryBytes: gb, ownCPUPercent: 65.2),
       .init(id: .init(pid: 402, started: 2), name: "Browser", bundleID: "example.browser",
-        memoryBytes: 2 * gb, cpuPercent: 32.6, fallbackSymbol: "globe"),
+        memoryBytes: 2 * gb, cpuPercent: 32.6, fallbackSymbol: "globe",
+        helpers: ProcessFamilies.Helpers(count: 9, memoryBytes: 1_600_000_000, cpuPercent: 28.1, largest: [
+          .init(pid: 511, name: "Browser Helper (Renderer)", memoryBytes: 700_000_000, cpuPercent: 18.0),
+          .init(pid: 512, name: "Browser Helper (GPU)", memoryBytes: 400_000_000, cpuPercent: 6.4),
+        ]), ownMemoryBytes: 400_000_000, ownCPUPercent: 4.5),
       .init(id: .init(pid: 403, started: 3), name: "Design Workspace with a longer application name", bundleID: "example.design-workspace",
         memoryBytes: 1_400_000_000, cpuPercent: 5.7, fallbackSymbol: "paintpalette.fill"),
       .init(id: .init(pid: 404, started: 4), name: "Music", bundleID: "example.music",

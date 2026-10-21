@@ -59,7 +59,7 @@ struct PerformanceView: View {
             Label("When to take action", systemImage: "info.circle").font(.headline)
             Text("Short CPU spikes during builds or photo analysis are normal. Quit unused apps when memory pressure stays Elevated or High. High memory use by itself is normal: macOS keeps useful caches in RAM.")
               .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("MacMint does not purge memory. For helper processes and detailed diagnostics, open Activity Monitor.")
+            Text("Each app's numbers include the helper processes it started, such as browser tabs and editor extensions; open an app's breakdown to see them. MacMint does not purge memory. For processes macOS starts on an app's behalf and detailed diagnostics, open Activity Monitor.")
               .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
               Button("Open Activity Monitor") { model.openActivityMonitor() }
@@ -249,8 +249,9 @@ private struct PerformanceFeed {
   }
   @MainActor func apps(_ live: SystemMonitor.LiveReadings) -> [PerformancePresentation.App] {
     preview?.apps ?? reading(live).apps.map { app in
-      .init(id: .init(pid: app.id, started: app.started), name: app.name, bundleID: app.bundleID,
-        memoryBytes: app.memoryBytes, cpuPercent: app.cpuPercent)
+      PerformancePresentation.App(id: .init(pid: app.id, started: app.started), name: app.name, bundleID: app.bundleID,
+        memoryBytes: app.totalMemoryBytes, cpuPercent: app.totalCPUPercent, helpers: app.helpers,
+        ownMemoryBytes: app.memoryBytes, ownCPUPercent: app.cpuPercent)
     }
   }
   @MainActor func controllable(_ live: SystemMonitor.LiveReadings) -> Set<PerformancePresentation.ProcessID> {
@@ -411,7 +412,7 @@ private struct PerformanceLiveText: View {
       let state = feed.paused ? "Paused" : (sampledAt == nil ? "Measuring" : "Live")
       let reading: String = time.map { "\(state) · \($0)" } ?? state
       let detail: String = Self.detail(time: time, paused: feed.paused, interval: feed.samplingInterval)
-      Text("Main processes · helpers not included · \(reading)")
+      Text("Apps with the helpers they started · \(reading)")
         .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         .help(detail)
     }
@@ -421,8 +422,9 @@ private struct PerformanceLiveText: View {
     guard let time else {
       return paused ? "Paused before the first sample. Resume to measure activity." : "Measuring app activity…"
     }
-    return paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
-      : "Updated \(time) · refreshes about every \(Int(interval)) seconds"
+    let scope = " Helpers macOS starts for an app (for example some web content and system services) are not counted."
+    return (paused ? "Readings frozen at \(time). Quit still checks the current process before acting."
+      : "Updated \(time) · refreshes about every \(Int(interval)) seconds") + scope
   }
 }
 
@@ -505,31 +507,68 @@ private struct PerformanceRowView: View, Equatable {
   let row: PerformancePresentation.Row
   let application: NSRunningApplication?
   let actions: PerformanceRowActions
+  @State private var expanded = false
   // The row ID carries the PID and kernel start time, so it identifies the same process.
   nonisolated static func == (left: Self, right: Self) -> Bool { left.row == right.row }
 
   var body: some View {
-    HStack(spacing: 12) {
-      HStack(spacing: 10) {
-        PerformanceAppIcon(id: row.id, fallbackSymbol: row.fallbackSymbol, application: application)
-        VStack(alignment: .leading, spacing: 3) {
-          Text(row.name).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
-          Text(row.detail)
-            .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-        }
-        Spacer(minLength: 0)
-      }.frame(maxWidth: .infinity, alignment: .leading)
-        .help(row.help)
-      PerformanceMetricCell(text: row.cpuText, fraction: row.cpuFraction, tint: AppTheme.info,
-        label: "CPU", value: row.cpuAccessibility).frame(width: 96)
-      PerformanceMetricCell(text: row.memoryText, fraction: row.memoryFraction, tint: AppTheme.violet,
-        label: "Memory footprint", value: row.memoryAccessibility).frame(width: 104)
-      PerformanceRowControls(control: row.control, actions: actions).equatable()
+    VStack(alignment: .leading, spacing: 8) {
+      HStack(spacing: 12) {
+        HStack(spacing: 10) {
+          PerformanceAppIcon(id: row.id, fallbackSymbol: row.fallbackSymbol, application: application)
+          VStack(alignment: .leading, spacing: 3) {
+            Text(row.name).font(.callout.weight(.medium)).lineLimit(1).truncationMode(.middle)
+            Text(row.detail)
+              .font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+          }
+          if !row.breakdown.isEmpty {
+            Button { expanded.toggle() } label: {
+              Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary).frame(width: 16, height: 16).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "Hide helper processes" : "Show helper processes")
+            .accessibilityLabel(expanded ? "Hide helper processes of " + row.name : "Show helper processes of " + row.name)
+          }
+          Spacer(minLength: 0)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+          .help(row.help)
+        PerformanceMetricCell(text: row.cpuText, fraction: row.cpuFraction, tint: AppTheme.info,
+          label: "CPU", value: row.cpuAccessibility).frame(width: 96)
+        PerformanceMetricCell(text: row.memoryText, fraction: row.memoryFraction, tint: AppTheme.violet,
+          label: "Memory footprint", value: row.memoryAccessibility).frame(width: 104)
+        PerformanceRowControls(control: row.control, actions: actions).equatable()
+      }
+      if expanded && !row.breakdown.isEmpty {
+        PerformanceBreakdown(lines: row.breakdown).padding(.leading, 40)
+      }
     }
     .accessibilityElement(children: .contain)
     .accessibilityLabel(row.name + ", PID \(row.id.pid)")
     .padding(.horizontal, 10).padding(.vertical, 10)
     .background(row.stripe ? AppTheme.panel.opacity(0.45) : Color.clear, in: RoundedRectangle(cornerRadius: 9))
+  }
+}
+
+/// Read-only list of what makes up an app's total. Helpers have no controls of their own.
+private struct PerformanceBreakdown: View {
+  let lines: [PerformancePresentation.BreakdownLine]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(lines) { line in
+        HStack(spacing: 12) {
+          Text(line.name).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+          Text(line.cpuText).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 96, alignment: .trailing)
+          Text(line.memoryText).font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 104, alignment: .trailing)
+          Color.clear.frame(width: 182, height: 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(line.name)
+        .accessibilityValue("CPU \(line.cpuText), memory \(line.memoryText)")
+      }
+    }
   }
 }
 

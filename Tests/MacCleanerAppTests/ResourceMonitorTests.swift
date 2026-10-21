@@ -1,5 +1,6 @@
 import AppKit
 import Darwin
+import MacCleanerCore
 import XCTest
 @testable import MacCleanerApp
 
@@ -32,6 +33,26 @@ final class ResourceMonitorTests: XCTestCase {
     for _ in 0..<20 { _ = await sampler.read(pids: []) }
     XCTAssertEqual(mach_port_get_refs(mach_task_self_, host, MACH_PORT_RIGHT_SEND, &after), KERN_SUCCESS)
     XCTAssertEqual(before, after, "Each sample must release its host send rights")
+  }
+
+  func testLiveListingAttributesAChildProcessToTheProcessThatStartedIt() async throws {
+    let child = Process()
+    child.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    child.arguments = ["10"]
+    try child.run()
+    defer { child.terminate() }
+    let me = ProcessInfo.processInfo.processIdentifier
+    let listing = ResourceSampler.listProcesses()
+    XCTAssertTrue(listing.contains { $0.pid == me && $0.parent == getppid() })
+    XCTAssertTrue(ProcessFamilies.members(of: [me], in: listing)[me]?.contains(child.processIdentifier) ?? false)
+    XCTAssertEqual(ResourceSampler.executableName(child.processIdentifier), "sleep")
+    let sampler = ResourceSampler(readDisk: { nil })
+    let measured = await sampler.read(pids: [me], families: true)
+    let helpers = try XCTUnwrap(measured.apps[me]?.helpers)
+    XCTAssertGreaterThanOrEqual(helpers.count, 1)
+    XCTAssertGreaterThan(helpers.memoryBytes, 0)
+    let controlOnly = await sampler.read(pids: [me])
+    XCTAssertNil(controlOnly.apps[me]?.helpers, "Auto Tame's samples don't list helper processes")
   }
 
   func testProcessPolicyProtectsSelfSystemAndUnknownOwnership() {

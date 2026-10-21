@@ -30,11 +30,17 @@ final class SystemMonitor: ObservableObject {
     let id: pid_t
     let name: String
     let bundleID: String?
+    /// The app's own process. Auto Tame and the process controls act on this process only.
     let memoryBytes: Int64
     let cpuPercent: Double?
     let started: UInt64
     let application: NSRunningApplication
+    /// Processes the app started (renderers, extension hosts and their tools); nil when not sampled.
+    var helpers: ProcessFamilies.Helpers? = nil
     var canControl: Bool { ProcessControlPolicy.allows(pid: id, bundleID: bundleID) }
+    /// The app and its helpers together, for display only.
+    var totalMemoryBytes: Int64 { ProcessFamilies.add(memoryBytes, helpers?.memoryBytes ?? 0) }
+    var totalCPUPercent: Double? { cpuPercent.map { $0 + (helpers?.cpuPercent ?? 0) } }
   }
   struct Reading: Equatable {
     var snapshot = Snapshot()
@@ -124,7 +130,7 @@ final class SystemMonitor: ObservableObject {
     if tamingController.needsMonitoring { start(lease: tamingLease, interval: 8, kind: .control) }
     else { stop(lease: tamingLease) }
   }
-  var topApps: [AppUsage] { Array(apps.sorted { $0.memoryBytes > $1.memoryBytes }.prefix(8)) }
+  var topApps: [AppUsage] { Array(apps.sorted { $0.totalMemoryBytes > $1.totalMemoryBytes }.prefix(8)) }
   private var timer: Timer?
   private struct Lease { var interval: TimeInterval; var kind: LeaseKind }
   private var leases: [UUID: Lease] = [:]
@@ -188,8 +194,10 @@ final class SystemMonitor: ObservableObject {
     let pids = applications.map(\.processIdentifier)
     let token = generation
     let sampler = sampler
+    // Helper processes are only listed for readings someone can see, not for Auto Tame alone.
+    let families = publishesReadings
     samplingTask = Task { [weak self] in
-      let work = Task.detached(priority: .utility) { await sampler.read(pids: pids) }
+      let work = Task.detached(priority: .utility) { await sampler.read(pids: pids, families: families) }
       let result = await withTaskCancellationHandler { await work.value } onCancel: { work.cancel() }
       guard let self, !Task.isCancelled, generation == token else { return }
       defer { samplingTask = nil }
@@ -197,7 +205,8 @@ final class SystemMonitor: ObservableObject {
       let usages = applications.compactMap { app -> AppUsage? in
         guard !app.isTerminated, let reading = result.apps[app.processIdentifier] else { return nil }
         return AppUsage(id: app.processIdentifier, name: app.localizedName ?? "App", bundleID: app.bundleIdentifier,
-          memoryBytes: reading.memoryBytes, cpuPercent: reading.cpuPercent, started: reading.started, application: app)
+          memoryBytes: reading.memoryBytes, cpuPercent: reading.cpuPercent, started: reading.started, application: app,
+          helpers: reading.helpers)
       }
       if publishesReadings {
         live.reading = Reading(snapshot: result.snapshot, apps: usages, sampledAt: Date())
@@ -235,7 +244,10 @@ enum ProcessControlPolicy {
 }
 
 actor ResourceSampler {
-  struct AppReading: Sendable { let started: UInt64; let memoryBytes: Int64; let cpuPercent: Double? }
+  struct AppReading: Sendable {
+    let started: UInt64; let memoryBytes: Int64; let cpuPercent: Double?
+    var helpers: ProcessFamilies.Helpers? = nil
+  }
   struct Result: Sendable { let snapshot: SystemMonitor.Snapshot; let apps: [pid_t: AppReading] }
   typealias DiskReader = @Sendable () -> (free: Int64, total: Int64)?
   /// Important-usage capacity can make macOS compute purgeable space, so it is read at
@@ -243,6 +255,8 @@ actor ResourceSampler {
   static let diskInterval: TimeInterval = 60
   private struct Baseline { let started: UInt64; let cpu: UInt64; let time: UInt64 }
   private var baselines: [pid_t: Baseline] = [:]
+  /// Full executable names of displayed helpers, reused while the same process lives.
+  private var helperNames: [pid_t: (started: UInt64, name: String)] = [:]
   private var previousTicks: (busy: UInt64, total: UInt64)?
   /// The last good capacity; a failed read keeps it (marked stale) instead of reporting zero.
   private var disk: (free: Int64, total: Int64)?
@@ -257,30 +271,92 @@ actor ResourceSampler {
     self.readDisk = readDisk; self.clock = clock
   }
 
-  func reset() { baselines = [:]; previousTicks = nil }
+  func reset() { baselines = [:]; previousTicks = nil; helperNames = [:] }
 
-  func read(pids: [pid_t]) -> Result {
+  func read(pids: [pid_t], families: Bool = false) -> Result {
     var next = SystemMonitor.Snapshot()
     if let capacity = diskCapacity() {
       next.totalBytes = capacity.total; next.freeBytes = capacity.free; next.diskStale = diskStale
     }
     next.cpuUsage = cpuUsage(); next.memoryUsedBytes = memoryUsed(); next.swapUsedBytes = swapUsed(); next.pressure = pressure()
     var readings: [pid_t: AppReading] = [:], updated: [pid_t: Baseline] = [:]
+    let listing = families ? Self.listProcesses() : []
+    let members = families ? ProcessFamilies.members(of: Set(pids), in: listing) : [:]
+    let records = families ? Dictionary(listing.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first }) : [:]
+    var names: [pid_t: (started: UInt64, name: String)] = [:]
     for pid in pids {
-      guard !Task.isCancelled, let info = Self.usage(pid) else { continue }
-      // XNU rusage CPU counters and mach_absolute_time share the Mach absolute timebase.
-      // Dividing deltas avoids assuming nanoseconds on Apple silicon.
-      let time = mach_absolute_time(), cpu = info.ri_user_time &+ info.ri_system_time
-      let old = baselines[pid]
-      let percent = old.flatMap { old in
-        Self.cpuPercent(previousCPU: old.cpu, currentCPU: cpu, previousTime: old.time, currentTime: time,
-          sameProcess: old.started == info.ri_proc_start_abstime)
+      guard !Task.isCancelled, let own = measure(pid, into: &updated) else { continue }
+      var reading = AppReading(started: own.started, memoryBytes: own.memoryBytes, cpuPercent: own.cpuPercent)
+      if families {
+        var started: [pid_t: UInt64] = [:]
+        let usages = (members[pid] ?? []).compactMap { helper -> ProcessFamilies.Usage? in
+          guard !Task.isCancelled, let measured = measure(helper, into: &updated) else { return nil }
+          started[helper] = measured.started
+          return ProcessFamilies.Usage(pid: helper, name: records[helper]?.name ?? "Helper",
+            memoryBytes: measured.memoryBytes, cpuPercent: measured.cpuPercent)
+        }
+        var helpers = ProcessFamilies.Helpers(usages)
+        for index in helpers.largest.indices {
+          let helper = helpers.largest[index], birth = started[helper.pid] ?? 0
+          let name = helperNames[helper.pid].flatMap { $0.started == birth ? $0.name : nil }
+            ?? Self.executableName(helper.pid) ?? helper.name
+          names[helper.pid] = (birth, name); helpers.largest[index].name = name
+        }
+        reading.helpers = helpers
       }
-      updated[pid] = Baseline(started: info.ri_proc_start_abstime, cpu: cpu, time: time)
-      readings[pid] = AppReading(started: info.ri_proc_start_abstime, memoryBytes: Int64(clamping: info.ri_phys_footprint), cpuPercent: percent)
+      readings[pid] = reading
     }
     baselines = updated
+    if families { helperNames = names }
     return Result(snapshot: next, apps: readings)
+  }
+
+  /// One process's footprint and CPU since its previous reading, recording the next baseline.
+  private func measure(_ pid: pid_t, into updated: inout [pid_t: Baseline])
+    -> (started: UInt64, memoryBytes: Int64, cpuPercent: Double?)? {
+    guard let info = Self.usage(pid) else { return nil }
+    // XNU rusage CPU counters and mach_absolute_time share the Mach absolute timebase.
+    // Dividing deltas avoids assuming nanoseconds on Apple silicon.
+    let time = mach_absolute_time(), cpu = info.ri_user_time &+ info.ri_system_time
+    let percent = baselines[pid].flatMap { old in
+      Self.cpuPercent(previousCPU: old.cpu, currentCPU: cpu, previousTime: old.time, currentTime: time,
+        sameProcess: old.started == info.ri_proc_start_abstime)
+    }
+    updated[pid] = Baseline(started: info.ri_proc_start_abstime, cpu: cpu, time: time)
+    return (info.ri_proc_start_abstime, Int64(clamping: info.ri_phys_footprint), percent)
+  }
+
+  /// Parent, start time and short name of every process this user may inspect: one listing
+  /// plus one BSD-info call per process. Processes that exit or refuse access are skipped.
+  nonisolated static func listProcesses() -> [ProcessRecord] {
+    let estimate = proc_listallpids(nil, 0)
+    guard estimate > 0 else { return [] }
+    var pids = [pid_t](repeating: 0, count: Int(estimate) + 64)
+    let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32(clamping: $0.count)) }
+    guard count > 0 else { return [] }
+    let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+    return pids.prefix(min(Int(count), pids.count)).compactMap { pid -> ProcessRecord? in
+      guard pid > 0 else { return nil }
+      var info = proc_bsdinfo()
+      guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+      let started = info.pbi_start_tvsec &* 1_000_000 &+ info.pbi_start_tvusec
+      return ProcessRecord(pid: pid, parent: Int32(bitPattern: info.pbi_ppid), started: started, name: shortName(info))
+    }
+  }
+
+  private nonisolated static func shortName(_ info: proc_bsdinfo) -> String {
+    let name = withUnsafeBytes(of: info.pbi_name) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
+    guard name.isEmpty else { return name }
+    return withUnsafeBytes(of: info.pbi_comm) { bytes in String(decoding: bytes.prefix { $0 != 0 }, as: UTF8.self) }
+  }
+
+  /// The executable's file name, which isn't truncated like the kernel's short name.
+  nonisolated static func executableName(_ pid: pid_t) -> String? {
+    var buffer = [UInt8](repeating: 0, count: 4 * Int(MAXPATHLEN))
+    let length = buffer.withUnsafeMutableBytes { proc_pidpath(pid, $0.baseAddress, UInt32($0.count)) }
+    guard length > 0 else { return nil }
+    let name = URL(fileURLWithPath: String(decoding: buffer.prefix(Int(length)), as: UTF8.self)).lastPathComponent
+    return name.isEmpty ? nil : name
   }
 
   private func diskCapacity() -> (free: Int64, total: Int64)? {

@@ -1,3 +1,4 @@
+import MacCleanerCore
 import XCTest
 @testable import MacCleanerApp
 
@@ -56,6 +57,31 @@ final class PerformancePresentationTests: XCTestCase {
     XCTAssertEqual(sort.direction, .ascending)
     sort.select(.name, toggle: true)
     XCTAssertEqual(sort.direction, .descending)
+  }
+
+  func testHelperTotalsShowABreakdownWithoutGrantingHelperControls() throws {
+    var browser = app(9, name: "Browser", memory: 1_000, cpu: 30, bundleID: "example.browser")
+    browser.helpers = ProcessFamilies.Helpers(count: 3, memoryBytes: 700, cpuPercent: 25, largest: [
+      .init(pid: 21, name: "Renderer", memoryBytes: 400, cpuPercent: 20),
+      .init(pid: 22, name: "GPU", memoryBytes: 200, cpuPercent: nil),
+    ])
+    browser.ownMemoryBytes = 300; browser.ownCPUPercent = 5
+    let rows = PerformancePresentation.rows(.init(apps: [browser], query: "", sort: .init(), taming: TamingState(),
+      physicalMemory: 16_000, logicalCPUCount: 8, controllable: [browser.id]))
+    let row = try XCTUnwrap(rows.first)
+    XCTAssertEqual(row.detail, "PID 9 · with 3 helpers")
+    XCTAssertEqual(row.breakdown.map(\.id), ["app", "pid-21", "pid-22", "rest"])
+    XCTAssertEqual(row.breakdown.first?.cpuText, "5.0%")
+    XCTAssertEqual(row.breakdown.last?.name, "1 more helper")
+    XCTAssertEqual(row.breakdown.last?.cpuText, "5.0%", "The rest is the helper total minus the helpers listed")
+    XCTAssertEqual(row.breakdown[2].cpuText, "—", "A helper without two samples has no CPU yet")
+    XCTAssertTrue(row.help.contains("Quit and Slow act on the app itself"))
+    XCTAssertEqual(row.control.id, browser.id, "Controls stay bound to the app's own process")
+    XCTAssertEqual(PerformancePresentation.apps([browser], query: "renderer", sort: .init()).map(\.id), [browser.id])
+    XCTAssertTrue(PerformancePresentation.breakdown(app(10)).isEmpty)
+    var single = app(11); single.helpers = ProcessFamilies.Helpers(count: 1, memoryBytes: 5, cpuPercent: 0, largest: [])
+    XCTAssertEqual(PerformancePresentation.rows(.init(apps: [single], query: "", sort: .init(), taming: TamingState(),
+      physicalMemory: 16, logicalCPUCount: 8, controllable: [])).first?.detail, "PID 11 · with 1 helper")
   }
 
   func testResourceMetersClampFiniteValuesAndPreserveUnknownMeasurements() {
