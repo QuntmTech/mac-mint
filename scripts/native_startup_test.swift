@@ -65,6 +65,23 @@ private struct CPUWindow {
   /// The busiest one-second interval inside the window.
   let peak: Double
   let seconds: Double
+  /// Each one-second interval in order (report-only trace), and the system uptime at the start.
+  var perSecond: [Double] = []
+  var startedAt: TimeInterval = 0
+}
+
+/// The app's timed memory releases (`trace-<event>.json`), for report-only attribution.
+private struct ReleaseTrace: Decodable {
+  struct Release: Decodable {
+    let reason: String
+    let at: TimeInterval
+    let purgeMS: Double
+    let compactMS: Double
+    let relieveMS: Double
+    let freed: Bool
+  }
+  let uptime: TimeInterval
+  let releases: [Release]
 }
 
 private struct Footprint {
@@ -262,6 +279,7 @@ private struct NativeStartupTest {
     let pid = app.processIdentifier
     let firstCPU = try cpuTicks(pid), firstTime = mach_absolute_time()
     var lastCPU = firstCPU, lastTime = firstTime, peak = 0.0
+    var perSecond: [Double] = []
     let start = ProcessInfo.processInfo.systemUptime
     while ProcessInfo.processInfo.systemUptime - start < seconds {
       guard !waitUntil(seconds: 1, { app.isTerminated }) else {
@@ -271,11 +289,12 @@ private struct NativeStartupTest {
       guard cpu >= lastCPU, time > lastTime else { throw ProbeFailure(description: "\(label): invalid cumulative CPU sample.") }
       // XNU rusage CPU counters use Mach absolute ticks, not nanoseconds on ARM.
       // Compare deltas in the same timebase, as the production sampler does.
-      peak = max(peak, Double(cpu - lastCPU) / Double(time - lastTime))
+      let interval = Double(cpu - lastCPU) / Double(time - lastTime)
+      peak = max(peak, interval); perSecond.append(interval)
       lastCPU = cpu; lastTime = time
     }
     return CPUWindow(average: Double(lastCPU - firstCPU) / Double(lastTime - firstTime), peak: peak,
-      seconds: ProcessInfo.processInfo.systemUptime - start)
+      seconds: ProcessInfo.processInfo.systemUptime - start, perSecond: perSecond, startedAt: start)
   }
 
   /// Record only an app whose exact bundle and inert launch marker were verified
@@ -706,6 +725,8 @@ extension NativeStartupTest {
 
     let heavy = "(d) heavy session"
     let heavyFolder = try fixture.launchFolder("heavy", manifest: ["storage": fixture.storage.path, "photos": fixture.photos.path])
+    var heavyHiddenAt: TimeInterval?
+    var heavyHidden: CPUWindow?
     try withLaunchedApp(target, LaunchOptions(label: heavy, extraArguments: ["--resource-probe", heavyFolder.path], ignoresSavedState: true)) { app in
       var system = SystemObserver(); system.start()
       let status = try waitForStatus(app, folder: heavyFolder, label: heavy, seconds: 300)
@@ -725,7 +746,9 @@ extension NativeStartupTest {
       report.memory(heavy, "footprint settled on Overview", settled.currentMiB, limit: ResourceBudgets.heavySettledFootprint)
       if profile { profileMemory(app, name: "heavy-settled") }
       try hide(app, label: heavy)
+      heavyHiddenAt = ProcessInfo.processInfo.systemUptime
       let hidden = try measureCPU(app, label: heavy + " hidden", seconds: 30)
+      heavyHidden = hidden
       let released = try footprint(app.processIdentifier)
       report.cpu(heavy + ", hidden", hidden, limit: ResourceBudgets.backgroundCPU)
       report.memory(heavy, "footprint after 30 s hidden", released.currentMiB,
@@ -733,6 +756,7 @@ extension NativeStartupTest {
       if profile { profileMemory(app, name: "heavy-hidden") }
       logState(app, heavy)
     }
+    if let hiddenAt = heavyHiddenAt { traceHidden(heavy, folder: heavyFolder, hiddenAt: hiddenAt, window: heavyHidden) }
 
     let exceeded = report.rows.filter(\.exceeded)
     if enforce, !exceeded.isEmpty {
@@ -840,6 +864,28 @@ extension NativeStartupTest {
   }
 
   // MARK: Best-effort diagnostics (never gate)
+
+  /// Report-only: when inside the hidden window the app used CPU, and which of its timed
+  /// memory releases ran then. Offsets are seconds after the app was hidden.
+  private static func traceHidden(_ label: String, folder: URL, hiddenAt: TimeInterval, window: CPUWindow?) {
+    if let window {
+      let offset = window.startedAt - hiddenAt
+      let series = window.perSecond.enumerated().map { index, cores in
+        String(format: "+%.0fs %.2f%%", offset + Double(index + 1), cores * 100)
+      }
+      log("TRACE \(label), hidden: per-second CPU (end of each second after hiding): " + series.joined(separator: ", "))
+    }
+    guard let data = try? Data(contentsOf: folder.appendingPathComponent("trace-quit.json")),
+      let trace = try? JSONDecoder().decode(ReleaseTrace.self, from: data) else {
+      log("TRACE \(label): no memory-release trace was written")
+      return
+    }
+    for release in trace.releases {
+      log(String(format: "TRACE %@: memory release (%@) at %+.1fs from hiding: purge %.1f ms, compaction %.1f ms, allocator walk %.1f ms%@",
+        label, release.reason, release.at - hiddenAt, release.purgeMS, release.compactMS, release.relieveMS,
+        release.freed ? "" : " (nothing to drop, walk skipped)"))
+    }
+  }
 
   @MainActor
   private static func profileCPU(_ app: NSRunningApplication, name: String) {

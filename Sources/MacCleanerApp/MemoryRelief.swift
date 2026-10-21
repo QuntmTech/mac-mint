@@ -20,6 +20,20 @@ final class MemoryRelief {
   private let delay: TimeInterval
   private(set) var releases = 0
 
+  /// One timed release. The last 20 are kept so the resource probe can attribute
+  /// background CPU to them; recording costs a few clock reads.
+  struct Record: Codable, Sendable {
+    let reason: String
+    /// System uptime when the release started.
+    let at: TimeInterval
+    let purgeMS: Double
+    let compactMS: Double
+    /// The allocator walk; zero when nothing was dropped and the walk was skipped.
+    let relieveMS: Double
+    let freed: Bool
+  }
+  private(set) var records: [Record] = []
+
   init(delay: TimeInterval = MemoryRelief.backgroundDelay,
     purge: @escaping @MainActor () -> Bool = { PreviewCaches.release() },
     relieve: @escaping @MainActor () -> Void = { _ = malloc_zone_pressure_relief(nil, 0) }) {
@@ -30,7 +44,7 @@ final class MemoryRelief {
   func start(activity: AppActivity = .shared) {
     guard pressureSource == nil else { return }
     let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
-    source.setEventHandler { @Sendable [weak self] in MainActor.assumeIsolated { self?.release() } }
+    source.setEventHandler { @Sendable [weak self] in MainActor.assumeIsolated { self?.release(reason: "memory pressure") } }
     source.resume(); pressureSource = source
     activity.observe { [weak self] foreground in self?.foregroundChanged(foreground) }
     closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: nil,
@@ -41,7 +55,7 @@ final class MemoryRelief {
         let open = NSApplication.shared.windows.contains {
           $0.isVisible && $0.level == .normal && !($0 is NSPanel) && $0.canBecomeMain
         }
-        if !open { self?.release() }
+        if !open { self?.release(reason: "window closed") }
       }
     }
   }
@@ -64,7 +78,7 @@ final class MemoryRelief {
     pending = Task { [weak self] in
       try? await Task.sleep(for: .seconds(delay))
       guard !Task.isCancelled else { return }
-      self?.release()
+      self?.release(reason: "in background")
     }
   }
 
@@ -73,17 +87,31 @@ final class MemoryRelief {
   func relieveSoon(after seconds: TimeInterval = 2) {
     Task { [weak self] in
       try? await Task.sleep(for: .seconds(seconds))
-      self?.relieve()
+      guard let self else { return }
+      let start = ProcessInfo.processInfo.systemUptime
+      relieve()
+      note(Record(reason: "after a scan or screen change", at: start, purgeMS: 0, compactMS: 0,
+        relieveMS: (ProcessInfo.processInfo.systemUptime - start) * 1000, freed: true))
     }
   }
 
-  func release() {
+  func release(reason: String = "requested") {
     pending?.cancel(); pending = nil
+    let start = ProcessInfo.processInfo.systemUptime
     var freed = purge()
+    let purged = ProcessInfo.processInfo.systemUptime
     for compaction in compactions.values where compaction() { freed = true }
+    let compacted = ProcessInfo.processInfo.systemUptime
     releases += 1
     // Scans and screen changes already hand pages back; a release with nothing to drop
     // skips the allocator walk, which is itself measurable CPU in the background.
     if freed { relieve() }
+    note(Record(reason: reason, at: start, purgeMS: (purged - start) * 1000, compactMS: (compacted - purged) * 1000,
+      relieveMS: freed ? (ProcessInfo.processInfo.systemUptime - compacted) * 1000 : 0, freed: freed))
+  }
+
+  private func note(_ record: Record) {
+    records.append(record)
+    if records.count > 20 { records.removeFirst(records.count - 20) }
   }
 }
