@@ -747,11 +747,16 @@ extension NativeStartupTest {
       if profile { profileMemory(app, name: "heavy-settled") }
       try hide(app, label: heavy)
       heavyHiddenAt = ProcessInfo.processInfo.systemUptime
+      // Hiding is one-time work (controls redrawn inactive, windows ordered out). As in (c),
+      // the background budget starts 5 s later; the hide itself is reported, not budgeted.
+      // The background memory release (10 s after hiding) stays inside the budgeted window.
+      let hiding = try measureCPU(app, label: heavy + " hiding", seconds: 5)
+      report.cpu(heavy + ", hiding", hiding, limit: nil)
       let hidden = try measureCPU(app, label: heavy + " hidden", seconds: 30)
       heavyHidden = hidden
       let released = try footprint(app.processIdentifier)
       report.cpu(heavy + ", hidden", hidden, limit: ResourceBudgets.backgroundCPU)
-      report.memory(heavy, "footprint after 30 s hidden", released.currentMiB,
+      report.memory(heavy, "footprint after 35 s hidden", released.currentMiB,
         limit: ResourceBudgets.backgroundReleaseOverFresh.flatMap { allowance in fresh.map { $0.currentMiB + allowance } })
       if profile { profileMemory(app, name: "heavy-hidden") }
       logState(app, heavy)

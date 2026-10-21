@@ -1,6 +1,6 @@
 # dmgbuild settings for MacMint's installer window (scripts/build_dmg.sh passes the -D values).
-# Icon positions are icon centres in a 660 x 440 window; Resources/Installer/background*.png
-# draws the title, the arrow between the two icons and the footer. Its colours keep Finder's
+# Icon positions are icon centers in a 660 x 440 window; Resources/Installer/background*.png
+# draws the title, the arrow between the two icons and the footer. Its colors keep Finder's
 # black (light) and white (dark) labels at about 4.4:1 contrast or better.
 import os.path
 
@@ -33,4 +33,7 @@ icon_locations = {
     "Applications": (490, 200),
     "Install MacMint.txt": (330, 336),
 }
-hide_extensions = ["MacMint.app", "Install MacMint.txt"]
+# Only the note: hiding an extension writes com.apple.FinderInfo onto the item, and
+# `codesign --verify --strict` rejects that on an app bundle. Finder already shows apps
+# without ".app" unless the person turned on all filename extensions.
+hide_extensions = ["Install MacMint.txt"]

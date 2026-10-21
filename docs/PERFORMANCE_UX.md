@@ -33,8 +33,10 @@ A cleaner that costs noticeable CPU or memory contradicts its purpose, so the pa
 |---|---|---|
 | (a) Overview idle | Fresh launch, Overview in front, 30 s | CPU ≤ 0.5% |
 | (b) Live Performance view | Performance in front with ~10 regular apps, 60 s | CPU ≤ 2% |
-| (c) Hidden | Same app hidden on Performance, 30 s | CPU ≤ 0.2%, no monitor samples |
-| (d) Heavy session | Map 80k generated files, scan 300 generated photos, return to Overview, then hide | Overview CPU ≤ 0.5%, hidden CPU ≤ 0.2%, settled footprint ≤ 85 MiB, footprint after 30 s hidden ≤ fresh launch + 35 MiB |
+| (c) Hidden | Same app hidden on Performance; 30 s measured from 5 s after hiding | CPU ≤ 0.2%, no monitor samples |
+| (d) Heavy session | Map 80k generated files, scan 300 generated photos, return to Overview, then hide; 30 s measured from 5 s after hiding | Overview CPU ≤ 0.5%, hidden CPU ≤ 0.2%, settled footprint ≤ 85 MiB, footprint after 35 s hidden ≤ fresh launch + 35 MiB |
+
+Both hidden scenarios start their budget 5 s after hiding. Hiding itself is one-time work (macOS redraws controls as inactive and orders the windows out): on a heavy session's Overview it was one second at about 10% of a core, then 0.00–0.3% per second (CI trace, 2026-10-21). Measuring from the moment of hiding averaged that second into the 30 s window (0.23–0.38%), while (c) already waited. The first 5 s are reported as "hiding" without a budget, and the background memory release 10 s after hiding stays inside the budgeted window.
 
 Ordinary hidden launches (menu bar off/on) must stay under 2% after settling, the live view must take at least five samples a minute, and hidden or Overview launches must take none.
 
