@@ -103,89 +103,235 @@ struct OrganizerView: View {
     } message: { Text("Selected files will be renamed or moved within the chosen folder. Recovery records are written first. Use History & Undo to reverse changes when their files and locations are still available.") }
   }
 
+  private func errorBanner(_ error: String) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Label(error, systemImage: "exclamationmark.triangle.fill")
+        .font(.system(size: 12.5))
+        .foregroundStyle(AppTheme.warning)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+      Button("Show organization records in Finder") { model.reveal(model.supportDirectory.appendingPathComponent("Organization")) }
+        .buttonStyle(MintButtonStyle(.plain))
+        .controlSize(.small)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(AppTheme.warningTint, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    .padding(.horizontal, 20)
+    .padding(.top, 12)
+  }
+
   private func proposalContent(_ inventory: OrganizationInventory) -> some View {
     let validating = validationPending
     return VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        VStack(alignment: .leading, spacing: 4) {
-          Label(inventory.root.lastPathComponent, systemImage: "folder").font(.headline)
+      HStack(alignment: .center, spacing: 12) {
+        SwatchBadge(symbol: "folder", swatch: .teal, size: 30)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(inventory.root.lastPathComponent)
+            .font(.system(size: 15, weight: .bold)).tracking(-0.2)
+            .foregroundStyle(AppTheme.ink)
+            .lineLimit(1)
           Text("\(inventory.files.count) eligible files · \(inventory.omitted) skipped\(inventory.wasLimited ? " · inspection stopped at 500 entries" : "")")
-            .font(.caption).foregroundStyle(.secondary)
+            .font(.system(size: 11.5)).monospacedDigit()
+            .foregroundStyle(AppTheme.ink3)
         }
-        Spacer()
+        .accessibilityElement(children: .combine)
+        Spacer(minLength: 8)
         Button("Suggest by file type") {
           suggestLocally(inventory)
-        }.disabled(busy)
+        }
+        .buttonStyle(MintButtonStyle(.secondary))
+        .controlSize(.small)
+        .disabled(busy)
         Button { prepareAI(inventory) } label: { Label("Suggest with AI…", systemImage: "sparkles") }
+          .buttonStyle(MintButtonStyle(.secondary))
+          .controlSize(.small)
           .disabled(busy || inventory.files.isEmpty || !account.aiStatus.allows("organize"))
           .help(account.aiStatus.allows("organize") ? "Preview the names sent before requesting suggestions" : "AI organization is not enabled by the service. File-type suggestions and manual edits work locally.")
       }
       Text("AI uses names only in this version. Nothing is selected automatically. Select a row to approve its proposed change.")
-        .font(.caption).foregroundStyle(.secondary)
+        .font(.system(size: 11.5))
+        .foregroundStyle(AppTheme.ink2)
+        .fixedSize(horizontal: false, vertical: true)
       if proposals.isEmpty {
         Button("Prepare manual edits") {
           proposals = inventory.files.map { .init(fileID: $0.id, folderID: "root", name: $0.name, reason: "Your manual edit") }
-        }.disabled(busy || inventory.files.isEmpty)
+        }
+        .buttonStyle(MintButtonStyle(.secondary))
+        .disabled(busy || inventory.files.isEmpty)
         Spacer()
         Text("File-type suggestions use existing folders named Documents, Photos, Videos, Audio, or Archives. You can also edit names and destinations yourself.")
-          .foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
+          .font(.system(size: 13))
+          .foregroundStyle(AppTheme.ink2)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 420)
+          .frame(maxWidth: .infinity, alignment: .center)
         Spacer()
       } else {
         ScrollView {
           LazyVStack(spacing: 12) {
-            ForEach(proposals) { proposal in proposalRow(proposal, inventory: inventory, validating: validating) }
+            ForEach(folderGroups(inventory)) { group in
+              folderCard(group, inventory: inventory, validating: validating)
+            }
           }.padding(.vertical, 4)
         }
       }
     }.padding(20)
   }
 
-  private func proposalRow(_ proposal: OrganizationProposal, inventory: OrganizationInventory, validating: Bool) -> some View {
-    SurfaceCard {
-      VStack(alignment: .leading, spacing: 8) {
-        HStack {
-          Toggle(isOn: Binding(get: { selected.contains(proposal.id) }, set: { if $0 { selected.insert(proposal.id) } else { selected.remove(proposal.id) } })) {
-            Text(inventory.files.first { $0.id == proposal.fileID }?.name ?? "Unknown file").lineLimit(1)
-          }.toggleStyle(.checkbox).disabled(busy || validating || problems[proposal.id] != nil)
-          Spacer()
+  /// Proposals gathered under the folder each one moves to.
+  private struct FolderGroup: Identifiable {
+    let id: String
+    let title: String
+    let proposals: [OrganizationProposal]
+  }
+
+  private func folderGroups(_ inventory: OrganizationInventory) -> [FolderGroup] {
+    var groups: [FolderGroup] = []
+    var placed: Set<String> = []
+    for folder in inventory.folders where !placed.contains(folder.id) {
+      let items = proposals.filter { $0.folderID == folder.id }
+      guard !items.isEmpty else { continue }
+      placed.insert(folder.id)
+      let title = folder.id == "root" ? "Stays in \(inventory.root.lastPathComponent)" : folder.name
+      groups.append(FolderGroup(id: folder.id, title: title, proposals: items))
+    }
+    let other = proposals.filter { !placed.contains($0.folderID) }
+    if !other.isEmpty {
+      groups.append(FolderGroup(id: "macmint.other-folders", title: "Other", proposals: other))
+    }
+    return groups
+  }
+
+  private func folderCard(_ group: FolderGroup, inventory: OrganizationInventory, validating: Bool) -> some View {
+    let eligible = group.proposals.filter { problems[$0.id] == nil }.map(\.id)
+    let chosen = eligible.filter { selected.contains($0) }.count
+    let state: CheckboxMark.Kind = chosen == 0 ? .off : (chosen == eligible.count ? .on : .mixed)
+    let locked = busy || validating || eligible.isEmpty
+    return VStack(spacing: 0) {
+      HStack(spacing: 11) {
+        Button {
+          if chosen == eligible.count { selected.subtract(eligible) } else { selected.formUnion(eligible) }
+        } label: {
+          CheckboxMark(state: state)
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
         }
-        HStack {
-          Image(systemName: "arrow.turn.down.right").foregroundStyle(.secondary)
-          Picker("Destination", selection: Binding(get: { proposal.folderID }, set: { replace(proposal, folder: $0) })) {
-            ForEach(inventory.folders) { Text($0.name).tag($0.id) }
-          }.frame(maxWidth: 240)
-          TextField("Proposed name", text: Binding(get: { proposal.name }, set: { replace(proposal, name: $0) }))
-            .textFieldStyle(.roundedBorder)
-        }.disabled(busy)
-        Text(proposal.reason).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-        if let problem = problems[proposal.id] { Label(problem, systemImage: "info.circle").font(.caption).foregroundStyle(AppTheme.warning) }
+        .buttonStyle(.plain)
+        .disabled(locked)
+        .opacity(locked ? 0.4 : 1)
+        .accessibilityLabel("Select every file for \(group.title)")
+        .accessibilityValue(state == .on ? "Checked" : state == .mixed ? "Mixed" : "Unchecked")
+
+        SwatchBadge(symbol: "folder", swatch: .teal, size: 28)
+        VStack(alignment: .leading, spacing: 1) {
+          Text(group.title)
+            .font(.system(size: 13.5, weight: .bold)).tracking(-0.2)
+            .foregroundStyle(AppTheme.ink)
+            .lineLimit(1)
+          Text("\(group.proposals.count) files · \(chosen) selected")
+            .font(.system(size: 11.5)).monospacedDigit()
+            .foregroundStyle(AppTheme.ink3)
+        }
+        .accessibilityElement(children: .combine)
+        Spacer(minLength: 8)
+      }
+      .padding(.horizontal, 16)
+      .padding(.vertical, 11)
+      ForEach(group.proposals) { proposal in
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        proposalRow(proposal, inventory: inventory, validating: validating)
       }
     }
+    .cardBackground()
+  }
+
+  private func proposalRow(_ proposal: OrganizationProposal, inventory: OrganizationInventory, validating: Bool) -> some View {
+    let locked = busy || validating || problems[proposal.id] != nil
+    return VStack(alignment: .leading, spacing: 8) {
+      Toggle(isOn: Binding(get: { selected.contains(proposal.id) }, set: { if $0 { selected.insert(proposal.id) } else { selected.remove(proposal.id) } })) {
+        Text(inventory.files.first { $0.id == proposal.fileID }?.name ?? "Unknown file")
+          .font(.system(size: 13, weight: .semibold))
+          .foregroundStyle(AppTheme.ink)
+          .lineLimit(1)
+      }
+      .toggleStyle(MintCheckboxStyle())
+      .disabled(locked)
+      .opacity(locked ? 0.55 : 1)
+      HStack(spacing: 8) {
+        Image(systemName: "arrow.turn.down.right").foregroundStyle(AppTheme.ink3)
+        Picker("Destination", selection: Binding(get: { proposal.folderID }, set: { replace(proposal, folder: $0) })) {
+          ForEach(inventory.folders) { Text($0.name).tag($0.id) }
+        }
+        .labelsHidden()
+        .frame(maxWidth: 240)
+        TextField("Proposed name", text: Binding(get: { proposal.name }, set: { replace(proposal, name: $0) }))
+          .textFieldStyle(.roundedBorder)
+      }
+      .disabled(busy)
+      .padding(.leading, 24)
+      Text(proposal.reason)
+        .font(.system(size: 11.5))
+        .foregroundStyle(AppTheme.ink2)
+        .lineLimit(3)
+        .padding(.leading, 24)
+      if let problem = problems[proposal.id] {
+        Label(problem, systemImage: "info.circle")
+          .font(.system(size: 11.5))
+          .foregroundStyle(AppTheme.warning)
+          .padding(.leading, 24)
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var historyContent: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 14) {
-        if records.isEmpty { Text("No organization changes recorded yet.").foregroundStyle(.secondary) }
+        if records.isEmpty {
+          Text("No organization changes recorded yet.")
+            .font(.system(size: 13))
+            .foregroundStyle(AppTheme.ink2)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, 40)
+        }
         ForEach(records) { record in
-          SurfaceCard {
-            VStack(alignment: .leading, spacing: 8) {
-              HStack {
-                Text(record.inventory.root.lastPathComponent).font(.headline)
-                Text(record.date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                Spacer()
+          SurfaceCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 10) {
+              HStack(spacing: 10) {
+                SwatchBadge(symbol: "folder", swatch: .teal, size: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                  Text(record.inventory.root.lastPathComponent)
+                    .font(.system(size: 14, weight: .bold)).tracking(-0.2)
+                    .foregroundStyle(AppTheme.ink)
+                  Text(record.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: 11.5)).monospacedDigit()
+                    .foregroundStyle(AppTheme.ink3)
+                }
+                Spacer(minLength: 8)
                 Button("Undo available changes") { undo(record) }
+                  .buttonStyle(MintButtonStyle(.secondary))
+                  .controlSize(.small)
                   .disabled(busy || model.isWorking || model.isScanning || !record.items.contains { $0.state == .moved })
               }
               ForEach(record.items) { item in
                 let original = record.inventory.files.first { $0.id == item.id }?.name ?? "Unknown file"
                 let folder = record.inventory.folders.first { $0.id == item.proposal.folderID }
                 let destination = (folder?.id == "root" ? "" : (folder?.name ?? "Unknown folder") + "/") + item.proposal.name
-                VStack(alignment: .leading, spacing: 3) {
-                  Text("\(original) → \(destination)").font(.callout).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 2) {
+                  Text("\(original) → \(destination)")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(AppTheme.ink)
+                    .textSelection(.enabled)
                   Text("\(stateLabel(item))\(item.message.map { " · " + $0 } ?? "")")
-                    .font(.caption).foregroundStyle(item.message == nil ? .secondary : AppTheme.warning)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(item.message == nil ? AppTheme.ink3 : AppTheme.warning)
                 }
+                .padding(.top, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Rectangle().fill(AppTheme.divider).frame(height: 1) }
               }
             }
           }

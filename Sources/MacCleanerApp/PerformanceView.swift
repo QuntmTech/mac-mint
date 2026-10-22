@@ -916,29 +916,41 @@ private struct TamingExceptionsView: View {
   @EnvironmentObject private var monitor: SystemMonitor
   @Environment(\.dismiss) private var dismiss
   var body: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Text("Never slow down").font(.title2.bold())
-      Text("Exceptions apply to manual slowdown and Auto Tame, including after an app relaunch. Adding an exception restores any current slowdown.")
-        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      List {
-        ForEach(monitor.taming.state.exceptions.keys.sorted(), id: \.self) { id in
-          HStack {
-            VStack(alignment: .leading) {
-              Text(monitor.taming.state.exceptions[id] ?? id).fontWeight(.medium)
-              Text(id).font(.caption).foregroundStyle(.secondary)
+    VStack(alignment: .leading, spacing: 0) {
+      SheetHeader(symbol: "tortoise.fill", swatch: .sky, title: "Never slow down",
+        subtitle: "Exceptions apply to manual slowdown and Auto Tame, including after an app relaunch. Adding an exception restores any current slowdown.")
+      VStack(alignment: .leading, spacing: 12) {
+        List {
+          ForEach(monitor.taming.state.exceptions.keys.sorted(), id: \.self) { id in
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(monitor.taming.state.exceptions[id] ?? id).font(.system(size: 13, weight: .semibold))
+                  .foregroundStyle(AppTheme.ink)
+                Text(id).font(.system(size: 11.5, design: .monospaced)).foregroundStyle(AppTheme.ink2)
+              }
+              Spacer()
+              Button("Remove") { monitor.setNeverSlow(bundleID: id, name: "", protected: false) }
+                .buttonStyle(MintButtonStyle(.secondary)).controlSize(.small)
             }
-            Spacer()
-            Button("Remove") { monitor.setNeverSlow(bundleID: id, name: "", protected: false) }
+            .padding(.vertical, 3)
+          }
+          if monitor.taming.state.exceptions.isEmpty {
+            Text("No saved exceptions. Add one from an app's ••• menu.").font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2)
           }
         }
-        if monitor.taming.state.exceptions.isEmpty {
-          Text("No saved exceptions. Add one from an app's ••• menu.").foregroundStyle(.secondary)
-        }
-      }.frame(minHeight: 160, maxHeight: 260)
-      Text("Auto Tame is off at each MacMint launch. It waits for ≥80% of one core for 20 seconds while overall CPU is ≥65%, affects at most two background main processes, and restores after cooling or five minutes. System and common calling/audio apps are excluded automatically.")
-        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-    }.padding(24).frame(width: 540).background(AppTheme.canvas)
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: 160, maxHeight: 260)
+        .cardBackground(radius: 12)
+        Text("Auto Tame is off at each MacMint launch. It waits for ≥80% of one core for 20 seconds while overall CPU is ≥65%, affects at most two background main processes, and restores after cooling or five minutes. System and common calling/audio apps are excluded automatically.")
+          .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink2).fixedSize(horizontal: false, vertical: true)
+      }
+      .padding(.horizontal, 22).padding(.bottom, 18)
+      SheetFooter {
+        Spacer()
+        Button("Done") { dismiss() }.keyboardShortcut(.defaultAction).buttonStyle(MintButtonStyle(.commit))
+      }
+    }
+    .frame(width: 540).background(AppTheme.elevated)
   }
 }
 
@@ -948,7 +960,7 @@ private struct PerformanceMeter: View {
   let fraction: Double?
   let tint: Color
   var body: some View {
-    Capsule().fill(AppTheme.panel)
+    Capsule().fill(AppTheme.track)
       .overlay(alignment: .leading) {
         if let fraction {
           Rectangle().fill(tint).scaleEffect(x: min(1, max(0, fraction)), y: 1, anchor: .leading)
@@ -967,9 +979,9 @@ private struct PerformanceAppIcon: View {
   var body: some View {
     Group {
       if let icon { Image(nsImage: icon).resizable().scaledToFit() }
-      else { Image(systemName: fallbackSymbol).font(.system(size: 20)).foregroundStyle(.secondary) }
+      else { Image(systemName: fallbackSymbol).font(.system(size: 17)).foregroundStyle(AppTheme.ink2) }
     }
-    .frame(width: 30, height: 30).accessibilityHidden(true)
+    .frame(width: 28, height: 28).accessibilityHidden(true)
     .task(id: id) {
       icon = application.flatMap { PerformanceIconCache.shared.icon(for: $0) }
     }
