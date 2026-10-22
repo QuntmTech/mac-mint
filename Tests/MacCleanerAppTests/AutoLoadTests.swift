@@ -5,18 +5,10 @@ import XCTest
 
 @MainActor
 final class AutoLoadTests: XCTestCase {
-  private var folders: [URL] = []
-
-  override func tearDown() {
-    for folder in folders { try? FileManager.default.removeItem(at: folder) }
-    folders = []
-    super.tearDown()
-  }
-
   /// A model whose exclusions have loaded, so automatic loads are allowed to start.
   private func readyModel() async throws -> AppViewModel {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    folders.append(folder)
+    addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
     let model = AppViewModel(supportDirectory: folder)
     for _ in 0..<100 where !model.exclusionsReady { try await Task.sleep(for: .milliseconds(20)) }
     XCTAssertTrue(model.exclusionsReady)
