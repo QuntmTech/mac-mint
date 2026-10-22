@@ -350,17 +350,29 @@ struct OrganizerView: View {
   }
 
   private var consentView: some View {
-    VStack(alignment: .leading, spacing: 14) {
-      Text("Review the names sent to AI").font(.title2.bold())
-      Text("This request sends the file and destination-folder names shown below to MacMint's service and Anthropic. Names may reveal personal information. It sends no file contents or full paths. AI proposes changes; you still review and approve them here.").font(.callout)
-      ScrollView { Text(consentText).font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-        .padding(12).background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 10))
-      HStack {
+    VStack(spacing: 0) {
+      SheetHeader(symbol: "sparkles", swatch: .iris, eyebrow: "Ask MacMint", title: "Review the names sent to AI",
+        subtitle: "This request sends the file and destination-folder names shown below to MacMint's service and Anthropic. Names may reveal personal information. It sends no file contents or full paths. AI proposes changes; you still review and approve them here.")
+      ScrollView {
+        Text(consentText)
+          .font(.system(size: 11.5, design: .monospaced))
+          .foregroundStyle(AppTheme.ink)
+          .textSelection(.enabled)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(12)
+      }
+      .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .padding(.horizontal, 22)
+      .padding(.bottom, 16)
+      SheetFooter {
         Button("Cancel", role: .cancel) { consentSheet = false; consentPayload = nil }
+          .buttonStyle(MintButtonStyle(.secondary))
         Spacer()
         Button("Send these names") { requestSuggestions() }.buttonStyle(MintButtonStyle())
       }
-    }.padding(24).frame(width: 650, height: 520).background(AppTheme.canvas)
+    }
+    .frame(width: 650, height: 520)
+    .background(AppTheme.elevated)
   }
 
   private func chooseFolder() {

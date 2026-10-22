@@ -369,17 +369,26 @@ struct CheckboxMark: View {
 
 /// The mint checkbox as a toggle style, keeping the toggle's accessibility.
 struct MintCheckboxStyle: ToggleStyle {
-  func makeBody(configuration: Configuration) -> some View {
+  func makeBody(configuration: Configuration) -> some View { MintCheckbox(configuration: configuration) }
+}
+
+/// Disabled checkboxes dim and ignore clicks and VoiceOver actions alike.
+private struct MintCheckbox: View {
+  let configuration: ToggleStyleConfiguration
+  @Environment(\.isEnabled) private var isEnabled
+
+  var body: some View {
     HStack(spacing: 8) {
       CheckboxMark(state: configuration.isMixed ? .mixed : configuration.isOn ? .on : .off)
       configuration.label
     }
+    .opacity(isEnabled ? 1 : 0.4)
     .contentShape(Rectangle())
-    .onTapGesture { configuration.isOn.toggle() }
+    .onTapGesture { if isEnabled { configuration.isOn.toggle() } }
     .accessibilityElement(children: .combine)
     .accessibilityAddTraits(.isButton)
     .accessibilityValue(configuration.isMixed ? "Mixed" : configuration.isOn ? "Checked" : "Unchecked")
-    .accessibilityAction { configuration.isOn.toggle() }
+    .accessibilityAction { if isEnabled { configuration.isOn.toggle() } }
   }
 }
 
