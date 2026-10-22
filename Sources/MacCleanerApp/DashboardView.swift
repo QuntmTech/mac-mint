@@ -118,7 +118,10 @@ struct DashboardView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
       }
       .clipShape(shape)
-      .shadow(color: AppTheme.hex(0x045A46).opacity(0.45), radius: 24, y: 14)
+      // Flattened once into one layer: the glows, leaf and shadow don't re-render when the
+      // hero's text changes (the disk reading refreshes about once a minute).
+      .drawingGroup()
+      .shadow(color: AppTheme.hex(0x045A46).opacity(0.35), radius: 12, y: 8)
       .accessibilityHidden(true)
     }
   }

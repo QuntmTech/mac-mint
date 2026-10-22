@@ -285,9 +285,16 @@ private struct CardButtonFace<Content: View>: View {
   let pressed: Bool
   @State private var hovering = false
   var body: some View {
-    // Tappable cards lift on hover (shadow2) instead of drawing an accent border.
-    content.compositingGroup()
-      .shadow(color: .black.opacity(hovering ? 0.12 : 0), radius: hovering ? 10 : 0, y: hovering ? 6 : 0)
-      .brightness(pressed ? -0.025 : 0).scaleEffect(pressed ? 0.99 : 1).onHover { hovering = $0 }
+    // Tappable cards lift on hover (shadow2) instead of drawing an accent border. The offscreen
+    // pass the lift needs exists only while the pointer is over the card, so resting pages
+    // redraw as cheaply as plain cards.
+    Group {
+      if hovering {
+        content.compositingGroup().shadow(color: .black.opacity(0.12), radius: 10, y: 6)
+      } else {
+        content
+      }
+    }
+    .brightness(pressed ? -0.025 : 0).scaleEffect(pressed ? 0.99 : 1).onHover { hovering = $0 }
   }
 }

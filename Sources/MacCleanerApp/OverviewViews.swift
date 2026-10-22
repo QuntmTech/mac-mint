@@ -373,7 +373,7 @@ struct CategoryTile: View {
         .clipShape(shape)
       }
       .overlay(shape.strokeBorder(Color.white.opacity(contrast == .increased ? 0.7 : 0.18), lineWidth: contrast == .increased ? 2 : 0.5))
-      .shadow(color: category.swatch.color.opacity(0.3), radius: 12, y: 8)
+      .shadow(color: category.swatch.color.opacity(0.3), radius: 6, y: 4)
       .contentShape(shape)
     }
     .buttonStyle(TileButtonStyle())
