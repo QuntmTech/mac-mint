@@ -388,13 +388,15 @@ struct OnboardingView: View {
       heading("Ready", "Ready for your first scan",
         "Scanning does not remove files. Review the results and keep anything you need.")
       HStack(alignment: .top, spacing: 10) {
-        // Both end setup the same way as before; the workspace offers the tour on its own.
+        // Both start Quick Scan. The workspace shows the tour after setup unless it has been
+        // seen, so "Jump right in" marks it seen; Help and the Overview card can still replay it.
         choice(symbol: "map.fill", swatch: .iris, title: "Show me around",
-          detail: "Open MacMint and see where things are. Scan when you're ready.", primary: false) {
-          finish(startScan: false)
+          detail: "A one-minute tour while Quick Scan looks around. Nothing is removed.", primary: false) {
+          finish(startScan: true)
         }
         choice(symbol: "dot.radiowaves.left.and.right", swatch: .mint, title: "Jump right in",
-          detail: "Run Quick Scan now. It only reads; nothing is removed.", primary: true) {
+          detail: "Skip the tour and run Quick Scan now. It only reads; nothing is removed.", primary: true) {
+          if !SmokeTest.isRequested { UserDefaults.standard.set(true, forKey: AppViewModel.tourSeenKey) }
           finish(startScan: true)
         }
         .keyboardShortcut(.defaultAction)
