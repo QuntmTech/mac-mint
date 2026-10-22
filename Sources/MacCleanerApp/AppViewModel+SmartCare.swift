@@ -52,6 +52,7 @@ extension AppViewModel {
             }
             apps = report.apps
             startupItems = report.startupItems
+            startupScanned = true
             scanIssues += report.issues
             scanCompletedAreas.append("Caches, apps and startup inventory")
           case .developer(let report):

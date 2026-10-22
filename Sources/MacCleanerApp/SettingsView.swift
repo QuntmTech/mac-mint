@@ -125,6 +125,7 @@ struct HelpersSettingsCard: View {
   @AppStorage(CareService.Keys.lowSpaceAlerts) private var lowSpaceAlerts = false
   @AppStorage(CareService.Keys.lowSpaceThresholdGB) private var thresholdGB = 20
   @AppStorage(CareService.Keys.scanReminders) private var scanReminders = false
+  @AppStorage(CareService.Keys.scanOnLaunch) private var scanOnLaunch = true
   @State private var launchAtLogin = false
   @StateObject private var permissions = PermissionsService()
 
@@ -132,6 +133,13 @@ struct HelpersSettingsCard: View {
     SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
         Label("Helpers & reminders", systemImage: "bell.badge").font(.headline)
+        Toggle(isOn: $scanOnLaunch) {
+          VStack(alignment: .leading, spacing: 2) {
+            Text("Run Quick Scan when MacMint opens")
+            Text("Overview, Cleanup, Apps and the other Quick Scan pages are ready when you look. It only reads; nothing is removed.")
+              .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          }
+        }
         Toggle("Show MacMint in the menu bar", isOn: $showMenuBar)
         Toggle("Open MacMint at login", isOn: $launchAtLogin)
           .onChange(of: launchAtLogin) { _, enabled in

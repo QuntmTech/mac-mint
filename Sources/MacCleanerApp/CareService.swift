@@ -41,6 +41,8 @@ final class CareService: ObservableObject {
     static let lastLowSpaceAlert = "care.lastLowSpaceAlert"
     static let lastScanReminder = "care.lastScanReminder"
     static let showMenuBar = "care.showMenuBar"
+    /// Quick Scan when MacMint opens; on unless turned off in Settings.
+    static let scanOnLaunch = "care.scanOnLaunch"
     static let onboardingDone = SetupProgressStore.completedKey
   }
 

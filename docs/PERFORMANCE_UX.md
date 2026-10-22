@@ -38,7 +38,7 @@ A cleaner that costs noticeable CPU or memory contradicts its purpose, so the pa
 
 Both hidden scenarios start their budget 5 s after hiding. Hiding itself is one-time work (macOS redraws controls as inactive and orders the windows out): on a heavy session's Overview it was one second at about 10% of a core, then 0.00–0.3% per second (CI trace, 2026-10-21). Measuring from the moment of hiding averaged that second into the 30 s window (0.23–0.38%), while (c) already waited. The first 5 s are reported as "hiding" without a budget, and the background memory release 10 s after hiding stays inside the budgeted window.
 
-Ordinary hidden launches (menu bar off/on) must stay under 2% after settling, the live view must take at least five samples a minute, and hidden or Overview launches must take none.
+Probe launches turn off the Quick Scan that runs when MacMint opens (`-care.scanOnLaunch NO`, like scan reminders and alerts), and `--resource-probe` launches start no automatic page loads: the budgets measure an idle app, and the heavy session drives its own scans. Ordinary hidden launches (menu bar off/on) must stay under 2% after settling, the live view must take at least five samples a minute, and hidden or Overview launches must take none.
 
 Before and after this work, on CI runners (macOS 15 / macOS 26):
 

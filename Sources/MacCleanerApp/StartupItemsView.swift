@@ -33,7 +33,7 @@ struct StartupItemsView: View {
             .help("Their program is missing, in the Trash or on a disk that isn't connected, or their last run ended with an error.")
         }
         Button("Open System Settings") { model.openLoginItemsSettings() }
-        Button("Refresh") { model.runSmartScan() }
+        Button("Refresh") { model.scanStartupItems() }
           .disabled(model.isScanning || model.isWorking)
       }
       }
@@ -55,10 +55,23 @@ struct StartupItemsView: View {
 
       Divider()
 
-      if filtered.isEmpty {
+      if model.startupItems.isEmpty && (model.isScanning || !model.startupScanned) {
+        let own = model.operationTitle == "Startup Items" || model.operationTitle == "Quick Scan"
+        if model.isScanning {
+          LoadingState(title: own ? "Reading startup items…" : "Startup items are next",
+            detail: own
+              ? "Checking launch agents and daemons, whether each program still exists, and what launchd reports."
+              : "\(model.operationTitle ?? "Another scan") is running. Startup items load as soon as it finishes.",
+            symbol: "bolt.horizontal.circle", swatch: .violet)
+        } else {
+          EmptyState(icon: "bolt.horizontal.circle", title: "See what starts with your Mac",
+            detail: "Lists launch agents and daemons, whether their programs still exist, and what launchd says about them. It only reads.",
+            actionTitle: "Read Startup Items") { model.scanStartupItems() }
+        }
+      } else if filtered.isEmpty {
         EmptyState(
-          icon: "bolt.horizontal.circle", title: "No startup items found",
-          detail: "Launch agents and daemons detected by the base app appear here.")
+          icon: "bolt.horizontal.circle", title: search.isEmpty ? "No startup items found" : "No matching startup items",
+          detail: search.isEmpty ? "No launch agents or daemons are installed for this Mac's users." : "Try a different search.")
       } else {
         List(filtered) { item in
           HStack(spacing: 12) {
@@ -119,6 +132,7 @@ struct StartupItemsView: View {
         .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.startup) }
   }
   private struct Pill {
     let title: String

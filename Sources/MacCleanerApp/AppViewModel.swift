@@ -101,6 +101,15 @@ final class AppViewModel: ObservableObject {
   @Published var cleanupTargets: [CleanupTarget] = [] { didSet { queueInputsChanged() } }
   @Published var apps: [AppRecord] = []
   @Published var startupItems: [StartupItem] = []
+  /// Whether each page's data has been read this session; an empty result is then "none found".
+  @Published var startupScanned = false
+  @Published var developerScanned = false
+  @Published var largeFilesScanned = false
+  @Published var duplicatesScanned = false
+  /// Pages that already started their automatic first load this session.
+  var autoLoaded: Set<Section> = []
+  /// The launch Quick Scan runs at most once per session, even if it is cancelled.
+  var launchScanStarted = false
   @Published var largeFiles: [LargeFile] = [] { didSet { queueInputsChanged() } }
   @Published var duplicateGroups: [DuplicateGroup] = [] { didSet { queueInputsChanged() } }
   @Published var selectedDuplicateIDs: Set<UUID> = [] { didSet { queueInputsChanged() } }
@@ -411,6 +420,7 @@ final class AppViewModel: ObservableObject {
           return
         }
         largeFiles = instant
+        largeFilesScanned = true
         largeFilesViaSpotlight = true
         selectedLargeFileIDs = []
         scanIssues = []
@@ -428,6 +438,7 @@ final class AppViewModel: ObservableObject {
         return
       }
       largeFiles = report.value
+      largeFilesScanned = true
       largeFilesViaSpotlight = false
       selectedLargeFileIDs = []
       scanIssues = report.issues
@@ -454,6 +465,7 @@ final class AppViewModel: ObservableObject {
         return
       }
       duplicateGroups = report.value
+      duplicatesScanned = true
       selectedDuplicateIDs = []
       scanIssues = report.issues
       lastScanDuration = report.duration

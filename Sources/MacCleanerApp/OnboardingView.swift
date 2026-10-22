@@ -10,6 +10,7 @@ struct OnboardingView: View {
   @Environment(\.dismiss) private var dismiss
   @AppStorage(CareService.Keys.showMenuBar) private var showMenuBar = false
   @AppStorage(CareService.Keys.lowSpaceAlerts) private var lowSpaceAlerts = false
+  @AppStorage(CareService.Keys.scanOnLaunch) private var scanOnLaunch = true
   @StateObject private var permissions = PermissionsService()
   @State private var step: Int
   @State private var showingAccount = false
@@ -79,7 +80,7 @@ struct OnboardingView: View {
       Text("Understand your storage, review what can go, and keep recovery close.")
         .font(.title3).foregroundStyle(.secondary)
       InstallationGuide()
-      point("magnifyingglass", "Start with a local scan", "Inspect results before signing in. You choose when to scan; useful inspection and History remain available without an account.")
+      point("magnifyingglass", "Start with a local scan", "Inspect results before signing in. Quick Scan only reads, and inspection and History work without an account.")
       point("checklist", "Review before removal", "Personal files need your decision. Nothing is removed when you grant permission or run a scan.")
       point("arrow.uturn.backward.circle.fill", "Know your recovery path", "File removals use Trash receipts. Restore while items remain there; Photos manages its own Recently Deleted recovery.")
       Text("Optional AI needs separate consent. You can preview what would be sent before enabling it.")
@@ -123,7 +124,14 @@ struct OnboardingView: View {
       }
       Divider()
       Text("Optional helpers").font(.headline)
-      Text("Off unless you choose them. Change these any time in Settings.").font(.callout).foregroundStyle(.secondary)
+      Text("Change these any time in Settings.").font(.callout).foregroundStyle(.secondary)
+      Toggle(isOn: $scanOnLaunch) {
+        VStack(alignment: .leading, spacing: 3) {
+          Text("Run Quick Scan when MacMint opens")
+          Text("Overview, Cleanup and Apps are ready when you look. It only reads; nothing is removed.")
+            .font(.caption).foregroundStyle(.secondary)
+        }
+      }
       Toggle(isOn: $showMenuBar) {
         VStack(alignment: .leading, spacing: 3) {
           Text("Show MacMint in the menu bar")

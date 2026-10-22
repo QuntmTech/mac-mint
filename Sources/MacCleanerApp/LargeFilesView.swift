@@ -21,18 +21,21 @@ struct LargeFilesView: View {
       controls
       Divider()
 
-      if model.largeFiles.isEmpty && !scanningHere {
+      if scanningHere || (model.largeFiles.isEmpty && model.isScanning && !model.largeFilesScanned) {
+        LoadingState(title: scanningHere ? "Looking for large files…" : "Large files are next",
+          detail: scanningHere
+            ? "Finding files over \(ByteFormatter.string(model.largeFileMinimum)) in \(model.largeFileRoot.lastPathComponent). Spotlight usually answers in a few seconds."
+            : "\(model.operationTitle ?? "Another scan") is running. Large files load as soon as it finishes.",
+          symbol: "externaldrive.fill", swatch: .indigo,
+          cancel: scanningHere ? { model.cancelCurrentOperation() } : nil)
+      } else if model.largeFiles.isEmpty {
         EmptyState(
-          icon: "externaldrive", title: "No large files found yet",
-          detail: "Choose a folder or scan your home folder. Large files are always review-only.")
-      } else if scanningHere {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Scanning for files larger than \(ByteFormatter.string(model.largeFileMinimum))…")
-            .foregroundStyle(.secondary)
-          Button("Cancel") { model.cancelCurrentOperation() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+          icon: "externaldrive", title: model.largeFilesScanned ? "No large files found" : "Find your biggest files",
+          detail: model.largeFilesScanned
+            ? "Nothing in \(model.largeFileRoot.lastPathComponent) is over \(ByteFormatter.string(model.largeFileMinimum)). Choose another folder or a smaller size above."
+            : "Lists files over \(ByteFormatter.string(model.largeFileMinimum)) in your home folder. Large files are always review-only.",
+          actionTitle: model.largeFilesScanned ? nil : "Find Large Files",
+          action: model.largeFilesScanned ? nil : { model.scanLargeFiles() })
       } else {
         if model.isScanning { OtherScanNote() }
         List(model.largeFiles) { file in
@@ -76,6 +79,7 @@ struct LargeFilesView: View {
         .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.largeFiles) }
   }
 
   private var header: some View {

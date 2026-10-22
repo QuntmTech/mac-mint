@@ -15,7 +15,7 @@ struct TourStep: Equatable, Sendable {
 }
 
 /// A short first-run walk through the window: each step dims the window, outlines one
-/// control and explains it in a sentence or two. Nothing runs or changes while it is open.
+/// control and explains it in a sentence or two. The tour itself starts and changes nothing.
 enum GuidedTour {
   static let steps: [TourStep] = [
     TourStep(target: .overview, section: .dashboard, title: "Overview",

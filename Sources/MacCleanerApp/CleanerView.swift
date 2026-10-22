@@ -45,7 +45,17 @@ struct CleanerView: View {
       filterBar
       Divider()
 
-      if filteredTargets.isEmpty && !model.isScanning {
+      if filteredTargets.isEmpty && model.isScanning {
+        let quick = model.operationTitle == "Quick Scan"
+        LoadingState(title: quick ? "Looking for caches and logs…" : "Cleanup is next",
+          detail: quick
+            ? "Quick Scan is checking known cache, log and download locations. Results appear here as each check finishes."
+            : "\(model.operationTitle ?? "Another scan") is running. Cleanup loads as soon as it finishes.",
+          symbol: "sparkles", swatch: .sky,
+          progress: quick ? Double(model.scanCompletedAreas.count) / 5 : nil,
+          status: quick ? "\(model.scanCompletedAreas.count) of 5 checks done" : nil,
+          cancel: quick ? { model.cancelCurrentOperation() } : nil)
+      } else if filteredTargets.isEmpty {
         EmptyState(
           icon: search.isEmpty ? "checkmark.seal" : "magnifyingglass",
           title: !search.isEmpty || riskFilter != .all ? "No matching cleanup items" : model.lastScanDate == nil ? "Start with a Quick Scan" : "Nothing found in this scan",
@@ -74,6 +84,7 @@ struct CleanerView: View {
         .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.cleaner) }
   }
 
   private var header: some View {

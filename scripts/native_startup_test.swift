@@ -207,6 +207,8 @@ private struct NativeStartupTest {
       "-care.onboardingDone", options.onboardingDone ? "YES" : "NO",
       "-care.lowSpaceAlerts", "NO",
       "-care.scanReminders", "NO",
+      // The launch Quick Scan is user-visible work, not idle cost; these launches measure idle.
+      "-care.scanOnLaunch", "NO",
       "-MacMintNativeStartupProbeID", marker,
     ] + options.extraArguments
     log("Launching ordinary app: \(label)")

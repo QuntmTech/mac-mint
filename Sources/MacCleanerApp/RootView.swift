@@ -105,6 +105,7 @@ struct RootView: View {
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       guard !SmokeTest.isRequested else { return }
+      model.runLaunchScanIfEnabled(inFront: !NSApp.isHidden)
       Task {
         await account.refreshAccess()
         await account.refreshAIStatusIfStale()
@@ -164,6 +165,12 @@ struct RootView: View {
       }
     }
     .task { await ResourceProbeSession.runIfRequested(model) }
+    .task(id: model.exclusionsReady) {
+      // Quick Scan when MacMint opens, once the window has settled (Settings can turn it off).
+      guard model.exclusionsReady, AppViewModel.autoLoadAllowed else { return }
+      try? await Task.sleep(for: .seconds(1))
+      model.runLaunchScanIfEnabled(inFront: NSApp.isActive && !NSApp.isHidden)
+    }
     .task {
       // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and every
       // minute while the workspace is in front. Hidden or background windows skip it.

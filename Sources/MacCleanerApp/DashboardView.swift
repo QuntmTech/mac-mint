@@ -38,7 +38,7 @@ struct DashboardView: View {
         SwatchBadge(symbol: "signpost.right.fill", swatch: .mint, size: 34)
         VStack(alignment: .leading, spacing: 3) {
           Text("New here, or want a refresher?").font(.headline)
-          Text("A one-minute tour shows where everything is. Nothing runs or changes while it's open.")
+          Text("A one-minute tour shows where everything is. Nothing is removed or changed while it's open.")
             .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
         Spacer(minLength: 12)

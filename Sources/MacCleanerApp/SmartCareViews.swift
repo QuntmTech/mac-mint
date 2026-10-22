@@ -215,18 +215,22 @@ struct DownloadsView: View {
       .padding(AppTheme.pagePadding)
       Divider()
 
-      if model.isScanning && model.operationTitle == "Downloads" {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Reading Spotlight's record of what you've opened…").foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      if model.isScanning && (model.operationTitle == "Downloads" || (model.downloadItems.isEmpty && !model.downloadsScanned)) {
+        let own = model.operationTitle == "Downloads" || model.operationTitle == "Quick Scan"
+        LoadingState(title: own ? "Reading your Downloads…" : "Downloads are next",
+          detail: own
+            ? "Checking each download's size, dates and Spotlight's record of when you last opened it."
+            : "\(model.operationTitle ?? "Another scan") is running. Downloads load as soon as it finishes.",
+          symbol: "arrow.down.circle", swatch: .teal,
+          cancel: model.operationTitle == "Downloads" ? { model.cancelCurrentOperation() } : nil)
       } else if model.downloadItems.isEmpty {
         EmptyState(
           icon: model.downloadsScanned ? "checkmark.seal" : "arrow.down.circle",
           title: model.downloadsScanned ? "No downloads found" : "Take a look at your Downloads",
           detail:
-            "Review downloads using their size, change dates, and available macOS usage records.")
+            "Review downloads using their size, change dates, and available macOS usage records.",
+          actionTitle: model.downloadsScanned ? nil : "Read Downloads",
+          action: model.downloadsScanned ? nil : { model.scanDownloads() })
       } else {
         HStack(spacing: 6) {
           filterChip(nil, title: "All")
@@ -247,6 +251,7 @@ struct DownloadsView: View {
           .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.downloads) }
   }
 
   private func filterChip(_ value: DownloadKind?, title: String) -> some View {
