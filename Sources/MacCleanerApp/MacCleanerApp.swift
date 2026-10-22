@@ -53,7 +53,9 @@ struct MacCleanerDesktopApp: App {
         }
     }
     .defaultSize(width: 1240, height: 820)
-    .windowStyle(.automatic)
+    // The sidebar and the canvas run up under a transparent title bar; the traffic lights sit
+    // over the sidebar and the content keeps to the safe area below them.
+    .windowStyle(.hiddenTitleBar)
     .commands {
       // One workspace window: every window would share the model's sheets and onboarding.
       CommandGroup(replacing: .newItem) {}

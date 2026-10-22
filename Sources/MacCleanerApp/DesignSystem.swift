@@ -13,21 +13,27 @@ enum AppAppearance: String, CaseIterable, Identifiable {
   }
 }
 
-/// A page header that gives actions their own row when a window becomes narrow.
+/// A page header that gives actions their own row when a window becomes narrow: the area's
+/// 42 pt gradient badge, a 24 pt title and a one-line explanation.
 struct PageHeader<Actions: View>: View {
   let title: String
   let subtitle: String
   var eyebrow: String? = nil
+  /// Overrides the area's symbol in the badge.
+  var symbol: String? = nil
+  var showsBadge = true
   @ViewBuilder var actions: () -> Actions
+  @Environment(\.areaSwatch) private var swatch
+  @Environment(\.areaSymbol) private var areaSymbol
 
   var body: some View {
     ViewThatFits(in: .horizontal) {
       HStack(alignment: .center, spacing: 24) {
         heading.frame(minWidth: 240, alignment: .leading)
         Spacer(minLength: 12)
-        actions().fixedSize()
+        HStack(spacing: 8) { actions() }.fixedSize()
       }
-      VStack(alignment: .leading, spacing: 16) { heading; actions() }
+      VStack(alignment: .leading, spacing: 14) { heading; HStack(spacing: 8) { actions() } }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .fixedSize(horizontal: false, vertical: true)
@@ -35,24 +41,25 @@ struct PageHeader<Actions: View>: View {
   }
 
   private var heading: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      if let eyebrow {
-        Text(eyebrow.uppercased()).font(.system(size: 10, weight: .semibold))
-          .tracking(1.6).foregroundStyle(AppTheme.accentText)
-      }
-      Text(title).font(.system(size: 29, weight: .semibold)).tracking(-0.8)
-        .foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
-      if !subtitle.isEmpty {
-        Text(subtitle).font(.callout).foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
+    HStack(alignment: .center, spacing: 14) {
+      if showsBadge { SwatchBadge(symbol: symbol ?? areaSymbol, swatch: swatch, size: 42, glow: true) }
+      VStack(alignment: .leading, spacing: 3) {
+        if let eyebrow { Eyebrow(eyebrow, color: swatch.text) }
+        Text(title).font(.system(size: 24, weight: .bold)).tracking(-0.55)
+          .foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true).accessibilityAddTraits(.isHeader)
+        if !subtitle.isEmpty {
+          Text(subtitle).font(.system(size: 13)).foregroundStyle(AppTheme.ink2)
+            .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 560, alignment: .leading)
+        }
       }
     }
   }
 }
 
 extension PageHeader where Actions == EmptyView {
-  init(_ title: String, subtitle: String, eyebrow: String? = nil) {
-    self.title = title; self.subtitle = subtitle; self.eyebrow = eyebrow; self.actions = { EmptyView() }
+  init(_ title: String, subtitle: String, eyebrow: String? = nil, symbol: String? = nil, showsBadge: Bool = true) {
+    self.title = title; self.subtitle = subtitle; self.eyebrow = eyebrow; self.symbol = symbol
+    self.showsBadge = showsBadge; self.actions = { EmptyView() }
   }
 }
 
@@ -66,9 +73,9 @@ struct IconTile: View {
     if let swatch {
       SwatchBadge(symbol: symbol, swatch: swatch, size: size)
     } else {
-      Image(systemName: symbol).font(.system(size: size * 0.42, weight: .medium))
+      Image(systemName: symbol).font(.system(size: size * 0.42, weight: .semibold))
         .foregroundStyle(tint).frame(width: size, height: size)
-        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: size * 0.28))
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: size * 0.29, style: .continuous))
         .accessibilityHidden(true)
     }
   }
@@ -80,9 +87,10 @@ struct SearchField: View {
   @Environment(\.colorSchemeContrast) private var contrast
   @FocusState private var focused: Bool
   var body: some View {
-    HStack(spacing: 8) {
-      Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-      TextField(prompt, text: $text).textFieldStyle(.plain).accessibilityLabel(prompt)
+    HStack(spacing: 7) {
+      Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium))
+        .foregroundStyle(AppTheme.ink3).accessibilityHidden(true)
+      TextField(prompt, text: $text).textFieldStyle(.plain).font(.system(size: 12.5)).accessibilityLabel(prompt)
         .focused($focused)
         .onKeyPress(.escape) {
           guard !text.isEmpty else { return .ignored }
@@ -91,34 +99,85 @@ struct SearchField: View {
         }
       if !text.isEmpty {
         Button { text = ""; focused = true } label: { Image(systemName: "xmark.circle.fill") }
-          .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("Clear search")
+          .buttonStyle(.plain).foregroundStyle(AppTheme.ink3).accessibilityLabel("Clear search")
           .help("Clear search · Esc")
       }
     }
-    .padding(.horizontal, 11).padding(.vertical, 9)
-    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 9))
-    .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(
-      focused ? AppTheme.accentText : contrast == .increased ? Color.primary.opacity(0.6) : AppTheme.border,
-      lineWidth: focused || contrast == .increased ? 2 : 1))
+    .padding(.horizontal, 10).frame(height: 30)
+    .cardBackground(radius: 8)
+    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(
+      focused ? AppTheme.accentText : contrast == .increased ? AppTheme.ink.opacity(0.6) : Color.clear,
+      lineWidth: 2))
   }
 }
 
+/// Every button in the app. Area buttons explore (Scan Photos, Map Folder) in the page's own
+/// color; commit buttons (Add to Review, Final Check, Move to Trash, Done) are always mint, so
+/// the button that brings a change closer always looks the same.
 struct MintButtonStyle: ButtonStyle {
-  var prominent = true
-  @Environment(\.isEnabled) private var isEnabled
-  @Environment(\.colorSchemeContrast) private var contrast
+  enum Kind { case commit, area, secondary, destructive, plain }
+  var kind: Kind
+
+  init(prominent: Bool = true) { kind = prominent ? .commit : .secondary }
+  init(_ kind: Kind) { self.kind = kind }
+
   func makeBody(configuration: Configuration) -> some View {
-    configuration.label.font(.system(size: 13, weight: .semibold))
-      .padding(.horizontal, 16).padding(.vertical, 10)
-      .foregroundStyle(prominent ? Color.white : AppTheme.ink)
-      .background(prominent ? AppTheme.accent : AppTheme.surface,
-        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(
-        prominent ? Color.white.opacity(0.10) : AppTheme.border,
-        lineWidth: contrast == .increased ? 2 : 1))
-      .brightness(configuration.isPressed ? -0.06 : 0)
-      .opacity(isEnabled ? 1 : 0.45)
-      .contentShape(RoundedRectangle(cornerRadius: 10))
+    StyledButtonFace(kind: kind, configuration: configuration)
+  }
+}
+
+private struct StyledButtonFace: View {
+  let kind: MintButtonStyle.Kind
+  let configuration: ButtonStyleConfiguration
+  @Environment(\.isEnabled) private var isEnabled
+  @Environment(\.controlSize) private var controlSize
+  @Environment(\.areaSwatch) private var swatch
+  @Environment(\.colorSchemeContrast) private var contrast
+  @State private var hovering = false
+
+  var body: some View {
+    let small = controlSize == .small || controlSize == .mini
+    let shape = RoundedRectangle(cornerRadius: small ? 6 : 8, style: .continuous)
+    configuration.label
+      .font(.system(size: small ? 12 : 13, weight: kind == .secondary ? .medium : .semibold))
+      .lineLimit(1)
+      .foregroundStyle(foreground)
+      .padding(.horizontal, kind == .plain ? 6 : small ? 10 : 14)
+      .frame(minHeight: small ? 24 : 30)
+      .background {
+        switch kind {
+        case .commit: shape.fill(AppTheme.commitGradient)
+        case .area: shape.fill(swatch.fill)
+        case .destructive: shape.fill(AppTheme.dangerFill)
+        case .secondary: shape.fill(hovering && isEnabled ? AppTheme.panel : AppTheme.surface)
+        case .plain: shape.fill(hovering && isEnabled ? AppTheme.panel : Color.clear)
+        }
+      }
+      .overlay {
+        switch kind {
+        case .secondary:
+          shape.strokeBorder(contrast == .increased ? AppTheme.ink.opacity(0.6) : AppTheme.border,
+            lineWidth: contrast == .increased ? 2 : 1)
+        case .commit, .area, .destructive:
+          shape.strokeBorder(Color.white.opacity(0.16), lineWidth: 0.5)
+        case .plain: EmptyView()
+        }
+      }
+      .contentShape(shape)
+      .brightness(configuration.isPressed ? -0.06 : hovering && isEnabled && filled ? 0.06 : 0)
+      .scaleEffect(configuration.isPressed ? 0.98 : 1)
+      .opacity(isEnabled ? 1 : 0.4)
+      .onHover { hovering = $0 }
+  }
+
+  private var filled: Bool { kind == .commit || kind == .area || kind == .destructive }
+
+  private var foreground: Color {
+    switch kind {
+    case .commit, .area, .destructive: return .white
+    case .secondary: return AppTheme.ink
+    case .plain: return AppTheme.accentText
+    }
   }
 }
 
@@ -226,8 +285,16 @@ private struct CardButtonFace<Content: View>: View {
   let pressed: Bool
   @State private var hovering = false
   var body: some View {
-    content.overlay(RoundedRectangle(cornerRadius: AppTheme.corner)
-      .strokeBorder(AppTheme.accentText.opacity(hovering || pressed ? 0.55 : 0), lineWidth: 1))
-      .brightness(pressed ? -0.025 : 0).onHover { hovering = $0 }
+    // Tappable cards lift on hover (shadow2) instead of drawing an accent border. The offscreen
+    // pass the lift needs exists only while the pointer is over the card, so resting pages
+    // redraw as cheaply as plain cards.
+    Group {
+      if hovering {
+        content.compositingGroup().shadow(color: .black.opacity(0.12), radius: 10, y: 6)
+      } else {
+        content
+      }
+    }
+    .brightness(pressed ? -0.025 : 0).scaleEffect(pressed ? 0.99 : 1).onHover { hovering = $0 }
   }
 }

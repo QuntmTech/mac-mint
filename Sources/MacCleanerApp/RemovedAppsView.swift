@@ -22,23 +22,31 @@ struct RemovedAppsView: View {
     VStack(spacing: 0) {
       PageHeader(title: "Removed Apps", subtitle: "Settings, caches, and containers left behind by apps you’ve removed.") {
         HStack(spacing: 8) {
-        if !model.selectedOrphanIDs.isEmpty {
-          Button("Deselect") { model.keepQueuedFiles(model.queuedOrphans.map(\.url)) }
-          Button {
-            model.reviewOrphans()
-          } label: {
-            Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "trash")
+          if !model.selectedOrphanIDs.isEmpty {
+            Button("Deselect") { model.keepQueuedFiles(model.queuedOrphans.map(\.url)) }
+              .buttonStyle(MintButtonStyle(.plain))
+            Button {
+              model.reviewOrphans()
+            } label: {
+              Label("Review \(ByteFormatter.string(selectedBytes))", systemImage: "trash")
+            }
+            .buttonStyle(MintButtonStyle(.commit))
+            .disabled(model.isWorking || model.isScanning)
           }
-          .buttonStyle(.borderedProminent)
-          .disabled(model.isWorking || model.isScanning)
-        }
-        Button(model.orphansScanned ? "Rescan" : "Scan") { model.scanOrphans() }
-          .buttonStyle(.borderedProminent)
+          Button {
+            model.scanOrphans()
+          } label: {
+            Label(model.orphansScanned ? "Rescan" : "Scan", systemImage: "arrow.clockwise")
+          }
+          .buttonStyle(MintButtonStyle(.area))
           .disabled(model.isScanning || model.isWorking)
+        }
       }
-      }
-      .padding(AppTheme.pagePadding)
-      Divider()
+      .frame(maxWidth: 1180)
+      .padding(.horizontal, AppTheme.pagePadding)
+      .padding(.top, AppTheme.pageTopPadding)
+      .padding(.bottom, 14)
+      .frame(maxWidth: .infinity)
 
       if model.isScanning && (model.operationTitle == "Removed Apps" || (model.orphans.isEmpty && !model.orphansScanned)) {
         let own = model.operationTitle == "Removed Apps" || model.operationTitle == "Quick Scan"
@@ -57,32 +65,108 @@ struct RemovedAppsView: View {
           actionTitle: model.orphansScanned ? nil : "Find Leftovers",
           action: model.orphansScanned ? nil : { model.scanOrphans() })
       } else {
-        List {
-          ForEach(grouped, id: \.0) { bundleID, items in
-            Section {
-              ForEach(items) { row($0) }
-            } header: {
-              HStack {
-                Text(bundleID).textSelection(.enabled)
-                Spacer()
-                Button("Select All") {
-                  model.selectedOrphanIDs.formUnion(items.map(\.id))
-                }
-                .buttonStyle(.link)
-        .tint(AppTheme.accentText)
-                Text(ByteFormatter.string(items.reduce(0) { $0 + $1.bytes })).monospacedDigit()
+        ScrollView {
+          VStack(alignment: .leading, spacing: 14) {
+            tip
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 12, alignment: .top)], alignment: .leading, spacing: 12) {
+              ForEach(grouped, id: \.0) { bundleID, items in
+                card(bundleID, items)
               }
             }
           }
+          .frame(maxWidth: 1180)
+          .padding(.horizontal, AppTheme.pagePadding)
+          .padding(.top, 2)
+          .padding(.bottom, 24)
+          .frame(maxWidth: .infinity)
         }
-        .listStyle(.inset)
       }
     }
     .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.removedApps) }
   }
 
-  private func row(_ item: OrphanedItem) -> some View {
-    HStack(spacing: 11) {
+  /// Settings stay useful if the app comes back.
+  private var tip: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "lightbulb.fill")
+        .font(.system(size: 14, weight: .semibold))
+        .foregroundStyle(AppTheme.Swatch.amber.text)
+        .accessibilityHidden(true)
+      Text("Plan to reinstall one of these apps? Keep its settings, and the app picks up where you left off.")
+        .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink)
+        .fixedSize(horizontal: false, vertical: true)
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 14).padding(.vertical, 12)
+    .background(AppTheme.Swatch.amber.tint, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+
+  /// The app is gone, so there is no icon to show: a dashed placeholder with its initial.
+  private func placeholderIcon(_ bundleID: String) -> some View {
+    let letter = bundleID.split(separator: ".").last.map { String($0.prefix(1)).uppercased() } ?? "?"
+    let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+    return Text(letter.isEmpty ? "?" : letter)
+      .font(.system(size: 15, weight: .bold))
+      .foregroundStyle(AppTheme.ink2)
+      .frame(width: 36, height: 36)
+      .background(AppTheme.panel, in: shape)
+      .overlay(shape.strokeBorder(AppTheme.borderStrong, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2.5])))
+      .accessibilityHidden(true)
+  }
+
+  private func riskChip(_ confidence: MatchConfidence) -> Chip {
+    confidence == .medium
+      ? Chip(title: "Likely unused", symbol: "clock.fill", swatch: .sky)
+      : Chip(title: "Check first", symbol: "eye.fill", swatch: .amber)
+  }
+
+  private func card(_ bundleID: String, _ items: [OrphanedItem]) -> some View {
+    let total = items.reduce(Int64(0)) { $0 + $1.bytes }
+    let mixed = Set(items.map(\.confidence)).count > 1
+    // The card shows the most careful level among its items.
+    let level: MatchConfidence = items.allSatisfy { $0.confidence == .medium } ? .medium : .low
+    let shape = RoundedRectangle(cornerRadius: AppTheme.corner, style: .continuous)
+    return VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 11) {
+        placeholderIcon(bundleID)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(bundleID).font(.system(size: 13.5, weight: .bold)).foregroundStyle(AppTheme.ink)
+            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+          Text(items.count == 1 ? "1 item" : "\(items.count) items")
+            .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3)
+        }
+        Spacer(minLength: 8)
+        Text(ByteFormatter.string(total)).font(AppTheme.number(16)).monospacedDigit().foregroundStyle(AppTheme.ink)
+          .fixedSize()
+      }
+      .padding(.horizontal, 14).padding(.vertical, 13)
+
+      ForEach(items) { item in
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        row(item, showsRisk: mixed)
+      }
+
+      HStack(spacing: 6) {
+        riskChip(level)
+        Text("No installed app claims this").font(.system(size: 11)).foregroundStyle(AppTheme.ink2).lineLimit(1)
+        Spacer(minLength: 4)
+        Button("Select All") {
+          model.selectedOrphanIDs.formUnion(items.map(\.id))
+        }
+        .buttonStyle(MintButtonStyle(.plain))
+        .controlSize(.small)
+      }
+      .padding(.horizontal, 14).padding(.vertical, 8)
+      .background(AppTheme.panel)
+      .overlay(alignment: .top) { Rectangle().fill(AppTheme.divider).frame(height: 1) }
+    }
+    .background(AppTheme.surface)
+    .clipShape(shape)
+    .cardBackground()
+  }
+
+  private func row(_ item: OrphanedItem, showsRisk: Bool) -> some View {
+    HStack(alignment: .top, spacing: 10) {
       Toggle(
         "",
         isOn: Binding(
@@ -91,25 +175,29 @@ struct RemovedAppsView: View {
             model.setFileSelection(item.url, selected: isOn)
           })
       )
+      .toggleStyle(MintCheckboxStyle())
       .labelsHidden()
+      .fixedSize()
+      .padding(.top, 1)
       .accessibilityLabel("Select \(item.url.lastPathComponent)")
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
-          Text(item.location).fontWeight(.medium)
-          StatusPill(
-            title: item.confidence == .medium ? "Likely unused" : "Check first",
-            icon: item.confidence == .medium ? "checkmark.shield" : "eye",
-            tint: item.confidence == .medium ? .green : .orange)
+          Text(item.location).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+          if showsRisk { riskChip(item.confidence) }
+          Spacer(minLength: 4)
+          Text(ByteFormatter.string(item.bytes))
+            .font(AppTheme.number(12.5, weight: .semibold)).monospacedDigit().foregroundStyle(AppTheme.ink)
+            .fixedSize()
         }
-        Text(item.reason).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-        Text(item.url.path).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+        Text(item.url.path).font(.system(size: 11, design: .monospaced)).foregroundStyle(AppTheme.ink2)
+          .lineLimit(1).truncationMode(.middle).help(item.url.path)
+        Text(item.reason).font(.system(size: 11.5)).foregroundStyle(AppTheme.ink2).lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
         if let modified = item.modified {
           Text("Last changed \(modified.formatted(.relative(presentation: .named)))")
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.system(size: 11)).foregroundStyle(AppTheme.ink3)
         }
       }
-      Spacer()
-      Text(ByteFormatter.string(item.bytes)).font(.callout.monospacedDigit()).frame(width: 86, alignment: .trailing)
       Menu {
         Button("Reveal in Finder") { model.reveal(item.url) }
         Button("Exclude from Future Scans") { model.ignore(item.url) }
@@ -119,8 +207,8 @@ struct RemovedAppsView: View {
           .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
-      .frame(width: 28)
+      .fixedSize()
     }
-    .padding(.vertical, 4)
+    .padding(.horizontal, 14).padding(.vertical, 10)
   }
 }

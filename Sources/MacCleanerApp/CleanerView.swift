@@ -3,6 +3,7 @@ import SwiftUI
 
 struct CleanerView: View {
   @EnvironmentObject private var model: AppViewModel
+  @EnvironmentObject private var account: AccountStore
   @SceneStorage("cleanup.search") private var search = ""
   @State private var riskFilter: RiskFilter = .all
 
@@ -13,39 +14,46 @@ struct CleanerView: View {
     var id: String { rawValue }
   }
 
-  private var filteredTargets: [CleanupTarget] {
-    model.cleanupTargets.filter { item in
-      let matchesRisk: Bool = {
-        switch riskFilter {
-        case .all: return true
-        case .safe: return item.risk == .safe
-        case .review: return item.risk == .review
-        }
-      }()
-      let matchesSearch =
-        search.isEmpty
-        || item.displayName.localizedCaseInsensitiveContains(search)
-        || item.detail.localizedCaseInsensitiveContains(search)
-        || item.url.path.localizedCaseInsensitiveContains(search)
-      return matchesRisk && matchesSearch
+  private func matchesSearch(_ item: CleanupTarget) -> Bool {
+    search.isEmpty
+      || item.displayName.localizedCaseInsensitiveContains(search)
+      || item.detail.localizedCaseInsensitiveContains(search)
+      || item.url.path.localizedCaseInsensitiveContains(search)
+  }
+
+  private func matchesRisk(_ item: CleanupTarget) -> Bool {
+    switch riskFilter {
+    case .all: return true
+    case .safe: return item.risk == .safe
+    case .review: return item.risk == .review
     }
   }
 
-  private var grouped: [(CleanupCategory, [CleanupTarget])] {
+  /// Items that match the search, before the risk filter. The risk pills count these.
+  private var searchMatches: [CleanupTarget] {
+    model.cleanupTargets.filter { matchesSearch($0) }
+  }
+
+  private func grouped(_ targets: [CleanupTarget]) -> [(CleanupCategory, [CleanupTarget])] {
     CleanupCategory.allCases.compactMap { category in
-      let items = filteredTargets.filter { $0.category == category }
+      let items = targets.filter { $0.category == category }
       return items.isEmpty ? nil : (category, items)
     }
   }
 
+  private var showsFilters: Bool {
+    !model.cleanupTargets.isEmpty || !search.isEmpty || riskFilter != .all
+  }
+
   var body: some View {
+    let matches = searchMatches
+    let targets = matches.filter { matchesRisk($0) }
+    let loading = targets.isEmpty && model.isScanning
     VStack(spacing: 0) {
       header
-      Divider()
-      filterBar
-      Divider()
+      if showsFilters && !loading { filterBar(matches: matches, shown: targets.count) }
 
-      if filteredTargets.isEmpty && model.isScanning {
+      if loading {
         let quick = model.operationTitle == "Quick Scan"
         LoadingState(title: quick ? "Looking for caches and logs…" : "Cleanup is next",
           detail: quick
@@ -55,7 +63,7 @@ struct CleanerView: View {
           progress: quick ? Double(model.scanCompletedAreas.count) / 5 : nil,
           status: quick ? "\(model.scanCompletedAreas.count) of 5 checks done" : nil,
           cancel: quick ? { model.cancelCurrentOperation() } : nil)
-      } else if filteredTargets.isEmpty {
+      } else if targets.isEmpty {
         EmptyState(
           icon: search.isEmpty ? "checkmark.seal" : "magnifyingglass",
           title: !search.isEmpty || riskFilter != .all ? "No matching cleanup items" : model.lastScanDate == nil ? "Start with a Quick Scan" : "Nothing found in this scan",
@@ -64,66 +72,199 @@ struct CleanerView: View {
           action: { model.runSmartScan() }
         )
       } else {
-        List {
-          ForEach(grouped, id: \.0) { category, items in
-            Section {
-              ForEach(items) { item in
-                cleanupRow(item)
-              }
-            } header: {
-              HStack {
-                Text(category.rawValue)
-                Spacer()
-                Text(ByteFormatter.string(items.reduce(0) { $0 + $1.size }))
-                  .font(.caption.monospacedDigit())
-                  .foregroundStyle(.secondary)
-              }
-            }
-          }
-        }
-        .listStyle(.inset)
+        groupList(targets)
       }
+
+      if !loading && !model.cleanupTargets.isEmpty { selectionBar }
     }
     .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.cleaner) }
   }
 
+  // MARK: Header and filters
+
   private var header: some View {
     PageHeader(title: "Cleanup", subtitle: "Inspect caches and generated data. Keep anything you still need.") {
-      HStack(spacing: 8) {
-        Button(model.isScanning ? "Cancel" : "Rescan", systemImage: model.isScanning ? "xmark" : "arrow.clockwise") {
-          if model.isScanning { model.cancelCurrentOperation() } else { model.runSmartScan() }
-        }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking)
-        Button { model.reviewCleanup() } label: {
-          Label("Review \(ByteFormatter.string(model.selectedCleanupBytes))", systemImage: "checklist")
-        }.buttonStyle(MintButtonStyle())
-          .disabled(model.selectedCleanupBytes == 0 || model.isWorking || model.isScanning)
+      Button(model.isScanning ? "Cancel" : "Rescan", systemImage: model.isScanning ? "xmark" : "arrow.clockwise") {
+        if model.isScanning { model.cancelCurrentOperation() } else { model.runSmartScan() }
       }
-    }.padding(AppTheme.pagePadding)
+      .buttonStyle(MintButtonStyle(model.isScanning ? .secondary : .area))
+      .disabled(model.isWorking)
+    }
+    .padding(.horizontal, AppTheme.pagePadding)
+    .padding(.top, AppTheme.pageTopPadding)
+    .padding(.bottom, 14)
+    .frame(maxWidth: 1180)
+    .frame(maxWidth: .infinity)
   }
 
-  private var filterBar: some View {
-    VStack(spacing: 12) {
-      HStack(spacing: 14) {
+  private func filterBar(matches: [CleanupTarget], shown: Int) -> some View {
+    let options = riskOptions(matches)
+    return ViewThatFits(in: .horizontal) {
+      HStack(spacing: 10) {
         SearchField(prompt: "Search cleanup items", text: $search)
-        Picker("Risk", selection: $riskFilter) {
-          ForEach(RiskFilter.allCases) { filter in Text(filter.rawValue).tag(filter) }
-        }.pickerStyle(.segmented).frame(width: 230)
+          .frame(minWidth: 180, maxWidth: 300)
+        riskPills(options)
+        Spacer(minLength: 8)
+        itemCount(shown)
+        selectMenu
       }
-      HStack {
-        Text("\(filteredTargets.count) items").font(.caption).foregroundStyle(.secondary)
-        Spacer()
-        Text("\(model.cleanupTargets.filter(\.isSelected).count) selected · \(ByteFormatter.string(model.selectedCleanupBytes))")
-          .font(.caption.weight(.medium)).foregroundStyle(AppTheme.accentText)
-        Menu("Select") {
-          Button("Rebuildable items") { model.selectSafeCleanupOnly() }
-          Button("Deselect all") { model.deselectAllCleanup() }
-        }.fixedSize().menuStyle(.borderlessButton)
+      VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 10) {
+          SearchField(prompt: "Search cleanup items", text: $search)
+          selectMenu
+        }
+        HStack(spacing: 10) {
+          riskPills(options)
+          Spacer(minLength: 8)
+          itemCount(shown)
+        }
       }
-    }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 14)
+    }
+    .padding(.horizontal, AppTheme.pagePadding)
+    .padding(.bottom, 14)
+    .frame(maxWidth: 1180)
+    .frame(maxWidth: .infinity)
   }
 
-  private func cleanupRow(_ item: CleanupTarget) -> some View {
-    HStack(spacing: 12) {
+  private func riskOptions(_ matches: [CleanupTarget]) -> [SegmentedPills<RiskFilter>.Option] {
+    let rebuildable = matches.filter { $0.risk == .safe }.count
+    let review = matches.filter { $0.risk == .review }.count
+    return [
+      SegmentedPills<RiskFilter>.Option(value: .all, title: RiskFilter.all.rawValue, count: matches.count),
+      SegmentedPills<RiskFilter>.Option(value: .safe, title: RiskFilter.safe.rawValue,
+        dot: CleanupRisk.safe.swatch.color, count: rebuildable),
+      SegmentedPills<RiskFilter>.Option(value: .review, title: RiskFilter.review.rawValue,
+        dot: CleanupRisk.review.swatch.color, count: review),
+    ]
+  }
+
+  private func riskPills(_ options: [SegmentedPills<RiskFilter>.Option]) -> some View {
+    SegmentedPills(selection: $riskFilter, options: options)
+      .fixedSize()
+      .accessibilityElement(children: .contain)
+      .accessibilityLabel("Risk")
+  }
+
+  private func itemCount(_ count: Int) -> some View {
+    Text("\(count) items")
+      .font(.system(size: 11.5)).monospacedDigit()
+      .foregroundStyle(AppTheme.ink3)
+      .lineLimit(1)
+      .fixedSize()
+  }
+
+  private var selectMenu: some View {
+    Menu("Select") {
+      Button("Rebuildable items") { model.selectSafeCleanupOnly() }
+      Button("Deselect all") { model.deselectAllCleanup() }
+    }
+    .fixedSize()
+    .menuStyle(.borderlessButton)
+  }
+
+  private var selectionBar: some View {
+    SelectionBar(
+      count: model.cleanupTargets.filter(\.isSelected).count,
+      bytes: model.selectedCleanupBytes,
+      clear: { model.deselectAllCleanup() },
+      commitTitle: "Review…",
+      commitDisabled: model.selectedCleanupBytes == 0 || model.isWorking || model.isScanning,
+      commit: { model.reviewCleanup() })
+  }
+
+  // MARK: Groups
+
+  private func groupList(_ targets: [CleanupTarget]) -> some View {
+    ScrollView {
+      LazyVStack(spacing: 14) {
+        ForEach(grouped(targets), id: \.0) { category, items in
+          groupCard(category, items)
+        }
+      }
+      .padding(.horizontal, AppTheme.pagePadding)
+      .padding(.top, 2)
+      .padding(.bottom, 24)
+      .frame(maxWidth: 1180)
+      .frame(maxWidth: .infinity)
+    }
+  }
+
+  private func groupCard(_ category: CleanupCategory, _ items: [CleanupTarget]) -> some View {
+    let mixed = Set(items.map(\.risk)).count > 1
+    return VStack(spacing: 0) {
+      groupHeader(category, items)
+      ForEach(items) { item in
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        cleanupRow(item, showsRisk: mixed)
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: AppTheme.corner, style: .continuous))
+    .cardBackground()
+  }
+
+  private func groupHeader(_ category: CleanupCategory, _ items: [CleanupTarget]) -> some View {
+    let selectable = items.filter { $0.risk != .restricted }
+    let chosen = selectable.filter(\.isSelected).count
+    let state: CheckboxMark.Kind = chosen == 0 ? .off : (chosen == selectable.count ? .on : .mixed)
+    let total = items.reduce(Int64(0)) { $0 + $1.size }
+    return HStack(spacing: 11) {
+      Button {
+        model.setFileSelections(selectable.map(\.url), selected: chosen < selectable.count)
+      } label: {
+        CheckboxMark(state: state)
+          .frame(width: 22, height: 22)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(selectable.isEmpty)
+      .opacity(selectable.isEmpty ? 0.4 : 1)
+      .accessibilityLabel("Select all in \(category.rawValue)")
+      .accessibilityValue(state == .on ? "Checked" : state == .mixed ? "Mixed" : "Unchecked")
+
+      SwatchBadge(symbol: icon(for: category), swatch: swatch(for: category), size: 30)
+
+      VStack(alignment: .leading, spacing: 1) {
+        Text(category.rawValue)
+          .font(.system(size: 13.5, weight: .bold)).tracking(-0.2)
+          .foregroundStyle(AppTheme.ink)
+          .lineLimit(1)
+        Text("\(items.count) items · \(chosen) selected")
+          .font(.system(size: 11.5)).monospacedDigit()
+          .foregroundStyle(AppTheme.ink3)
+          .lineLimit(1)
+      }
+      .accessibilityElement(children: .combine)
+
+      Spacer(minLength: 8)
+
+      groupRiskChip(items)
+
+      Text(ByteFormatter.string(total))
+        .font(AppTheme.number(13.5)).monospacedDigit()
+        .foregroundStyle(AppTheme.ink)
+        .frame(minWidth: 74, alignment: .trailing)
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+  }
+
+  @ViewBuilder
+  private func groupRiskChip(_ items: [CleanupTarget]) -> some View {
+    let risks = Set(items.map(\.risk))
+    if risks.count == 1, let risk = risks.first {
+      RiskBadge(risk: risk)
+    } else {
+      Chip(title: "Mixed", symbol: "square.stack.fill", swatch: .slate)
+    }
+  }
+
+  // MARK: Rows
+
+  private func cleanupRow(_ item: CleanupTarget, showsRisk: Bool) -> some View {
+    let owner = OwnerResolver.hint(for: item.url, explicitBundleID: item.ownerBundleID)
+    let reason = OwnerDirectory.owner(for: owner).map { "Used by \($0.name) — \(item.reason)" } ?? item.reason
+    let restricted = item.risk == .restricted
+    return HStack(spacing: 11) {
       Toggle(
         "",
         isOn: Binding(
@@ -131,35 +272,43 @@ struct CleanerView: View {
           set: { model.toggleCleanup(item.id, selected: $0) }
         )
       )
+      .toggleStyle(MintCheckboxStyle())
       .labelsHidden()
       .accessibilityLabel("Clean \(item.displayName), \(ByteFormatter.string(item.size))")
-      .disabled(item.risk == .restricted)
+      .disabled(restricted)
+      .opacity(restricted ? 0.4 : 1)
+      .frame(width: 22)
 
-      let owner = OwnerResolver.hint(for: item.url, explicitBundleID: item.ownerBundleID)
-      OwnerIcon(hint: owner, fallbackSymbol: icon(for: item.category))
+      OwnerIcon(hint: owner, fallbackSymbol: icon(for: item.category), size: 30)
 
-      VStack(alignment: .leading, spacing: 3) {
-        HStack(spacing: 7) {
-          Text(item.displayName).fontWeight(.medium)
-          RiskBadge(risk: item.risk)
+      VStack(alignment: .leading, spacing: 2) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          Text(item.displayName)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(AppTheme.ink)
+            .lineLimit(1)
+            .layoutPriority(1)
+          Text((item.url.path as NSString).abbreviatingWithTildeInPath)
+            .font(.system(size: 11, design: .monospaced))
+            .foregroundStyle(AppTheme.ink3)
+            .lineLimit(1).truncationMode(.middle)
+            .help(item.url.path)
         }
-        Text(
-          OwnerDirectory.owner(for: owner).map { "Used by \($0.name) — \(item.reason)" } ?? item.reason
-        )
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        Text(reason)
+          .font(.system(size: 11.5))
+          .foregroundStyle(AppTheme.ink2)
           .lineLimit(1)
-        Text(item.url.path)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-          .lineLimit(1).truncationMode(.middle)
       }
 
-      Spacer()
+      Spacer(minLength: 8)
+
+      if showsRisk { RiskBadge(risk: item.risk) }
+      explainChip(item)
 
       Text(ByteFormatter.string(item.size))
-        .font(.callout.monospacedDigit())
-        .frame(width: 92, alignment: .trailing)
+        .font(AppTheme.number(13, weight: .semibold)).monospacedDigit()
+        .foregroundStyle(AppTheme.ink)
+        .frame(width: 80, alignment: .trailing)
 
       Menu {
         Button("Reveal in Finder") { model.reveal(item.url) }
@@ -170,10 +319,38 @@ struct CleanerView: View {
           .accessibilityLabel("More actions")
       }
       .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
       .frame(width: 28)
     }
-    .padding(.vertical, 10)
-    .listRowBackground(item.isSelected ? AppTheme.selection.opacity(0.45) : AppTheme.surface)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 8)
+    .frame(minHeight: 50)
+    .background(item.isSelected ? AppTheme.selection.opacity(0.35) : Color.clear)
+  }
+
+  /// The iris "Explain" chip. It shows only when Ask MacMint can explain this item, and it
+  /// calls the same action as the Explain menu item.
+  @ViewBuilder
+  private func explainChip(_ item: CleanupTarget) -> some View {
+    if account.aiStatus.allows("explain"), let target = model.aiTarget(for: item) {
+      Button {
+        model.explain(target)
+      } label: {
+        HStack(spacing: 4) {
+          Image(systemName: "sparkles").font(.system(size: 10, weight: .bold))
+          Text("Explain")
+        }
+        .font(.system(size: 11.5, weight: .semibold))
+        .foregroundStyle(AppTheme.Swatch.iris.text)
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(AppTheme.Swatch.iris.tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .help("Ask MacMint what this is")
+      .accessibilityLabel("Explain \(item.displayName) with AI")
+    }
   }
 
   private func icon(for category: CleanupCategory) -> String {
@@ -188,6 +365,21 @@ struct CleanerView: View {
     case .installers: return "shippingbox.and.arrow.backward"
     case .mailAttachments: return "paperclip"
     case .deviceFirmware: return "iphone.and.arrow.forward"
+    }
+  }
+
+  private func swatch(for category: CleanupCategory) -> AppTheme.Swatch {
+    switch category {
+    case .userCaches: return .sky
+    case .userLogs: return .slate
+    case .browserCaches: return .indigo
+    case .developerJunk: return .orange
+    case .deviceBackups: return .violet
+    case .diagnostics: return .amber
+    case .appLeftovers: return .pink
+    case .installers: return .teal
+    case .mailAttachments: return .iris
+    case .deviceFirmware: return .graphite
     }
   }
 }

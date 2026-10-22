@@ -27,31 +27,12 @@ final class AppUpdatesStore: ObservableObject {
 struct AppUpdatesView: View {
   @EnvironmentObject private var model: AppViewModel
   @EnvironmentObject private var store: AppUpdatesStore
+  @Environment(\.areaSwatch) private var swatch
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(alignment: .top) {
-        VStack(alignment: .leading, spacing: 4) {
-          Text(store.available.isEmpty ? "App updates" : "\(store.available.count) update\(store.available.count == 1 ? "" : "s") available")
-            .font(.title2.bold())
-          Text(
-            "Checks the App Store, each app's own update feed, and Homebrew. Only app identifiers and feed addresses are sent — MacMint never downloads or installs other apps' updates."
-          )
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .fixedSize(horizontal: false, vertical: true)
-        }
-        Spacer()
-        Button {
-          store.check(model.apps)
-        } label: {
-          if store.isChecking { ProgressView().controlSize(.small) } else { Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath") }
-        }
-        .buttonStyle(.borderedProminent)
-        .disabled(store.isChecking || model.apps.isEmpty)
-      }
-      .padding(AppTheme.pagePadding)
-      Divider()
+    VStack(spacing: 14) {
+      summary
+        .padding(.horizontal, AppTheme.pagePadding)
 
       if store.updates.isEmpty {
         EmptyState(
@@ -60,34 +41,100 @@ struct AppUpdatesView: View {
             ? "MacMint looks at App Store apps, apps that update themselves, and Homebrew casks."
             : "None of your apps report a way to check for updates.")
       } else {
-        List(store.updates) { update in
-          HStack(spacing: 12) {
-            Image(nsImage: FileIcons.icon(forPath: update.appURL.path))
-              .resizable().frame(width: 34, height: 34)
-            VStack(alignment: .leading, spacing: 3) {
-              Text(update.appName).fontWeight(.medium)
-              HStack(spacing: 6) {
-                Text("Installed \(update.installedVersion)")
-                if let available = update.availableVersion, update.hasUpdate {
-                  Image(systemName: "arrow.right")
-                  Text(available).foregroundStyle(AppTheme.accentText).fontWeight(.semibold)
+        ScrollView {
+          LazyVStack(spacing: 0) {
+            ForEach(store.updates) { update in
+              row(update)
+                .overlay(alignment: .top) {
+                  if update.id != store.updates.first?.id {
+                    Rectangle().fill(AppTheme.divider).frame(height: 1).padding(.leading, 60)
+                  }
                 }
-                if let minOS = update.minimumSystem, update.hasUpdate { Text("• needs macOS \(minOS)") }
-              }
-              .font(.caption)
-              .foregroundStyle(.secondary)
             }
-            Spacer()
-            Text(update.statusLabel).font(.caption).foregroundStyle(update.checkState == .failed ? AppTheme.warning : Color.secondary)
-            StatusPill(title: update.source.label, icon: icon(update.source), tint: .secondary)
-            action(update)
           }
           .padding(.vertical, 4)
-          .opacity(update.hasUpdate || update.availableVersion == nil ? 1 : 0.6)
+          .cardBackground()
+          .padding(.horizontal, AppTheme.pagePadding)
+          .padding(.top, 2)
+          .padding(.bottom, 24)
         }
-        .listStyle(.inset)
       }
     }
+  }
+
+  private var summaryTitle: String {
+    store.available.isEmpty ? "App updates" : "\(store.available.count) update\(store.available.count == 1 ? "" : "s") available"
+  }
+
+  private var summary: some View {
+    HStack(alignment: .center, spacing: 14) {
+      SwatchBadge(symbol: "arrow.down.app", swatch: swatch, size: 36)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(summaryTitle)
+          .font(.system(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(AppTheme.ink)
+          .accessibilityAddTraits(.isHeader)
+        Text(
+          "Checks the App Store, each app's own update feed, and Homebrew. Only app identifiers and feed addresses are sent — MacMint never downloads or installs other apps' updates."
+        )
+        .font(.system(size: 12))
+        .foregroundStyle(AppTheme.ink2)
+        .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 8)
+      Button {
+        store.check(model.apps)
+      } label: {
+        if store.isChecking { ProgressView().controlSize(.small) } else { Label("Check for Updates", systemImage: "arrow.triangle.2.circlepath") }
+      }
+      .buttonStyle(MintButtonStyle(.area))
+      .disabled(store.isChecking || model.apps.isEmpty)
+    }
+    .padding(16)
+    .cardBackground()
+  }
+
+  private func row(_ update: AppUpdate) -> some View {
+    HStack(spacing: 12) {
+      Image(nsImage: FileIcons.icon(forPath: update.appURL.path))
+        .resizable().interpolation(.high).frame(width: 32, height: 32)
+        .accessibilityHidden(true)
+      VStack(alignment: .leading, spacing: 3) {
+        Text(update.appName).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
+        HStack(spacing: 5) {
+          Text("Installed \(update.installedVersion)")
+          if let available = update.availableVersion, update.hasUpdate {
+            Image(systemName: "arrow.right").font(.system(size: 9, weight: .bold))
+            Text(available).foregroundStyle(AppTheme.accentText).fontWeight(.semibold)
+          }
+          if let minOS = update.minimumSystem, update.hasUpdate { Text("· needs macOS \(minOS)") }
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(AppTheme.ink2)
+        .lineLimit(1)
+      }
+      Spacer(minLength: 8)
+      status(update)
+      Chip(title: update.source.label, symbol: icon(update.source), swatch: .slate)
+      action(update)
+    }
+    .padding(.horizontal, 16).padding(.vertical, 8)
+    .frame(minHeight: 50)
+    .opacity(update.hasUpdate || update.availableVersion == nil ? 1 : 0.6)
+  }
+
+  @ViewBuilder
+  private func status(_ update: AppUpdate) -> some View {
+    if update.hasUpdate {
+      Chip(title: update.statusLabel, symbol: "arrow.down.circle.fill", swatch: .mint)
+    } else if update.checkState == .failed {
+      Chip(title: update.statusLabel, symbol: "exclamationmark.triangle.fill", swatch: .amber)
+    } else {
+      Text(update.statusLabel).font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).lineLimit(1)
+    }
+  }
+
+  private func buttonKind(_ update: AppUpdate) -> MintButtonStyle.Kind {
+    update.hasUpdate ? MintButtonStyle.Kind.area : MintButtonStyle.Kind.secondary
   }
 
   @ViewBuilder
@@ -98,17 +145,20 @@ struct AppUpdatesView: View {
         NSWorkspace.shared.open(
           update.hasUpdate ? URL(string: "macappstore://showUpdatesPage")! : (pageURL ?? URL(string: "macappstore://")!))
       }
+      .buttonStyle(MintButtonStyle(buttonKind(update)))
       .controlSize(.small)
     case .sparkle:
       Button(update.hasUpdate ? "Open to Update" : "Open") {
         NSWorkspace.shared.openApplication(at: update.appURL, configuration: NSWorkspace.OpenConfiguration())
       }
+      .buttonStyle(MintButtonStyle(buttonKind(update)))
       .controlSize(.small)
       .help("This app updates itself — use “Check for Updates…” in its app menu.")
     case .unsupported:
       EmptyView()
     case .homebrew(let token):
       Button("Copy Command") { model.copyCommand("brew upgrade --cask \(ShellArgument.quote(token))") }
+        .buttonStyle(MintButtonStyle(.secondary))
         .controlSize(.small)
     }
   }

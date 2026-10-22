@@ -53,34 +53,126 @@ struct BrandMark: View {
   }
 }
 
+/// The form side of the split account sheet: the panel, then any account message.
 private struct GateScaffold<Content: View>: View {
   @ViewBuilder let content: Content
 
   var body: some View {
-    ZStack {
-      LinearGradient(
-        colors: [AppTheme.panel, AppTheme.canvas],
-        startPoint: .top,
-        endPoint: .bottom
-      )
-      .ignoresSafeArea()
+    ScrollView {
+      VStack(alignment: .leading, spacing: 16) {
+        content
+        GateMessages()
+      }
+      .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 24)
+      .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+  }
+}
 
-      GeometryReader { geometry in
-        ScrollView {
-          VStack(spacing: 22) {
-            VStack(spacing: 10) {
-              BrandMark(size: 56)
-              Text("MacMint").font(.system(size: 27, weight: .semibold))
-            }
-            SurfaceCard { content }
-              .frame(width: 420)
-            GateMessages()
-          }
-          .padding(40)
-          .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+/// The brand side of the split account sheet: what Pro adds, and what always stays free.
+private struct AccountBrandPanel: View {
+  let purpose: AccountSheetPurpose
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 10) {
+        BrandMark(size: 32).frame(width: 32, height: 32)
+        VStack(alignment: .leading, spacing: 1) {
+          Text("MacMint").font(.system(size: 15, weight: .bold)).tracking(-0.3)
+          Text("Pro").font(.system(size: 11, weight: .semibold)).foregroundStyle(Color.white.opacity(0.8))
         }
       }
+      .accessibilityElement(children: .combine)
+      .padding(.bottom, 22)
+
+      Text(purpose == .paidAction ? "This step needs Pro" : "What Pro unlocks")
+        .font(.system(size: 17, weight: .bold)).tracking(-0.3)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.bottom, 12)
+      VStack(alignment: .leading, spacing: 10) {
+        perk("trash.fill", "Move reviewed items to the Trash")
+        perk("square.grid.2x2.fill", "Uninstall apps with their leftovers")
+        perk("folder.fill", "Sort your Downloads into folders")
+      }
+
+      Spacer(minLength: 16)
+
+      VStack(alignment: .leading, spacing: 8) {
+        Eyebrow("Always free", color: Color.white.opacity(0.8))
+        perk("magnifyingglass", "Scanning and exploring")
+        perk("clock.arrow.circlepath", "History and Restore")
+      }
+      .padding(12)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+      .accessibilityElement(children: .combine)
     }
+    .foregroundStyle(.white)
+    .padding(.horizontal, 18).padding(.top, 22).padding(.bottom, 18)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .background { panelBackground }
+  }
+
+  private var panelBackground: some View {
+    ZStack {
+      AppTheme.heroGradient
+      Image(systemName: "leaf.fill").font(.system(size: 150)).foregroundStyle(Color.white.opacity(0.06))
+        .rotationEffect(.degrees(-18)).offset(x: 54, y: 24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+    }
+    .clipped()
+    .accessibilityHidden(true)
+  }
+
+  private func perk(_ symbol: String, _ title: String) -> some View {
+    HStack(alignment: .top, spacing: 9) {
+      Image(systemName: symbol).font(.system(size: 10.5, weight: .semibold))
+        .frame(width: 22, height: 22)
+        .background(Color.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .accessibilityHidden(true)
+      Text(title).font(.system(size: 12.5, weight: .medium))
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.top, 3)
+    }
+  }
+}
+
+/// A form panel's title: a small badge and a bold line.
+private struct PanelHeading: View {
+  let symbol: String
+  var swatch: AppTheme.Swatch = .violet
+  let title: String
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 10) {
+      SwatchBadge(symbol: symbol, swatch: swatch, size: 30)
+      Text(title).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(AppTheme.ink)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityAddTraits(.isHeader)
+    }
+  }
+}
+
+/// Text fields on the account forms: surface fill, hairline border, mint ring while focused.
+private struct FieldChrome: ViewModifier {
+  let active: Bool
+  @Environment(\.colorSchemeContrast) private var contrast
+
+  func body(content: Content) -> some View {
+    let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+    return content
+      .textFieldStyle(.plain)
+      .font(.system(size: 13))
+      .padding(.horizontal, 10)
+      .frame(height: 32)
+      .background(AppTheme.surface, in: shape)
+      .overlay(shape.strokeBorder(borderColor, lineWidth: active ? 2 : 1))
+  }
+
+  private var borderColor: Color {
+    if active { return AppTheme.accentText }
+    return contrast == .increased ? AppTheme.ink.opacity(0.6) : AppTheme.borderStrong
   }
 }
 
@@ -88,19 +180,25 @@ private struct GateMessages: View {
   @EnvironmentObject private var account: AccountStore
 
   var body: some View {
-    VStack(spacing: 8) {
+    VStack(alignment: .leading, spacing: 8) {
       if let error = account.errorMessage {
-        Label(error, systemImage: "exclamationmark.triangle.fill")
-          .foregroundStyle(AppTheme.warning)
+        message(error, symbol: "exclamationmark.triangle.fill", color: AppTheme.warning, tint: AppTheme.warningTint)
       }
       if let info = account.infoMessage {
-        Label(info, systemImage: "checkmark.circle.fill")
-          .foregroundStyle(AppTheme.accentText)
+        message(info, symbol: "checkmark.circle.fill", color: AppTheme.accentText, tint: AppTheme.successTint)
       }
     }
-    .font(.callout)
-    .multilineTextAlignment(.center)
-    .frame(width: 420)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private func message(_ text: String, symbol: String, color: Color, tint: Color) -> some View {
+    Label(text, systemImage: symbol)
+      .font(.system(size: 12.5))
+      .foregroundStyle(color)
+      .fixedSize(horizontal: false, vertical: true)
+      .padding(.horizontal, 12).padding(.vertical, 10)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(tint, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
   }
 }
 
@@ -117,28 +215,36 @@ private struct AuthForm: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       VStack(alignment: .leading, spacing: 4) {
-        Text(isCreating ? "Create your account" : "Sign in").font(.title2.bold())
+        Text(isCreating ? "Create your account" : "Sign in")
+          .font(.system(size: 19, weight: .bold)).tracking(-0.3).foregroundStyle(AppTheme.ink)
+          .accessibilityAddTraits(.isHeader)
         Text(
           isCreating
             ? "Create an account to connect a purchase or redeem a code. Local inspection stays available."
             : "Sign in with the same account you use on the MacMint website."
         )
-        .font(.callout)
-        .foregroundStyle(.secondary)
+        .font(.system(size: 12.5))
+        .foregroundStyle(AppTheme.ink2)
+        .fixedSize(horizontal: false, vertical: true)
       }
 
-      if isCreating {
-        TextField("Name", text: $name)
-          .textContentType(.name)
-          .focused($focused, equals: .name)
+      VStack(alignment: .leading, spacing: 10) {
+        if isCreating {
+          TextField("Name", text: $name)
+            .textContentType(.name)
+            .focused($focused, equals: .name)
+            .modifier(FieldChrome(active: focused == .name))
+        }
+        TextField("Email", text: $email)
+          .textContentType(.username)
+          .focused($focused, equals: .email)
+          .modifier(FieldChrome(active: focused == .email))
+        SecureField("Password", text: $password)
+          .textContentType(isCreating ? .newPassword : .password)
+          .focused($focused, equals: .password)
+          .onSubmit(submit)
+          .modifier(FieldChrome(active: focused == .password))
       }
-      TextField("Email", text: $email)
-        .textContentType(.username)
-        .focused($focused, equals: .email)
-      SecureField("Password", text: $password)
-        .textContentType(isCreating ? .newPassword : .password)
-        .focused($focused, equals: .password)
-        .onSubmit(submit)
 
       Button(action: submit) {
         HStack {
@@ -146,8 +252,7 @@ private struct AuthForm: View {
           Text(isCreating ? "Create Account" : "Sign In").frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.large)
+      .buttonStyle(MintButtonStyle(.commit))
       .keyboardShortcut(.defaultAction)
       .disabled(account.isBusy || email.isEmpty || password.isEmpty)
 
@@ -164,11 +269,9 @@ private struct AuthForm: View {
           .disabled(account.isBusy)
         }
       }
-      .buttonStyle(.link)
-        .tint(AppTheme.accentText)
-      .font(.callout)
+      .buttonStyle(MintButtonStyle(.plain))
+      .padding(.horizontal, -6)
     }
-    .textFieldStyle(.roundedBorder)
     .onAppear { focused = .email }
   }
 
@@ -191,13 +294,15 @@ private struct RedeemForm: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
       VStack(alignment: .leading, spacing: 4) {
-        Text("Unlock MacMint").font(.title2.bold())
+        Text("Unlock MacMint").font(.system(size: 19, weight: .bold)).tracking(-0.3).foregroundStyle(AppTheme.ink)
+          .accessibilityAddTraits(.isHeader)
         if let email = account.snapshot?.user.email {
-          Text("Signed in as \(email)").font(.callout).foregroundStyle(.secondary)
+          Text("Signed in as \(email)").font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2)
+            .lineLimit(1).truncationMode(.middle)
         }
       }
       Text("Bought MacMint on the website? Check your purchase to activate this Mac, or enter a redemption code below.")
-        .font(.callout)
+        .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink)
         .fixedSize(horizontal: false, vertical: true)
       Button {
         Task { await account.checkPurchase() }
@@ -205,14 +310,20 @@ private struct RedeemForm: View {
         Label("Check My Purchase", systemImage: "arrow.clockwise")
           .frame(maxWidth: .infinity)
       }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.large)
+      .buttonStyle(MintButtonStyle(.commit))
       .disabled(account.isBusy)
 
+      HStack(spacing: 8) {
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        Text("or use a code").font(.system(size: 11)).foregroundStyle(AppTheme.ink3).fixedSize()
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+      }
+      .accessibilityHidden(true)
+
       TextField("MINT-XXXX-XXXX-XXXX-XXXX", text: $code)
-        .textFieldStyle(.roundedBorder)
-        .font(.body.monospaced())
+        .font(.system(size: 13, design: .monospaced))
         .onSubmit(submit)
+        .modifier(FieldChrome(active: false))
 
       Button(action: submit) {
         HStack {
@@ -220,20 +331,18 @@ private struct RedeemForm: View {
           Text("Redeem Code").frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.bordered)
-      .controlSize(.large)
+      .buttonStyle(MintButtonStyle(.secondary))
       .keyboardShortcut(.defaultAction)
       .disabled(account.isBusy || code.isEmpty)
 
-      Divider()
+      Rectangle().fill(AppTheme.divider).frame(height: 1)
       HStack {
         Button("Buy MacMint") { account.openPurchasePage() }
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
       }
-      .buttonStyle(.link)
-        .tint(AppTheme.accentText)
-      .font(.callout)
+      .buttonStyle(MintButtonStyle(.plain))
+      .padding(.horizontal, -6)
     }
   }
 
@@ -250,32 +359,42 @@ private struct DeviceLimitPanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Text("Device limit reached").font(.title2.bold())
-      Text(message).font(.callout).foregroundStyle(.secondary)
+      PanelHeading(symbol: "laptopcomputer", swatch: .amber, title: "Device limit reached")
+      Text(message).font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2)
+        .fixedSize(horizontal: false, vertical: true)
 
       VStack(spacing: 0) {
         ForEach(devices) { device in
           HStack(spacing: 10) {
-            Image(systemName: "laptopcomputer").foregroundStyle(AppTheme.accentText)
+            SwatchBadge(symbol: "laptopcomputer", swatch: .slate, size: 26)
             VStack(alignment: .leading, spacing: 2) {
-              Text(device.name).fontWeight(.medium)
-              Text(detail(for: device)).font(.caption).foregroundStyle(.secondary)
+              Text(device.name).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink)
+                .lineLimit(1)
+              Text(detail(for: device)).font(.system(size: 11.5)).foregroundStyle(AppTheme.ink2)
+                .lineLimit(1)
             }
-            Spacer()
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
             Button("Remove") { Task { await account.removeDevice(device) } }
+              .buttonStyle(MintButtonStyle(.secondary))
+              .controlSize(.small)
               .disabled(account.isBusy)
           }
-          .padding(.vertical, 8)
-          if device.id != devices.last?.id { Divider() }
+          .padding(.horizontal, 12)
+          .frame(minHeight: 48)
+          if device.id != devices.last?.id {
+            Rectangle().fill(AppTheme.divider).frame(height: 1).padding(.leading, 48)
+          }
         }
       }
+      .cardBackground(radius: 12)
 
       HStack {
         Button("Try Again") { Task { await account.retry() } }
+          .buttonStyle(MintButtonStyle(.secondary))
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
-          .buttonStyle(.link)
-        .tint(AppTheme.accentText)
+          .buttonStyle(MintButtonStyle(.plain))
       }
     }
   }
@@ -295,10 +414,9 @@ private struct DeviceRemovedPanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Label("This Mac was removed from your account", systemImage: "laptopcomputer.slash")
-        .font(.title3.bold())
+      PanelHeading(symbol: "laptopcomputer.slash", swatch: .amber, title: "This Mac was removed from your account")
       Text("MacMint won’t add it back on its own. Activate this Mac to use your plan here again; it takes one of your device slots.")
-        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2).fixedSize(horizontal: false, vertical: true)
       Button {
         Task { await account.activateThisMac() }
       } label: {
@@ -307,17 +425,15 @@ private struct DeviceRemovedPanel: View {
           Text("Activate this Mac").frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.large)
+      .buttonStyle(MintButtonStyle(.commit))
       .disabled(account.isBusy)
       HStack {
         Button("Manage Devices…") { account.openAccountPage() }
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
       }
-      .buttonStyle(.link)
-      .tint(AppTheme.accentText)
-      .font(.callout)
+      .buttonStyle(MintButtonStyle(.plain))
+      .padding(.horizontal, -6)
     }
   }
 }
@@ -327,12 +443,11 @@ private struct AccessLapsedPanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Label("MacMint Pro needs to be checked again", systemImage: "clock.badge.exclamationmark")
-        .font(.title3.bold())
+      PanelHeading(symbol: "clock.badge.exclamationmark", swatch: .amber, title: "MacMint Pro needs to be checked again")
       Text(account.isOffline
         ? "This Mac has been offline longer than MacMint Pro allows without a check, or your access period ended. Connect to the internet and check again."
         : "Your access period may have ended. Check again to confirm your plan for this Mac.")
-        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2).fixedSize(horizontal: false, vertical: true)
       Button {
         Task { await account.retry() }
       } label: {
@@ -341,17 +456,15 @@ private struct AccessLapsedPanel: View {
           Text("Check Again").frame(maxWidth: .infinity)
         }
       }
-      .buttonStyle(.borderedProminent)
-      .controlSize(.large)
+      .buttonStyle(MintButtonStyle(.commit))
       .disabled(account.isBusy)
       HStack {
         Button("Buy MacMint") { account.openPurchasePage() }
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
       }
-      .buttonStyle(.link)
-      .tint(AppTheme.accentText)
-      .font(.callout)
+      .buttonStyle(MintButtonStyle(.plain))
+      .padding(.horizontal, -6)
     }
   }
 }
@@ -362,17 +475,16 @@ private struct FailurePanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 14) {
-      Label("Couldn't verify your account", systemImage: "wifi.exclamationmark")
-        .font(.title3.bold())
-      Text(message).font(.callout).foregroundStyle(.secondary)
+      PanelHeading(symbol: "wifi.exclamationmark", swatch: .amber, title: "Couldn't verify your account")
+      Text(message).font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2)
+        .fixedSize(horizontal: false, vertical: true)
       HStack {
         Button("Try Again") { Task { await account.retry() } }
-          .buttonStyle(.borderedProminent)
+          .buttonStyle(MintButtonStyle(.commit))
           .disabled(account.isBusy)
         Spacer()
         Button("Sign Out") { Task { await account.signOut() } }
-          .buttonStyle(.link)
-        .tint(AppTheme.accentText)
+          .buttonStyle(MintButtonStyle(.plain))
       }
     }
   }
@@ -387,33 +499,40 @@ struct AccountSettingsCard: View {
   var body: some View {
     SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
-        HStack {
-          Label("Account", systemImage: "person.crop.circle.fill").font(.headline)
+        HStack(spacing: 10) {
+          SwatchBadge(symbol: "person.crop.circle.fill", swatch: .violet, size: 26)
+          Text("Account").font(.system(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(AppTheme.ink)
+            .accessibilityAddTraits(.isHeader)
           Spacer()
           if account.isOffline {
             StatusPill(title: "Offline", icon: "wifi.slash", tint: AppTheme.warning)
           }
         }
         if let snapshot = account.snapshot {
-          row("Email", snapshot.user.email)
-          row("Access", account.isUnlocked ? snapshot.entitlement.planDescription : "Verification required")
-          row(
-            "Devices",
-            "\(snapshot.devices.count) of \(max(snapshot.entitlement.maxDevices, 1)) in use")
-          row("This Mac", account.deviceInfo.name)
+          VStack(spacing: 8) {
+            row("Email", snapshot.user.email)
+            row("Access", account.isUnlocked ? snapshot.entitlement.planDescription : "Verification required")
+            row(
+              "Devices",
+              "\(snapshot.devices.count) of \(max(snapshot.entitlement.maxDevices, 1)) in use")
+            row("This Mac", account.deviceInfo.name)
+          }
         }
         if account.snapshot == nil {
           Text("You’re inspecting locally. Scan, explore, and use History without signing in. Connect your account when you’re ready to start a paid operation.")
-            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2).fixedSize(horizontal: false, vertical: true)
         }
-        Divider()
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
         HStack {
           if account.snapshot != nil {
-            Button("Manage Account…") { account.openAccountPage() }
+            Button("Manage Account…") { account.openAccountPage() }.buttonStyle(MintButtonStyle(.secondary))
             Spacer()
-            Button("Sign Out", role: .destructive) { confirmSignOut = true }
+            Button(role: .destructive) { confirmSignOut = true } label: {
+              Text("Sign Out").foregroundStyle(AppTheme.danger)
+            }
+            .buttonStyle(MintButtonStyle(.plain))
           } else {
-            Label("Local inspection", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
+            Label("Local inspection", systemImage: "desktopcomputer").font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3)
             Spacer()
             Button("Connect account") { model.openAccount() }.buttonStyle(MintButtonStyle(prominent: false))
           }
@@ -430,11 +549,11 @@ struct AccountSettingsCard: View {
 
   private func row(_ title: String, _ value: String) -> some View {
     HStack {
-      Text(title)
+      Text(title).foregroundStyle(AppTheme.ink)
       Spacer()
-      Text(value).foregroundStyle(.secondary).textSelection(.enabled)
+      Text(value).foregroundStyle(AppTheme.ink2).textSelection(.enabled)
     }
-    .font(.callout)
+    .font(.system(size: 12.5))
   }
 
 }
@@ -475,41 +594,53 @@ struct AccountOverviewPanel: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      HStack(spacing: 12) {
-        SwatchBadge(symbol: "person.crop.circle.fill", swatch: .mint, size: 40)
-        VStack(alignment: .leading, spacing: 4) {
-          Text(details.email).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+      HStack(spacing: 14) {
+        SwatchBadge(symbol: "person.crop.circle.fill", swatch: .violet, size: 44, glow: true)
+        VStack(alignment: .leading, spacing: 5) {
+          Text(details.email).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(AppTheme.ink)
+            .lineLimit(1).truncationMode(.middle)
             .textSelection(.enabled)
-          StatusPill(title: details.plan, icon: details.planActive ? "checkmark.seal.fill" : "exclamationmark.circle",
-            tint: details.planActive ? AppTheme.accentText : AppTheme.warning)
+          Chip(title: details.plan,
+            symbol: details.planActive ? "checkmark.seal.fill" : "exclamationmark.circle.fill",
+            swatch: details.planActive ? .mint : .amber)
         }
         Spacer(minLength: 0)
       }
-      SurfaceCard {
-        VStack(spacing: 10) {
-          row("Devices", details.devices)
-          row("This Mac", details.thisMac)
-          row("Connection", details.offline ? "Offline · using saved access" : "Online")
-        }
+      VStack(spacing: 0) {
+        row("laptopcomputer.and.iphone", "Devices", details.devices)
+        Rectangle().fill(AppTheme.divider).frame(height: 1).padding(.leading, 42)
+        row("laptopcomputer", "This Mac", details.thisMac)
+        Rectangle().fill(AppTheme.divider).frame(height: 1).padding(.leading, 42)
+        row(details.offline ? "wifi.slash" : "wifi", "Connection", details.offline ? "Offline · using saved access" : "Online")
       }
+      .cardBackground(radius: 14)
       Text("Billing, receipts and the devices on your plan are managed on your account page.")
-        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      HStack(spacing: 10) {
-        Button("Manage Account…", action: manage)
-        Button("Refresh", action: refresh).disabled(busy)
+        .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).fixedSize(horizontal: false, vertical: true)
+      HStack(spacing: 8) {
+        Button("Manage Account…", action: manage).buttonStyle(MintButtonStyle(.secondary))
+        Button("Refresh", action: refresh).buttonStyle(MintButtonStyle(.secondary)).disabled(busy)
         Spacer()
-        Button("Sign Out", role: .destructive, action: signOut)
+        Button(role: .destructive, action: signOut) {
+          Text("Sign Out").foregroundStyle(AppTheme.danger)
+        }
+        .buttonStyle(MintButtonStyle(.plain))
       }
     }
   }
 
-  private func row(_ title: String, _ value: String) -> some View {
-    HStack {
-      Text(title)
-      Spacer()
-      Text(value).foregroundStyle(.secondary).textSelection(.enabled)
+  private func row(_ symbol: String, _ title: String, _ value: String) -> some View {
+    HStack(spacing: 10) {
+      Image(systemName: symbol).font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.ink3)
+        .frame(width: 18)
+        .accessibilityHidden(true)
+      Text(title).font(.system(size: 13)).foregroundStyle(AppTheme.ink)
+      Spacer(minLength: 12)
+      Text(value).font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(AppTheme.ink2)
+        .lineLimit(1).truncationMode(.middle)
+        .textSelection(.enabled)
     }
-    .font(.callout)
+    .padding(.horizontal, 14)
+    .frame(minHeight: 40)
     .accessibilityElement(children: .combine)
   }
 }
@@ -524,18 +655,24 @@ struct AccountAccessSheet: View {
   @State private var confirmSignOut = false
 
   var body: some View {
-    VStack(spacing: 0) {
-      HStack(spacing: 12) {
-        Text(title).font(.headline).accessibilityAddTraits(.isHeader)
-        Spacer()
-        Button(closeTitle) { dismiss() }.keyboardShortcut(.cancelAction)
+    HStack(spacing: 0) {
+      // Sign-in and plan panels are a split sheet: what Pro unlocks beside the form.
+      if usesScaffold { AccountBrandPanel(purpose: purpose).frame(width: 206) }
+      VStack(spacing: 0) {
+        header
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        content
+        SheetFooter {
+          Spacer(minLength: 8)
+          Button(closeTitle) { dismiss() }
+            .buttonStyle(MintButtonStyle(.secondary))
+            .keyboardShortcut(.cancelAction)
+        }
       }
-      .padding(.horizontal, 20).padding(.vertical, 14)
-      Divider()
-      content
+      .frame(maxWidth: .infinity)
     }
     .frame(width: 560, height: usesScaffold ? 560 : nil)
-    .background(AppTheme.canvas)
+    .background(AppTheme.elevated)
     // A waiting action continues once access is confirmed; the account itself stays open.
     .onChange(of: account.isUnlocked) { _, unlocked in if unlocked, purpose == .paidAction { dismiss() } }
     .onExitCommand { dismiss() }
@@ -547,12 +684,30 @@ struct AccountAccessSheet: View {
     }
   }
 
+  private var header: some View {
+    HStack(alignment: .center, spacing: 12) {
+      if !usesScaffold {
+        SwatchBadge(symbol: headerSymbol, swatch: headerSwatch, size: 36, glow: true)
+      }
+      VStack(alignment: .leading, spacing: 2) {
+        Eyebrow(purpose == .paidAction ? "MacMint Pro" : "Account", color: headerSwatch.text)
+        Text(title).font(.system(size: 17, weight: .bold)).tracking(-0.3).foregroundStyle(AppTheme.ink)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityAddTraits(.isHeader)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(.horizontal, 22).padding(.top, 18).padding(.bottom, 14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
   @ViewBuilder private var content: some View {
     switch account.phase {
     case .active where account.accessLapsed: GateScaffold { AccessLapsedPanel() }
     case .active:
       if purpose == .paidAction { accessConfirmed } else { overview }
-    case .checking: ProgressView("Checking account…").padding(50)
+    case .checking:
+      ProgressView("Checking account…").padding(50).frame(maxWidth: .infinity)
     case .signedOut: GateScaffold { AuthForm() }
     case .needsPlan: GateScaffold { RedeemForm() }
     case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
@@ -573,18 +728,24 @@ struct AccountAccessSheet: View {
   }
 
   private var accessConfirmed: some View {
-    VStack(alignment: .leading, spacing: 16) {
-      Label("Your MacMint Pro access is confirmed.", systemImage: "checkmark.seal.fill")
-        .font(.callout.weight(.medium)).foregroundStyle(AppTheme.accentText)
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(spacing: 12) {
+        SwatchBadge(symbol: "checkmark.seal.fill", swatch: .mint, size: 32)
+        Text("Your MacMint Pro access is confirmed.")
+          .font(.system(size: 14, weight: .semibold)).foregroundStyle(AppTheme.accentText)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .accessibilityElement(children: .combine)
       Text(hasDeferredPlan
         ? "Continue to review the items you selected. Nothing moves until you confirm there."
         : "Choose the action again to continue.")
-        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        .font(.system(size: 12.5)).foregroundStyle(AppTheme.ink2).fixedSize(horizontal: false, vertical: true)
       if hasDeferredPlan {
         HStack { Spacer(); Button("Continue to Review") { dismiss() }.buttonStyle(MintButtonStyle()) }
       }
     }
     .padding(24)
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var details: AccountOverviewPanel.Details {
@@ -605,6 +766,16 @@ struct AccountAccessSheet: View {
     case .checking: return false
     default: return true
     }
+  }
+
+  private var headerSymbol: String {
+    if case .active = account.phase, purpose == .paidAction { return "checkmark.seal.fill" }
+    return "person.crop.circle.fill"
+  }
+
+  private var headerSwatch: AppTheme.Swatch {
+    if case .active = account.phase, purpose == .paidAction { return .mint }
+    return .violet
   }
 
   private var title: String {

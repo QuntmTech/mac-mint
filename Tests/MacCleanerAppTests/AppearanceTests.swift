@@ -9,16 +9,25 @@ final class AppearanceTests: XCTestCase {
     for name in [NSAppearance.Name.aqua, .darkAqua] {
       let appearance = try XCTUnwrap(NSAppearance(named: name))
       appearance.performAsCurrentDrawingAppearance {
-        for background in [AppTheme.canvas, AppTheme.surface, AppTheme.panel, AppTheme.heroStart, AppTheme.heroMiddle,
-          AppTheme.heroEnd, AppTheme.selection] {
-          for foreground in [AppTheme.ink, AppTheme.accentText, AppTheme.warning, AppTheme.danger, AppTheme.info, AppTheme.violet] {
+        for background in [AppTheme.canvas, AppTheme.surface, AppTheme.elevated, AppTheme.panel, AppTheme.selection, AppTheme.sidebar] {
+          for foreground in [AppTheme.ink, AppTheme.ink2, AppTheme.accentText, AppTheme.warning, AppTheme.danger, AppTheme.info, AppTheme.violet] {
             XCTAssertGreaterThanOrEqual(contrast(foreground, background), 4.5, "Text contrast in \(name.rawValue)")
           }
         }
+        for background in [AppTheme.canvas, AppTheme.surface, AppTheme.elevated, AppTheme.sidebar] {
+          XCTAssertGreaterThanOrEqual(contrast(AppTheme.ink3, background), 4.5, "Tertiary text in \(name.rawValue)")
+        }
         XCTAssertGreaterThanOrEqual(contrast(.white, AppTheme.accent), 4.5, "Primary button label")
-        for swatch in [AppTheme.Swatch.mint, .sky, .indigo, .violet, .pink, .orange, .amber, .slate, .graphite, .iris, .teal, .rose] {
+        XCTAssertGreaterThanOrEqual(contrast(.white, AppTheme.dangerFill), 4.5, "Destructive button label")
+        for stop in AppTheme.heroStops {
+          XCTAssertGreaterThanOrEqual(contrast(.white, stop), 4.5, "White type on the Overview hero")
+        }
+        for swatch in AppTheme.Swatch.all {
           XCTAssertGreaterThanOrEqual(contrast(.white, swatch.start), 4.5, "White on a colored tile")
           XCTAssertGreaterThanOrEqual(contrast(.white, swatch.end), 4.5, "White on a colored tile")
+          for background in [swatch.tint, AppTheme.canvas, AppTheme.surface] {
+            XCTAssertGreaterThanOrEqual(contrast(swatch.text, background), 4.5, "\(swatch.name) text in \(name.rawValue)")
+          }
         }
       }
     }
