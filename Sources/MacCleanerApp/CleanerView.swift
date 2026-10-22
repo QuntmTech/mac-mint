@@ -34,10 +34,6 @@ struct CleanerView: View {
     model.cleanupTargets.filter { matchesSearch($0) }
   }
 
-  private var filteredTargets: [CleanupTarget] {
-    searchMatches.filter { matchesRisk($0) }
-  }
-
   private func grouped(_ targets: [CleanupTarget]) -> [(CleanupCategory, [CleanupTarget])] {
     CleanupCategory.allCases.compactMap { category in
       let items = targets.filter { $0.category == category }
@@ -202,6 +198,7 @@ struct CleanerView: View {
         cleanupRow(item, showsRisk: mixed)
       }
     }
+    .clipShape(RoundedRectangle(cornerRadius: AppTheme.corner, style: .continuous))
     .cardBackground()
   }
 

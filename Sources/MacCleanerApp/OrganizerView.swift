@@ -38,42 +38,56 @@ struct OrganizerView: View {
   }
 
   var body: some View {
+    let history = showHistory || historyOnly
     VStack(spacing: 0) {
-      PageHeader(title: showHistory || historyOnly ? "Organization history" : "A place for every file",
-        subtitle: "Preview names and moves. You choose what changes; existing files are never overwritten.") {
+      SheetHeader(
+        symbol: history ? "clock.arrow.circlepath" : "folder.badge.gearshape", swatch: .teal,
+        eyebrow: "Organize",
+        title: history ? "Organization history" : "A place for every file",
+        subtitle: "Preview names and moves. Files stay in the folder you choose and never go to the Trash. Existing files are never overwritten."
+      ) {
         Button("Done") { dismiss() }.keyboardShortcut(.cancelAction)
-      }.padding(22)
-      Divider()
-      if let error {
-        Label(error, systemImage: "exclamationmark.triangle").font(.callout)
-          .foregroundStyle(AppTheme.warning).textSelection(.enabled).padding(14)
-        Button("Show organization records in Finder") { model.reveal(model.supportDirectory.appendingPathComponent("Organization")) }.padding(.bottom, 8)
+          .buttonStyle(MintButtonStyle(.secondary))
+          .controlSize(.small)
       }
-      if showHistory || historyOnly { historyContent }
+      Rectangle().fill(AppTheme.divider).frame(height: 1)
+      if let error { errorBanner(error) }
+      if history { historyContent }
       else if let inventory { proposalContent(inventory) }
       else {
         EmptyState(icon: "folder.badge.gearshape", title: "Start with one folder",
           detail: "Inspect up to 100 local documents and media files. Use existing subfolders, edit names, and review every change. App data, repositories, cloud-only files, and nested files are skipped.",
-          actionTitle: "Choose folder…", action: chooseFolder)
+          actionTitle: "Choose folder…", action: chooseFolder,
+          trust: "Files only move inside the folder you pick. Nothing goes to the Trash.",
+          swatch: .teal)
       }
-      Divider()
-      HStack {
-        if !historyOnly { Button(showHistory ? "Back to preview" : "History & Undo") { showHistory.toggle(); Task { await loadHistory() } } }
-        if busy { ProgressView().controlSize(.small); Text("Working…").font(.caption) }
-        else if validationPending {
-          ProgressView().controlSize(.small)
-          Text("Checking changes…").font(.caption).foregroundStyle(.secondary)
+      SheetFooter {
+        if !historyOnly {
+          Button(showHistory ? "Back to preview" : "History & Undo") { showHistory.toggle(); Task { await loadHistory() } }
+            .buttonStyle(MintButtonStyle(.plain))
         }
-        if suggestions.isBusy { Button("Cancel suggestions") { cancelRequest() } }
+        if busy {
+          ProgressView().controlSize(.small)
+          Text("Working…").font(.system(size: 11.5)).foregroundStyle(AppTheme.ink2)
+        } else if validationPending {
+          ProgressView().controlSize(.small)
+          Text("Checking changes…").font(.system(size: 11.5)).foregroundStyle(AppTheme.ink2)
+        }
+        if suggestions.isBusy {
+          Button("Cancel suggestions") { cancelRequest() }
+            .buttonStyle(MintButtonStyle(.secondary))
+            .controlSize(.small)
+        }
         Spacer()
         if inventory != nil && !showHistory && !historyOnly {
           Button("Choose another folder…", action: chooseFolder).disabled(busy)
+            .buttonStyle(MintButtonStyle(.secondary))
           Button("Review \(selected.count) changes") { confirmation = true }
             .buttonStyle(MintButtonStyle()).disabled(busy || validationPending || selected.isEmpty || selected.contains { problems[$0] != nil } || model.isWorking || model.isScanning)
         }
-      }.padding(16)
+      }
     }
-    .background(AppTheme.canvas)
+    .background(AppTheme.elevated)
     .frame(minWidth: 700, idealWidth: 840, maxWidth: 960, minHeight: 520, idealHeight: 660)
     .task { await loadHistory(); if !SmokeTest.isRequested { await account.refreshAIStatus() } }
     .task(id: validationInput) { await validate() }

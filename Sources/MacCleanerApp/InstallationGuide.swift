@@ -16,31 +16,64 @@ struct InstallationGuide: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Label(title, systemImage: location == .installed ? "checkmark.circle.fill" : "app.badge.checkmark")
-        .font(.headline).foregroundStyle(location.suggestsInstallation ? AppTheme.ink : AppTheme.accentText)
-      Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-      if location.suggestsInstallation {
-        HStack(spacing: 12) {
-          Button("Open Applications") { open(URL(fileURLWithPath: "/Applications")) }
-            .buttonStyle(MintButtonStyle(prominent: false))
-          if location == .translocated {
-            Button("Open Downloads") {
-              open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads"))
-            }
-          } else {
-            Button("Show This Copy") { NSWorkspace.shared.activateFileViewerSelecting([bundleURL]) }
+    HStack(alignment: .top, spacing: 12) {
+      SwatchBadge(symbol: symbol, swatch: swatch, size: 30)
+      VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 3) {
+          HStack(spacing: 8) {
+            Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(AppTheme.ink)
+              .accessibilityAddTraits(.isHeader)
+            if location == .installed { Chip(title: "Ready", symbol: "checkmark.circle.fill", swatch: .mint) }
+            if location.suggestsInstallation { Chip(title: "One more step", symbol: "arrow.down.circle.fill", swatch: .amber) }
           }
+          Text(detail).font(.system(size: 12)).foregroundStyle(AppTheme.ink2)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        Text("After copying, quit this copy and open MacMint from Applications. Keep any existing copy until you choose whether to replace it.")
-          .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        if location.suggestsInstallation {
+          HStack(spacing: 8) {
+            Button("Open Applications") { open(URL(fileURLWithPath: "/Applications")) }
+              .buttonStyle(MintButtonStyle(.secondary))
+            if location == .translocated {
+              Button("Open Downloads") {
+                open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads"))
+              }
+              .buttonStyle(MintButtonStyle(.plain))
+            } else {
+              Button("Show This Copy") { NSWorkspace.shared.activateFileViewerSelecting([bundleURL]) }
+                .buttonStyle(MintButtonStyle(.plain))
+            }
+          }
+          .controlSize(.small)
+          Text("After copying, quit this copy and open MacMint from Applications. Keep any existing copy until you choose whether to replace it.")
+            .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).fixedSize(horizontal: false, vertical: true)
+        }
+        if let errorMessage {
+          Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+            .font(.system(size: 12)).foregroundStyle(AppTheme.warning)
+            .fixedSize(horizontal: false, vertical: true)
+        }
       }
-      if let errorMessage { Text(errorMessage).font(.callout).foregroundStyle(AppTheme.warning) }
+      Spacer(minLength: 0)
     }
-    .padding(16)
+    .padding(14)
     .frame(maxWidth: .infinity, alignment: .leading)
-    .background(AppTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-    .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.border))
+    .cardBackground(radius: 14)
+  }
+
+  private var symbol: String {
+    switch location {
+    case .installed: return "checkmark.circle"
+    case .development: return "hammer"
+    case .readOnlyVolume, .translocated, .downloads, .elsewhere: return "app.badge.checkmark"
+    }
+  }
+
+  private var swatch: AppTheme.Swatch {
+    switch location {
+    case .installed: return .mint
+    case .development: return .slate
+    case .readOnlyVolume, .translocated, .downloads, .elsewhere: return .amber
+    }
   }
 
   private var title: String {
