@@ -8,30 +8,42 @@ struct SmartCareList: View {
   @EnvironmentObject private var model: AppViewModel
 
   var body: some View {
-    SurfaceCard {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(alignment: .firstTextBaseline) {
-          VStack(alignment: .leading, spacing: 2) {
-            Text("Recommendations").font(.headline)
-            Text("Ranked by estimated space and how confident MacMint is. Sizes are estimates until the Trash is emptied.")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          Spacer()
-          if let ran = model.smartCareRanAt {
-            Text("Checked \(ran.formatted(.relative(presentation: .named)))")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-        AIReviewPanel()
-        Divider()
-        ForEach(model.displayedRecommendations) { recommendation in
-          RecommendationRow(recommendation: recommendation)
-          if recommendation.id != model.displayedRecommendations.last?.id { Divider() }
-        }
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        Text("Recommended for you").font(.system(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(AppTheme.ink)
+        Spacer()
+        let count = model.displayedRecommendations.count
+        Text("\(count) suggestion\(count == 1 ? "" : "s")" + (model.smartCareRanAt.map { " · checked \($0.formatted(.relative(presentation: .named)))" } ?? ""))
+          .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3)
       }
+      .padding(.horizontal, 18).padding(.top, 14).padding(.bottom, 4)
+      Text("Ranked by estimated space and how sure MacMint is. Sizes are estimates until the Trash is emptied.")
+        .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).fixedSize(horizontal: false, vertical: true)
+        .padding(.horizontal, 18).padding(.bottom, 10)
+      AIReviewPanel().padding(.horizontal, 18).padding(.bottom, 8)
+      ForEach(model.displayedRecommendations) { recommendation in
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        RecommendationRow(recommendation: recommendation).padding(.horizontal, 18).padding(.vertical, 11)
+      }
+    }
+    .cardBackground()
+  }
+}
+
+extension Recommendation.Confidence {
+  /// Rebuildable is mint, Likely unneeded is sky, Worth a look is amber.
+  var swatch: AppTheme.Swatch {
+    switch self {
+    case .safe: return .mint
+    case .likely: return .sky
+    case .review: return .amber
+    }
+  }
+  var symbol: String {
+    switch self {
+    case .safe: return "checkmark.shield.fill"
+    case .likely: return "clock.fill"
+    case .review: return "eye.fill"
     }
   }
 }
@@ -40,69 +52,38 @@ struct RecommendationRow: View {
   let recommendation: Recommendation
   @EnvironmentObject private var model: AppViewModel
 
-  private var tint: Color {
-    switch recommendation.confidence {
-    case .safe: return AppTheme.accentText
-    case .likely: return AppTheme.info
-    case .review: return AppTheme.warning
-    }
-  }
-
   var body: some View {
     HStack(alignment: .center, spacing: 12) {
-      ZStack {
-        RoundedRectangle(cornerRadius: 9, style: .continuous)
-          .fill(tint.opacity(0.12))
-          .frame(width: 36, height: 36)
-        Image(systemName: recommendation.symbol)
-          .font(.system(size: 15, weight: .semibold))
-          .foregroundStyle(tint)
-      }
-      .accessibilityHidden(true)
-
+      SwatchBadge(symbol: recommendation.symbol, swatch: OverviewPresentation.style(recommendation.destination).swatch, size: 32)
       VStack(alignment: .leading, spacing: 3) {
+        Text(recommendation.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink).lineLimit(1)
         HStack(spacing: 6) {
-          Text(recommendation.title).fontWeight(.semibold)
-          StatusPill(title: recommendation.confidence.label, icon: icon, tint: tint)
+          Chip(title: recommendation.confidence.label, symbol: recommendation.confidence.symbol, swatch: recommendation.confidence.swatch)
+          Text(recommendation.detail).font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).lineLimit(1)
         }
-        Text(recommendation.detail)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
-          .fixedSize(horizontal: false, vertical: true)
         AIRecommendationNote(recommendationID: recommendation.id)
       }
-
+      .help(recommendation.detail)
       Spacer(minLength: 8)
-
-      VStack(alignment: .trailing, spacing: 2) {
-        Text("≈ " + ByteFormatter.string(recommendation.bytes))
-          .font(.callout.monospacedDigit().weight(.semibold))
+      VStack(alignment: .trailing, spacing: 1) {
+        Text("≈ " + ByteFormatter.string(recommendation.bytes)).font(AppTheme.number(13, weight: .semibold)).monospacedDigit()
+          .foregroundStyle(AppTheme.ink)
         if recommendation.count > 1 {
-          Text("\(recommendation.count) items").font(.caption2).foregroundStyle(.secondary)
+          Text("\(recommendation.count) items").font(.system(size: 10.5)).foregroundStyle(AppTheme.ink3)
         }
       }
-
       if recommendation.canReview {
         Button("Review") { model.review(recommendation) }
+          .buttonStyle(MintButtonStyle(.secondary)).controlSize(.small)
           .disabled(model.isWorking || model.isScanning)
           .help("Opens the review sheet — nothing moves until you confirm")
       } else {
-        Button("Show") { model.open(recommendation.destination) }
+        Button("Show") { model.open(recommendation.destination) }.buttonStyle(MintButtonStyle(.secondary)).controlSize(.small)
       }
     }
-    .padding(.vertical, 2)
     .accessibilityElement(children: .contain)
     .accessibilityLabel(
       "\(recommendation.title), about \(ByteFormatter.string(recommendation.bytes)), \(recommendation.confidence.label)")
-  }
-
-  private var icon: String {
-    switch recommendation.confidence {
-    case .safe: return "checkmark.shield.fill"
-    case .likely: return "hand.thumbsup.fill"
-    case .review: return "eye.fill"
-    }
   }
 }
 
@@ -110,69 +91,63 @@ struct RecommendationRow: View {
 
 struct SpaceHistoryCard: View {
   @EnvironmentObject private var model: AppViewModel
+  private static let line = AppTheme.hex(0x10B981)
 
   var body: some View {
-    SurfaceCard {
-      VStack(alignment: .leading, spacing: 10) {
-        HStack(alignment: .firstTextBaseline) {
-          Text("Free space").font(.headline)
-          Spacer()
-          if let change = model.weeklySpaceChange {
-            Label(
-              change >= 0
-                ? "\(ByteFormatter.string(change)) more free than a week ago"
-                : "\(ByteFormatter.string(-change)) less free than a week ago",
-              systemImage: change >= 0 ? "arrow.up.right" : "arrow.down.right"
-            )
-            .font(.caption.weight(.medium))
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Free space, last 30 days").font(.system(size: 15, weight: .bold)).tracking(-0.2).foregroundStyle(AppTheme.ink)
+        Spacer()
+        if let change = model.weeklySpaceChange {
+          Text(change >= 0
+            ? "+\(ByteFormatter.string(change)) this week"
+            : "−\(ByteFormatter.string(-change)) this week")
+            .font(.system(size: 12, weight: .semibold)).monospacedDigit()
             .foregroundStyle(change >= 0 ? AppTheme.accentText : AppTheme.warning)
-          }
-        }
-        if model.spaceHistory.count >= 2 {
-          Chart(model.spaceHistory) { sample in
-            AreaMark(
-              x: .value("Day", sample.day, unit: .day),
-              y: .value("Free", Double(sample.freeBytes) / 1_073_741_824)
-            )
-            .foregroundStyle(
-              LinearGradient(
-                colors: [AppTheme.accent.opacity(0.35), AppTheme.accent.opacity(0.05)],
-                startPoint: .top, endPoint: .bottom))
-            LineMark(
-              x: .value("Day", sample.day, unit: .day),
-              y: .value("Free", Double(sample.freeBytes) / 1_073_741_824)
-            )
-            .foregroundStyle(AppTheme.accent)
-          }
-          .chartYAxisLabel("GB free")
-          .frame(height: 120)
-          .accessibilityLabel("Free space over the last \(model.spaceHistory.count) days")
-        } else {
-          Text("MacMint records free space once a day. The trend appears after a second day.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-        if !model.storageGrowth.isEmpty {
-          Divider()
-          Text("Grew since your last Storage map").font(.caption.weight(.semibold))
-          ForEach(model.storageGrowth.prefix(4)) { growth in
-            HStack {
-              Image(systemName: "folder.fill").foregroundStyle(AppTheme.accentText).accessibilityHidden(true)
-              Text(displayPath(growth.path)).lineLimit(1).truncationMode(.middle)
-              Spacer()
-              Text("+\(ByteFormatter.string(growth.delta))")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(AppTheme.warning)
-            }
-            .font(.caption)
-          }
-          Button("Open Storage") { model.selectedSection = .storage }
-            .buttonStyle(.link)
-            .tint(AppTheme.accentText)
-            .font(.caption)
         }
       }
+      if model.spaceHistory.count >= 2 {
+        Chart(model.spaceHistory) { sample in
+          AreaMark(
+            x: .value("Day", sample.day, unit: .day),
+            y: .value("Free", Double(sample.freeBytes) / 1_073_741_824)
+          )
+          .foregroundStyle(
+            LinearGradient(colors: [Self.line.opacity(0.35), Self.line.opacity(0)], startPoint: .top, endPoint: .bottom))
+          LineMark(
+            x: .value("Day", sample.day, unit: .day),
+            y: .value("Free", Double(sample.freeBytes) / 1_073_741_824)
+          )
+          .foregroundStyle(Self.line)
+          .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+        }
+        .chartYAxisLabel("GB free")
+        .frame(height: 120)
+        .accessibilityLabel("Free space over the last \(model.spaceHistory.count) days")
+      } else {
+        Text("MacMint records free space once a day. The trend appears after a second day.")
+          .font(.system(size: 12)).foregroundStyle(AppTheme.ink2)
+      }
+      if !model.storageGrowth.isEmpty {
+        Rectangle().fill(AppTheme.divider).frame(height: 1)
+        Eyebrow("Grew since your last Storage map")
+        ForEach(model.storageGrowth.prefix(4)) { growth in
+          HStack {
+            Image(systemName: "folder.fill").foregroundStyle(AppTheme.Swatch.indigo.text).accessibilityHidden(true)
+            Text(displayPath(growth.path)).lineLimit(1).truncationMode(.middle).foregroundStyle(AppTheme.ink)
+            Spacer()
+            Text("+\(ByteFormatter.string(growth.delta))")
+              .font(AppTheme.number(12, weight: .semibold)).monospacedDigit()
+              .foregroundStyle(AppTheme.warning)
+          }
+          .font(.system(size: 12))
+        }
+        Button("Open Storage") { model.selectedSection = .storage }
+          .buttonStyle(MintButtonStyle(.plain)).controlSize(.small)
+      }
     }
+    .padding(.horizontal, 18).padding(.vertical, 16)
+    .cardBackground()
   }
 
   private func displayPath(_ path: String) -> String {

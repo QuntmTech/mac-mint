@@ -47,24 +47,25 @@ final class AppViewModel: ObservableObject {
       }
     }
 
+    /// Filled symbols: they sit as white glyphs on each area's colored badge.
     var icon: String {
       switch self {
-      case .dashboard: return "sparkles"
+      case .dashboard: return "leaf.fill"
       case .review: return "checklist"
-      case .cleaner: return "trash.circle"
-      case .storage: return "chart.pie"
-      case .developer: return "hammer"
-      case .assistant: return "bubble.left.and.text.bubble.right"
-      case .downloads: return "arrow.down.circle"
-      case .photos: return "photo.on.rectangle.angled"
-      case .removedApps: return "folder.badge.questionmark"
-      case .performance: return "gauge.with.dots.needle.33percent"
-      case .applications: return "app.dashed"
-      case .largeFiles: return "externaldrive"
-      case .duplicates: return "square.on.square"
-      case .startup: return "bolt.horizontal.circle"
+      case .cleaner: return "bubbles.and.sparkles.fill"
+      case .storage: return "chart.pie.fill"
+      case .developer: return "hammer.fill"
+      case .assistant: return "sparkles"
+      case .downloads: return "arrow.down.circle.fill"
+      case .photos: return "photo.fill.on.rectangle.fill"
+      case .removedApps: return "folder.fill.badge.questionmark"
+      case .performance: return "gauge.with.dots.needle.67percent"
+      case .applications: return "square.grid.2x2.fill"
+      case .largeFiles: return "doc.fill"
+      case .duplicates: return "square.fill.on.square.fill"
+      case .startup: return "bolt.horizontal.circle.fill"
       case .history: return "clock.arrow.circlepath"
-      case .settings: return "gearshape"
+      case .settings: return "gearshape.fill"
       }
     }
   }

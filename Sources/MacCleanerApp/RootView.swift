@@ -11,87 +11,49 @@ struct RootView: View {
   @State private var showingOnboarding = false
   @State private var scanAfterSetup = false
   @State private var hoveredSection: AppViewModel.Section?
+  @State private var hoveredFooter: String?
+  @Environment(\.colorScheme) private var colorScheme
   @State private var lastTabs: [AppViewModel.Section: AppViewModel.Section] = [:]
 
   var body: some View {
-    NavigationSplitView {
+    HStack(spacing: 0) {
+      sidebar
+        .frame(width: 228)
+        .background(AppTheme.sidebar.ignoresSafeArea())
+      Rectangle().fill(AppTheme.divider).frame(width: 1).ignoresSafeArea()
       VStack(spacing: 0) {
-        sidebarBrand
-          .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["brand": geometry.frame(in: .global)]) })
-          .padding(.horizontal, 12)
-          .padding(.top, 12)
-          .padding(.bottom, 8)
-
-        VStack(alignment: .leading, spacing: 5) {
-          Text("WORKSPACE").font(.system(size: 9, weight: .semibold)).tracking(1.6)
-            .foregroundStyle(.secondary).padding(.leading, 12).padding(.bottom, 7)
-          ForEach(AppViewModel.Section.primary) { section in
-            sidebarDestination(section)
+        updateBanner
+        workspaceBar
+          .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["workspace controls": geometry.frame(in: .global)]) })
+        GeometryReader { geometry in
+          Group {
+            switch model.selectedSection {
+            case .dashboard: DashboardView()
+            case .review: ReviewQueueView()
+            case .cleaner: CleanerView()
+            case .storage: StorageExplorerView()
+            case .developer: DeveloperView()
+            case .assistant: AssistantView()
+            case .photos: PhotosView()
+            case .removedApps: RemovedAppsView()
+            case .downloads: DownloadsView()
+            case .performance: PerformanceView()
+            case .applications: ApplicationsView()
+            case .largeFiles: LargeFilesView()
+            case .duplicates: DuplicatesView()
+            case .startup: StartupItemsView()
+            case .history: HistoryView()
+            case .settings: SettingsView()
+            }
           }
-        }.padding(.horizontal, 12).padding(.top, 22)
-
-        Spacer(minLength: 16)
-
-        Button { model.showingCommandPalette = true } label: {
-          HStack {
-            Image(systemName: "magnifyingglass")
-            Text("Go to…")
-            Spacer()
-            Text("⌘K").font(.caption).foregroundStyle(.secondary)
-          }.font(.callout).foregroundStyle(.secondary).padding(10)
-            .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-        }.buttonStyle(.plain).tourTarget(.goTo).padding(.horizontal, 16).padding(.bottom, 12)
-        sidebarFooter.padding(.horizontal, 12).padding(.bottom, 12)
-        Divider().padding(.horizontal, 16)
-        HStack(spacing: 8) {
-          Button { model.selectedSection = .settings } label: {
-            Label("Settings", systemImage: "gearshape").font(.callout)
-          }.buttonStyle(.plain)
-            .foregroundStyle(model.selectedSection == .settings ? AppTheme.accentText : Color.secondary)
-          Spacer()
-          Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle") }
-            .buttonStyle(.plain).foregroundStyle(.secondary).help("Help & diagnostics")
-            .accessibilityLabel("Help and diagnostics").tourTarget(.help)
-        }.padding(18)
-      }
-      .background(AppTheme.sidebar)
-      .navigationSplitViewColumnWidth(min: 200, ideal: 216, max: 250)
-    } detail: {
-      GeometryReader { geometry in
-      Group {
-        switch model.selectedSection {
-        case .dashboard: DashboardView()
-        case .review: ReviewQueueView()
-        case .cleaner: CleanerView()
-        case .storage: StorageExplorerView()
-        case .developer: DeveloperView()
-        case .assistant: AssistantView()
-        case .photos: PhotosView()
-        case .removedApps: RemovedAppsView()
-        case .downloads: DownloadsView()
-        case .performance: PerformanceView()
-        case .applications: ApplicationsView()
-        case .largeFiles: LargeFilesView()
-        case .duplicates: DuplicatesView()
-        case .startup: StartupItemsView()
-        case .history: HistoryView()
-        case .settings: SettingsView()
+          .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
         }
-      }
-      .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
-      }
-      .background(AppTheme.canvas)
-      .scrollContentBackground(.hidden)
-      .safeAreaInset(edge: .top, spacing: 0) {
-        VStack(spacing: 0) {
-          updateBanner
-          workspaceBar
-            .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["workspace controls": geometry.frame(in: .global)]) })
-        }
-      }
-      .safeAreaInset(edge: .bottom) {
+        .background(AreaWash())
+        .scrollContentBackground(.hidden)
         operationBar
       }
+      .area(model.selectedSection)
+      .background(AppTheme.canvas.ignoresSafeArea())
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
       // Only a paid action's gate returns to its review; opening the account never does. A
@@ -152,8 +114,7 @@ struct RootView: View {
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
     .overlayPreferenceValue(TourTargetFrames.self) { frames in
       if let index = model.tourStep, GuidedTour.steps.indices.contains(index) {
-        let step = GuidedTour.steps[index]
-        TourOverlay(step: step, index: index, count: GuidedTour.steps.count, targetFrame: frames[step.target],
+        TourOverlay(step: GuidedTour.steps[index], index: index, count: GuidedTour.steps.count, frames: frames,
           back: { model.retreatTour() }, next: { model.advanceTour() }, skip: { model.endTour(finished: false) })
       }
     }
@@ -183,123 +144,306 @@ struct RootView: View {
     }
   }
 
+  // MARK: Sidebar
+
+  /// Brand, Go to…, the seven areas, the disk card, then Settings and Help. In the window the
+  /// traffic lights sit in the title bar strip above the brand row.
+  private var sidebar: some View {
+    VStack(alignment: .leading, spacing: 0) {
+      sidebarBrand
+        .background(GeometryReader { geometry in Color.clear.preference(key: WorkspaceLayoutFrames.self, value: ["brand": geometry.frame(in: .global)]) })
+        .padding(.horizontal, 16).padding(.top, 10).padding(.bottom, 12)
+
+      Button { model.showingCommandPalette = true } label: {
+        HStack(spacing: 7) {
+          Image(systemName: "magnifyingglass").font(.system(size: 12, weight: .medium))
+          Text("Go to…").font(.system(size: 12.5))
+          Spacer(minLength: 0)
+          Text("⌘K").font(.system(size: 10.5, weight: .semibold)).foregroundStyle(AppTheme.ink2)
+            .padding(.horizontal, 5).padding(.vertical, 2)
+            .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+        }
+        .foregroundStyle(AppTheme.ink3)
+        .padding(.leading, 9).padding(.trailing, 6).frame(height: 30)
+        .background(sidebarField, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(AppTheme.border))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+      }
+      .buttonStyle(.plain).help("Go to any page · ⌘K").accessibilityLabel("Go to")
+      .tourTarget(.goTo).padding(.horizontal, 12)
+
+      Eyebrow("Workspace").padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 6)
+      VStack(spacing: 2) {
+        ForEach(AppViewModel.Section.primary) { section in
+          sidebarDestination(section)
+        }
+      }
+      .padding(.horizontal, 10)
+
+      Spacer(minLength: 12)
+      diskCard.padding(.horizontal, 12).padding(.bottom, 10)
+      Rectangle().fill(AppTheme.divider).frame(height: 1)
+      HStack(spacing: 6) {
+        Button { model.selectedSection = .settings } label: {
+          HStack(spacing: 7) {
+            Image(systemName: "gearshape").font(.system(size: 14))
+            Text("Settings").font(.system(size: 12.5, weight: .medium))
+            Spacer(minLength: 0)
+          }
+          .foregroundStyle(model.selectedSection == .settings ? AppTheme.ink : AppTheme.ink2)
+          .padding(.horizontal, 8).frame(height: 28)
+          .background(model.selectedSection == .settings ? sidebarSelected : hoveredFooter == "settings" ? sidebarHover : .clear,
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+          .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain).onHover { hoveredFooter = $0 ? "settings" : nil }
+        .accessibilityAddTraits(model.selectedSection == .settings ? .isSelected : [])
+        Button { model.showingHelp = true } label: {
+          Image(systemName: "questionmark.circle").font(.system(size: 15)).foregroundStyle(AppTheme.ink2)
+            .frame(width: 28, height: 28)
+            .background(hoveredFooter == "help" ? sidebarHover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+        }
+        .buttonStyle(.plain).onHover { hoveredFooter = $0 ? "help" : nil }
+        .help("Help & diagnostics").accessibilityLabel("Help and diagnostics").tourTarget(.help)
+      }
+      .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 12)
+    }
+    .tourTarget(.map)
+  }
+
+  private var sidebarField: Color { colorScheme == .dark ? Color.white.opacity(0.06) : Color.white.opacity(0.78) }
+  private var sidebarHover: Color { colorScheme == .dark ? Color.white.opacity(0.045) : AppTheme.ink.opacity(0.055) }
+  private var sidebarSelected: Color { colorScheme == .dark ? Color.white.opacity(0.085) : AppTheme.surface }
+
+  private var sidebarBrand: some View {
+    HStack(spacing: 10) {
+      BrandMark(size: 40).frame(width: 40, height: 40)
+      VStack(alignment: .leading, spacing: 1) {
+        Text("MacMint").font(.system(size: 15, weight: .bold)).tracking(-0.35).foregroundStyle(AppTheme.ink)
+        Text(account.isUnlocked ? (account.isOffline ? "Pro · offline" : "Pro · this Mac") : "Local inspection")
+          .font(.system(size: 11)).foregroundStyle(AppTheme.ink3)
+      }
+      Spacer(minLength: 0)
+    }
+    .accessibilityElement(children: .combine)
+  }
+
+  private func sidebarDestination(_ section: AppViewModel.Section) -> some View {
+    let selected = model.selectedSection.parent == section
+    let meta = sidebarMeta(section)
+    return Button { model.selectedSection = lastTabs[section] ?? section } label: {
+      HStack(spacing: 10) {
+        SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 24)
+        Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .medium))
+          .foregroundStyle(AppTheme.ink).lineLimit(1)
+        Spacer(minLength: 4)
+        if let meta {
+          Text(meta).font(AppTheme.number(11, weight: .medium)).monospacedDigit()
+            .foregroundStyle(selected ? AppTheme.ink2 : AppTheme.ink3).lineLimit(1)
+        }
+      }
+      .padding(.horizontal, 8).frame(height: 34)
+      .background {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        if selected {
+          if colorScheme == .dark { shape.fill(sidebarSelected) } else { shape.fill(AppTheme.surface).elevation(.card) }
+        } else if hoveredSection == section {
+          shape.fill(sidebarHover)
+        }
+      }
+      .contentShape(RoundedRectangle(cornerRadius: 9))
+    }
+    .buttonStyle(SidebarPressStyle()).onHover { hoveredSection = $0 ? section : nil }
+    .accessibilityAddTraits(selected ? .isSelected : []).accessibilityLabel(section.rawValue)
+    .accessibilityValue(meta ?? "")
+    .help(section.rawValue)
+    .modifier(SidebarTourTarget(section: section))
+  }
+
+  /// What each area found, once a scan has results; nothing before that.
+  private func sidebarMeta(_ section: AppViewModel.Section) -> String? {
+    func bytes(_ value: Int64) -> String? { value > 0 ? ByteFormatter.string(value) : nil }
+    switch section {
+    case .cleaner:
+      return bytes(model.cleanupTargets.reduce(Int64(0)) { OverviewPresentation.add($0, $1.size) })
+    case .storage:
+      return model.storageScan.flatMap { bytes($0.root.allocatedBytes) }
+    case .applications:
+      return model.apps.isEmpty ? nil : "\(model.apps.count)"
+    case .photos:
+      guard let scan = model.photoScan else { return nil }
+      let count = scan.similarGroups.count + scan.screenshots.count + scan.blurry.count
+      return count > 0 ? "\(count)" : nil
+    case .developer:
+      return bytes(model.devItems.reduce(Int64(0)) { OverviewPresentation.add($0, $1.bytes) })
+    case .history:
+      return model.history.isEmpty ? nil : "\(model.history.count)"
+    default:
+      return nil
+    }
+  }
+
+  /// The startup disk: name, share used, the same colored breakdown as Overview's disk bar,
+  /// and what is available.
+  private var diskCard: some View {
+    let stats = model.volume
+    let fraction = stats.isMeasured ? min(1, Double(stats.used) / Double(stats.total)) : 0
+    let bar = OverviewPresentation.bar(OverviewPresentation.categories(model.recommendations), used: stats.used, total: stats.total)
+    return VStack(alignment: .leading, spacing: 9) {
+      HStack(spacing: 7) {
+        Image(systemName: "internaldrive").font(.system(size: 13)).foregroundStyle(AppTheme.ink2)
+        Text(stats.name).lineLimit(1).font(.system(size: 12, weight: .semibold)).foregroundStyle(AppTheme.ink)
+        Spacer(minLength: 4)
+        if stats.isMeasured {
+          Text("\(Int((fraction * 100).rounded()))% used").font(.system(size: 11)).monospacedDigit().foregroundStyle(AppTheme.ink3)
+        }
+      }
+      GeometryReader { geometry in
+        HStack(spacing: 1) {
+          if let bar {
+            ForEach(bar.segments) { segment in
+              Rectangle().fill(segment.category.swatch.gradient).frame(width: max(0, geometry.size.width * segment.fraction))
+            }
+            Rectangle().fill(AppTheme.borderStrong).frame(width: max(0, geometry.size.width * bar.rest))
+          }
+          Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppTheme.track)
+        .clipShape(Capsule())
+      }
+      .frame(height: 6)
+      .accessibilityElement()
+      .accessibilityLabel(stats.isMeasured ? "Disk \(Int(fraction * 100)) percent used" : "Disk space unavailable")
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(stats.isMeasured ? ByteFormatter.string(stats.free) : "—").font(AppTheme.number(17)).tracking(-0.3)
+          .monospacedDigit().foregroundStyle(AppTheme.ink)
+        Text(stats.isMeasured ? "available of " + ByteFormatter.string(stats.total) : "unavailable")
+          .font(.system(size: 11)).foregroundStyle(AppTheme.ink3).lineLimit(1).minimumScaleFactor(0.85)
+      }
+    }
+    .padding(12)
+    .background(colorScheme == .dark ? Color.white.opacity(0.04) : Color.white.opacity(0.6),
+      in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(AppTheme.border))
+  }
+
+  // MARK: Top bar
+
   private var workspaceBar: some View {
-    HStack(spacing: 6) {
+    HStack(spacing: 8) {
       if model.selectedSection.tabs.isEmpty {
-        Label("Your workspace", systemImage: "square.grid.2x2").font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 6) {
+          Image(systemName: model.selectedSection.icon).font(.system(size: 12))
+          Text(model.selectedSection.rawValue).font(.system(size: 12.5))
+        }
+        .foregroundStyle(AppTheme.ink3)
+        .accessibilityElement(children: .combine)
       } else {
-        // One pill-shaped segmented control; the selected tab is a raised capsule with its
-        // area's color badge, which reads in both Light and Dark Mode.
+        // A segmented track; the selected tab is a raised surface with its area's badge.
         HStack(spacing: 2) {
           ForEach(model.selectedSection.tabs) { section in
             let selected = model.selectedSection == section
             Button { model.selectedSection = section } label: {
               HStack(spacing: 6) {
                 if selected {
-                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 16)
+                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 18)
                 } else {
                   Image(systemName: section.icon).font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.secondary).frame(width: 16, height: 16)
+                    .foregroundStyle(AppTheme.ink3).frame(width: 18, height: 18)
                 }
-                Text(section.rawValue).font(.system(size: 12, weight: selected ? .semibold : .medium))
-                  .foregroundStyle(selected ? AppTheme.ink : Color.secondary)
+                Text(section.rawValue).font(.system(size: 12.5, weight: selected ? .semibold : .medium))
+                  .foregroundStyle(selected ? AppTheme.ink : AppTheme.ink2)
               }
-              .padding(.horizontal, 12).padding(.vertical, 5)
+              .padding(.leading, 5).padding(.trailing, 11).frame(height: 27)
               .background {
-                if selected { Capsule().fill(AppTheme.surface).shadow(color: .black.opacity(0.12), radius: 2, y: 1) }
+                if selected { RoundedRectangle(cornerRadius: 7, style: .continuous).fill(AppTheme.surface).elevation(.card) }
               }
-              .contentShape(Capsule())
+              .contentShape(RoundedRectangle(cornerRadius: 7))
             }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
               .modifier(SidebarTourTarget(section: section, tab: true))
           }
         }
-        // 30 pt tall, no taller than the plain tabs it replaced, so pages keep their first fold.
         .padding(2)
-        .background(AppTheme.panel, in: Capsule())
+        .background(AppTheme.panel, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
       }
       Spacer(minLength: 8)
       if account.aiAvailable {
         Button { model.selectedSection = .assistant } label: {
-          Image(systemName: "sparkles").font(.system(size: 15)).frame(width: 30, height: 30)
-        }.buttonStyle(.plain).foregroundStyle(AppTheme.accentText)
+          HStack(spacing: 6) {
+            Image(systemName: "sparkles").font(.system(size: 13, weight: .semibold))
+            Text("Ask").font(.system(size: 12.5, weight: .semibold))
+          }
+          .foregroundStyle(AppTheme.Swatch.iris.text)
+          .padding(.leading, 9).padding(.trailing, 11).frame(height: 30)
+          .background(AppTheme.Swatch.iris.tint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+          .contentShape(RoundedRectangle(cornerRadius: 8))
+        }.buttonStyle(.plain)
           .help("Ask MacMint").accessibilityLabel("Ask MacMint")
       }
-      Button { model.selectedSection = .review } label: {
-        HStack(spacing: 7) {
-          Image(systemName: "checklist")
-          Text("Review").fontWeight(.medium)
-          if model.queuedCount > 0 {
-            Text("\(model.queuedCount)").font(.system(size: 10, weight: .semibold)).monospacedDigit()
-              .foregroundStyle(.white).padding(.horizontal, 6).padding(.vertical, 2)
-              .background(AppTheme.accent, in: Capsule())
-          }
-        }.font(.system(size: 12)).padding(.horizontal, 11).padding(.vertical, 8)
-          .foregroundStyle(AppTheme.accentText)
-          .background(model.queuedCount > 0 || model.selectedSection == .review ? AppTheme.selection : AppTheme.surface,
-            in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8))
-      }.buttonStyle(.plain).help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
-        .tourTarget(.review)
-      Button { model.openAccount() } label: {
-        Image(systemName: "person.crop.circle").font(.system(size: 19)).frame(width: 32, height: 32)
-      }.buttonStyle(.plain).foregroundStyle(.secondary)
+      reviewButton
+      Button { model.openAccount() } label: { avatar }
+        .buttonStyle(.plain)
         .help(account.isUnlocked ? "Account" : "Connect your MacMint account")
         .accessibilityLabel(account.isUnlocked ? "Account" : "Connect your MacMint account")
-    }.padding(.horizontal, AppTheme.pagePadding).padding(.vertical, 10)
-      .background(AppTheme.canvas).overlay(alignment: .bottom) { Divider().opacity(0.5) }
-  }
-
-  private var sidebarBrand: some View {
-    HStack(spacing: 11) {
-      BrandMark().frame(width: 36, height: 36)
-      VStack(alignment: .leading, spacing: 1) {
-        Text("MacMint")
-          .font(.system(size: 18, weight: .semibold)).tracking(-0.4)
-        Text(account.isUnlocked ? (account.isOffline ? "Pro • Offline" : "Pro") : "Local inspection")
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-      Spacer()
     }
+    .padding(.leading, 20).padding(.trailing, 16).frame(height: 52)
+    .background(AppTheme.canvas)
+    .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.divider).frame(height: 1) }
   }
 
-  private func sidebarDestination(_ section: AppViewModel.Section) -> some View {
-    let selected = model.selectedSection.parent == section
-    return Button { model.selectedSection = lastTabs[section] ?? section } label: {
-      HStack(spacing: 11) {
-        SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 24)
-        Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .medium))
-        Spacer(minLength: 0)
-        if selected { Circle().fill(AppTheme.accentText).frame(width: 5, height: 5) }
-      }.foregroundStyle(selected ? AppTheme.ink : AppTheme.ink.opacity(0.8))
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(selected ? AppTheme.selection : hoveredSection == section ? AppTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 10))
-        .contentShape(RoundedRectangle(cornerRadius: 10))
-    }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }
-      .accessibilityAddTraits(selected ? .isSelected : []).accessibilityLabel(section.rawValue)
-      .help(section.rawValue)
-      .modifier(SidebarTourTarget(section: section))
+  /// The strongest control in the window once something is picked: filled mint with a count.
+  private var reviewButton: some View {
+    let count = model.queuedCount
+    let filled = count > 0
+    return Button { model.selectedSection = .review } label: {
+      HStack(spacing: 7) {
+        Image(systemName: "checklist").font(.system(size: 13, weight: .semibold))
+        Text("Review").font(.system(size: 12.5, weight: .semibold))
+        Text("\(count)").font(AppTheme.number(11)).monospacedDigit()
+          .foregroundStyle(filled ? AppTheme.accent : AppTheme.ink2)
+          .padding(.horizontal, 6).frame(minWidth: 20, minHeight: 20)
+          .background(filled ? Color.white : AppTheme.panel, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+      }
+      .foregroundStyle(filled ? Color.white : AppTheme.ink)
+      .padding(.leading, 10).padding(.trailing, 5).frame(height: 30)
+      .background {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        if filled {
+          shape.fill(AppTheme.commitGradient).shadow(color: AppTheme.accent.opacity(0.35), radius: 6, y: 3)
+        } else {
+          shape.fill(AppTheme.surface).overlay(shape.strokeBorder(model.selectedSection == .review ? AppTheme.accentText : AppTheme.border))
+        }
+      }
+      .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+    .buttonStyle(SidebarPressStyle())
+    .help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
+    .accessibilityLabel("Review, \(count) item\(count == 1 ? "" : "s") selected")
+    .tourTarget(.review)
   }
 
-  private var sidebarFooter: some View {
-    let stats = model.volume
-    let fraction = stats.total > 0 ? min(1, Double(stats.used) / Double(stats.total)) : 0
-    return VStack(alignment: .leading, spacing: 11) {
-      HStack(spacing: 8) {
-        Image(systemName: "internaldrive").foregroundStyle(AppTheme.accentText)
-        Text(stats.name).lineLimit(1).font(.caption.weight(.semibold))
+  private var avatar: some View {
+    let initials = account.snapshot.map { snapshot in
+      String(snapshot.user.email.prefix { $0 != "@" }.filter(\.isLetter).prefix(2)).uppercased()
+    } ?? ""
+    return ZStack {
+      Circle().fill(LinearGradient(colors: [AppTheme.Swatch.violet.start, AppTheme.Swatch.pink.start],
+        startPoint: .topLeading, endPoint: .bottomTrailing))
+      if initials.isEmpty {
+        Image(systemName: "person.fill").font(.system(size: 13, weight: .semibold))
+      } else {
+        Text(initials).font(.system(size: 11.5, weight: .bold))
       }
-      GeometryReader { geometry in
-        Capsule().fill(AppTheme.border)
-          .overlay(alignment: .leading) {
-            Capsule().fill(AppTheme.accentText).frame(width: geometry.size.width * fraction)
-          }
-      }.frame(height: 5).accessibilityLabel(stats.isMeasured ? "Disk \(Int(fraction * 100)) percent used" : "Disk space unavailable")
-      HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Text(stats.isMeasured ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
-        Text(stats.isMeasured ? "available" : "unavailable").font(.caption).foregroundStyle(.secondary)
-      }
-    }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
+    }
+    .foregroundStyle(.white)
+    .frame(width: 30, height: 30)
+    .overlay(Circle().strokeBorder(AppTheme.border, lineWidth: 1).padding(-3))
+    .padding(3)
   }
+
+  // MARK: Update banner and status bar
 
   /// One banner for every update source. Sparkle installs whenever it has the update; the
   /// download page remains the fallback for the server's required/available notice.
@@ -310,26 +454,23 @@ struct RootView: View {
         text: "The update is ready. MacMint restarts to install it when the current operation finishes.")
     } else if let update = updater.reminder {
       updateBannerRow(icon: "arrow.down.circle.fill", tint: AppTheme.accentText,
-        text: "MacMint \(update.title) is available — you have \(UpdaterController.current.versionAndBuild).") {
+        text: "MacMint \(update.title) is ready. You have \(UpdaterController.current.versionAndBuild). It installs when you choose.") {
         Button("Install…") { updater.checkForUpdates() }
-          .buttonStyle(.borderedProminent)
-          .controlSize(.small)
+          .buttonStyle(MintButtonStyle(.commit)).controlSize(.small)
         dismissButton { updater.dismissReminder() }
       }
     } else if let release = updates.bannerRelease {
       updateBannerRow(icon: updates.isRequired ? "exclamationmark.triangle.fill" : "arrow.down.circle.fill",
-        tint: updates.isRequired ? .orange : AppTheme.accentText,
+        tint: updates.isRequired ? AppTheme.warning : AppTheme.accentText,
         text: updates.isRequired
           ? "This version of MacMint is no longer supported. Please update to \(release.version)."
-          : "MacMint \(release.version) is available — you have \(UpdateService.currentVersion).") {
+          : "MacMint \(release.version) is available. You have \(UpdateService.currentVersion).") {
         if updater.availableUpdate != nil {
           Button("Install…") { updater.checkForUpdates() }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .buttonStyle(MintButtonStyle(.commit)).controlSize(.small)
         } else {
           Button("Download") { updates.openDownload(release) }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .buttonStyle(MintButtonStyle(.commit)).controlSize(.small)
         }
         if !updates.isRequired {
           dismissButton { updates.dismissedVersion = release.version }
@@ -341,23 +482,23 @@ struct RootView: View {
   private func updateBannerRow<Actions: View>(icon: String, tint: Color, text: String,
     @ViewBuilder actions: () -> Actions = { EmptyView() }) -> some View {
     HStack(spacing: 10) {
-      Image(systemName: icon).foregroundStyle(tint)
-      Text(text).font(.callout)
+      Image(systemName: icon).font(.system(size: 15)).foregroundStyle(tint)
+      Text(text).font(.system(size: 12.5)).foregroundStyle(AppTheme.ink).fixedSize(horizontal: false, vertical: true)
       Spacer()
       actions()
     }
-    .padding(.horizontal, 16)
+    .padding(.leading, 20).padding(.trailing, 16)
     .padding(.vertical, 8)
-    .background(AppTheme.surface)
-    .overlay(alignment: .bottom) { Divider() }
+    .background(LinearGradient(colors: [AppTheme.Swatch.mint.tint, AppTheme.Swatch.sky.tint], startPoint: .leading, endPoint: .trailing))
+    .overlay(alignment: .bottom) { Rectangle().fill(AppTheme.divider).frame(height: 1) }
   }
 
   private func dismissButton(_ action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      Image(systemName: "xmark")
-        .accessibilityLabel("Dismiss")
+      Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(AppTheme.ink2)
+        .frame(width: 24, height: 24).contentShape(Rectangle())
     }
-    .buttonStyle(.borderless)
+    .buttonStyle(.plain)
     .accessibilityLabel("Dismiss update notice")
   }
 
@@ -370,20 +511,17 @@ struct RootView: View {
       } else if model.isScanning || model.isWorking || model.isPreparingPlan {
         ProgressView().controlSize(.small)
       } else {
-        Image(
-          systemName: model.scanIssues.isEmpty
-            ? "leaf" : "exclamationmark.triangle.fill"
-        )
-        .foregroundStyle(model.scanIssues.isEmpty ? AppTheme.accentText : .orange)
+        Image(systemName: "leaf.fill").font(.system(size: 12)).foregroundStyle(AppTheme.brand)
+          .accessibilityHidden(true)
       }
 
-      VStack(alignment: .leading, spacing: 1) {
+      HStack(spacing: 6) {
         if let title = model.operationTitle {
-          Text(title).font(.caption.weight(.semibold))
+          Text(title).font(.system(size: 11.5, weight: .semibold)).foregroundStyle(AppTheme.ink)
         }
         Text(model.statusMessage)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          .font(.system(size: 11.5))
+          .foregroundStyle(AppTheme.ink2)
           .lineLimit(1)
       }
 
@@ -391,56 +529,61 @@ struct RootView: View {
 
       if model.isWorking, let progress = model.operationProgress {
         Text("\(progress.completed) of \(progress.total)")
-          .font(.caption.monospacedDigit())
-          .foregroundStyle(.secondary)
-        ProgressView(value: progress.fraction)
-          .frame(width: 140)
+          .font(AppTheme.number(11.5, weight: .semibold)).monospacedDigit()
+          .foregroundStyle(AppTheme.ink2)
+        GeometryReader { geometry in
+          Capsule().fill(AppTheme.track).overlay(alignment: .leading) {
+            Capsule().fill(AppTheme.commitGradient).frame(width: geometry.size.width * min(1, max(0, progress.fraction)))
+          }
+        }
+        .frame(width: 140, height: 5)
+        .accessibilityHidden(true)
       }
 
       if model.isScanning || model.isWorking || model.isPreparingPlan {
         Button(model.isWorking ? "Stop" : "Cancel") { model.cancelCurrentOperation() }
-          .controlSize(.small)
+          .buttonStyle(MintButtonStyle(.secondary)).controlSize(.small)
       }
 
       if !model.scanIssues.isEmpty {
         Button {
           model.showingScanIssues = true
         } label: {
-          Label(
-            "\(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")",
-            systemImage: "exclamationmark.triangle")
+          Chip(title: "\(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")",
+            symbol: "exclamationmark.triangle.fill", swatch: .amber)
         }
-        .controlSize(.small)
+        .buttonStyle(.plain)
+        .help("Show what the scan skipped")
       }
     }
     .padding(.horizontal, 16)
-    .padding(.vertical, 8)
-    .background(AppTheme.surface)
-    .overlay(alignment: .top) { Divider() }
+    .frame(minHeight: 32)
+    .padding(.vertical, 2)
+    .background(colorScheme == .dark ? AppTheme.hex(0x131917) : AppTheme.hex(0xFAFBFA))
+    .overlay(alignment: .top) { Rectangle().fill(AppTheme.divider).frame(height: 1) }
   }
 }
 
-/// Sidebar destinations and tabs that are stops on the guided tour.
+/// Sidebar rows and the Review button sink slightly while pressed.
+private struct SidebarPressStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label.scaleEffect(configuration.isPressed ? 0.98 : 1)
+  }
+}
+
+/// Sidebar areas and tabs on the guided tour: every area reports its frame for the map step,
+/// History is its own stop, and the Performance tab stands for tabs.
 private struct SidebarTourTarget: ViewModifier {
   let section: AppViewModel.Section
-  /// Tabs mark only tabs the tour visits; the sidebar owns each area's own stop.
   var tab = false
 
   func body(content: Content) -> some View {
-    if let target = Self.target(section), !tab || section == .performance { content.tourTarget(target) } else { content }
-  }
-
-  static func target(_ section: AppViewModel.Section) -> TourTarget? {
-    switch section {
-    case .dashboard: return .overview
-    case .performance: return .performance
-    case .cleaner: return .cleanup
-    case .storage: return .storage
-    case .applications: return .apps
-    case .photos: return .photos
-    case .developer: return .developer
-    case .history: return .history
-    default: return nil
+    if tab {
+      if section == .performance { content.tourTarget(.performance) } else { content }
+    } else if section == .history {
+      content.tourTarget(.area(section)).tourTarget(.history)
+    } else {
+      content.tourTarget(.area(section))
     }
   }
 }

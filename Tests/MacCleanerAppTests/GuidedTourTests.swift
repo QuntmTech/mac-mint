@@ -4,13 +4,17 @@ import XCTest
 
 @MainActor
 final class GuidedTourTests: XCTestCase {
-  private let card = CGSize(width: 320, height: 196)
+  private let card = CGSize(width: 340, height: 214)
   private let window = CGSize(width: 1200, height: 800)
 
   func testTheCardSitsBesideSidebarItemsBelowTopControlsAndInsideTheWindow() {
     let sidebarItem = CGRect(x: 12, y: 200, width: 190, height: 40)
     let beside = TourLayout.cardOrigin(target: sidebarItem, card: card, bounds: window)
     XCTAssertEqual(beside, CGPoint(x: sidebarItem.maxX + TourLayout.gap, y: sidebarItem.midY - card.height / 2))
+
+    let sidebar = CGRect(x: 0, y: 40, width: 228, height: 700)
+    let map = TourLayout.cardOrigin(target: sidebar, card: card, bounds: window)
+    XCTAssertEqual(map.x, sidebar.maxX + TourLayout.gap, "The whole sidebar keeps the card beside it")
 
     let reviewButton = CGRect(x: 1080, y: 10, width: 100, height: 32)
     let below = TourLayout.cardOrigin(target: reviewButton, card: card, bounds: window)
@@ -21,7 +25,7 @@ final class GuidedTourTests: XCTestCase {
     let corner = TourLayout.cardOrigin(target: goTo, card: card, bounds: window)
     XCTAssertEqual(corner.y + card.height, window.height - TourLayout.margin, "Never past the bottom edge")
 
-    XCTAssertEqual(TourLayout.cardOrigin(target: nil, card: card, bounds: window), CGPoint(x: 440, y: 302),
+    XCTAssertEqual(TourLayout.cardOrigin(target: nil, card: card, bounds: window), CGPoint(x: 430, y: 293),
       "A target that isn't on screen centers the card")
     let tiny = TourLayout.cardOrigin(target: nil, card: card, bounds: CGSize(width: 200, height: 100))
     XCTAssertEqual(tiny, CGPoint(x: TourLayout.margin, y: TourLayout.margin))
@@ -47,7 +51,9 @@ final class GuidedTourTests: XCTestCase {
         visited.insert(section)
       }
     }
-    XCTAssertTrue(visited.isSuperset(of: [.cleaner, .storage, .applications, .photos, .developer, .history]))
+    XCTAssertTrue(visited.contains(.history), "History and Restore is shown on its own page")
+    XCTAssertEqual(GuidedTour.steps.count, 6, "A one-minute tour")
+    XCTAssertEqual(GuidedTour.steps.first?.target, .map, "It starts with the map of every area")
     model.retreatTour()
     XCTAssertEqual(model.tourStep, GuidedTour.steps.count - 2)
     model.advanceTour()
