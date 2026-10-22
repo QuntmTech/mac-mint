@@ -319,15 +319,9 @@ struct OnboardingView: View {
       Label("Install and open MacMint from Applications before granting this access.", systemImage: "app.badge.checkmark")
         .font(.system(size: 12)).foregroundStyle(AppTheme.ink)
         .fixedSize(horizontal: false, vertical: true)
-      HStack(spacing: 8) {
-        Button("Open System Settings") { permissions.open(.fullDiskAccess) }
-          .buttonStyle(MintButtonStyle(.area))
-          .environment(\.areaSwatch, .mint)
-          .help(PermissionSettingsPane.fullDiskAccess.path)
-        Button(showingSteps ? "Hide Steps" : "Show Me How") { showingSteps.toggle() }
-          .buttonStyle(MintButtonStyle(.secondary))
-        Button("Reveal This App") { permissions.revealThisApp() }
-          .buttonStyle(MintButtonStyle(.plain))
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) { fullDiskAccessButtons }
+        VStack(alignment: .leading, spacing: 8) { fullDiskAccessButtons }
       }
       if showingSteps {
         VStack(alignment: .leading, spacing: 8) {
@@ -345,6 +339,17 @@ struct OnboardingView: View {
     }
     .padding(16)
     .cardBackground()
+  }
+
+  @ViewBuilder private var fullDiskAccessButtons: some View {
+    Button("Open System Settings") { permissions.open(.fullDiskAccess) }
+      .buttonStyle(MintButtonStyle(.area))
+      .environment(\.areaSwatch, .mint)
+      .help(PermissionSettingsPane.fullDiskAccess.path)
+    Button(showingSteps ? "Hide Steps" : "Show Me How") { showingSteps.toggle() }
+      .buttonStyle(MintButtonStyle(.secondary))
+    Button("Reveal This App") { permissions.revealThisApp() }
+      .buttonStyle(MintButtonStyle(.plain))
   }
 
   private func numberedStep(_ number: Int, _ text: String) -> some View {

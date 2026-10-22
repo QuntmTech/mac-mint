@@ -120,6 +120,7 @@ private struct MenuBarReadings: View {
           title: "CPU",
           value: snapshot.cpuUsage.map { "\(Int(($0 * 100).rounded()))%" } ?? "…",
           detail: "all cores", swatch: .sky, fraction: snapshot.cpuUsage, action: performance)
+          .help("Open Performance")
       }
       if !busiest.isEmpty { busiestList }
     }
@@ -279,7 +280,6 @@ struct MetricTile: View {
   var body: some View {
     if let action {
       Button(action: action) { tile }.buttonStyle(TileButtonStyle())
-        .help("Open " + title)
     } else {
       tile
     }
