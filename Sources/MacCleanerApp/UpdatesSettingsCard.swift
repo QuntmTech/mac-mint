@@ -1,3 +1,4 @@
+import AppKit
 import MacCleanerCore
 import SwiftUI
 
@@ -8,61 +9,78 @@ struct UpdatesSettingsCard: View {
   @EnvironmentObject private var updates: UpdateService
 
   var body: some View {
-    SurfaceCard {
-      VStack(alignment: .leading, spacing: 12) {
-        HStack(alignment: .firstTextBaseline) {
-          Label("Updates", systemImage: "arrow.triangle.2.circlepath").font(.headline)
-          Spacer()
-          Button("Check for Updates…") {
-            updater.checkForUpdates()
-            Task { await updates.check() }
-          }
-          .disabled(!updater.canCheckForUpdates)
+    SettingsCard(spacing: 0) {
+      SettingsCardHeader(symbol: "arrow.triangle.2.circlepath", swatch: .teal, title: "Updates") {
+        Button("Check for Updates…") {
+          updater.checkForUpdates()
+          Task { await updates.check() }
         }
-        Text(UpdaterController.current.displayString + " · " + channelName + " channel")
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .textSelection(.enabled)
-        status.font(.callout)
-        Divider()
-        Toggle("Automatically check for updates", isOn: $updater.automaticallyChecks)
-        Toggle("Automatically download and install updates", isOn: $updater.automaticallyInstalls)
-          .disabled(!updater.automaticallyChecks || !updater.allowsAutomaticInstalls)
-        Toggle("Receive developer builds (may be unstable)", isOn: $updater.receivesDeveloperBuilds)
+        .buttonStyle(MintButtonStyle(.secondary))
+        .controlSize(.small)
+        .disabled(!updater.canCheckForUpdates)
+      }
+      .padding(.bottom, 12)
+      HStack(alignment: .center, spacing: 12) {
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+          .resizable()
+          .interpolation(.high)
+          .frame(width: 40, height: 40)
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(UpdaterController.current.displayString + " · " + channelName + " channel")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(AppTheme.ink)
+            .textSelection(.enabled)
+          status
+            .font(.system(size: 12))
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(.bottom, 10)
+      SettingsToggleRow(title: "Automatically check for updates", isOn: $updater.automaticallyChecks)
+      SettingsToggleRow(title: "Automatically download and install updates", isOn: $updater.automaticallyInstalls)
+        .disabled(!updater.automaticallyChecks || !updater.allowsAutomaticInstalls)
+      SettingsToggleRow(title: "Receive developer builds (may be unstable)", isOn: $updater.receivesDeveloperBuilds)
+      VStack(alignment: .leading, spacing: 4) {
+        Rectangle().fill(AppTheme.divider).frame(height: 1).padding(.bottom, 6)
         Text(channelNote)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          .font(.system(size: 11.5))
+          .foregroundStyle(AppTheme.ink3)
           .fixedSize(horizontal: false, vertical: true)
         Text(lastChecked)
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          .font(.system(size: 11.5))
+          .foregroundStyle(AppTheme.ink3)
       }
-      .toggleStyle(.switch)
     }
   }
 
   @ViewBuilder
   private var status: some View {
     if let error = updater.startError {
-      Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
+      Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(AppTheme.warning)
     } else if updater.isWaitingForWork {
       Label("The update installs and MacMint restarts when the current operation finishes.",
         systemImage: "clock.arrow.circlepath")
         .foregroundStyle(AppTheme.accentText)
     } else if let update = updater.availableUpdate {
-      HStack {
+      HStack(spacing: 8) {
         Label("Version \(update.title) is available", systemImage: "arrow.down.circle.fill")
           .foregroundStyle(AppTheme.accentText)
-        Button("Install…") { updater.checkForUpdates() }.controlSize(.small)
+        Button("Install…") { updater.checkForUpdates() }
+          .buttonStyle(MintButtonStyle(.commit))
+          .controlSize(.small)
       }
     } else if case .required(let release, let minimum) = updates.status {
-      HStack {
+      HStack(spacing: 8) {
         Label("Update required (minimum \(minimum))", systemImage: "exclamationmark.triangle.fill")
           .foregroundStyle(AppTheme.warning)
-        Button("Download") { updates.openDownload(release) }.controlSize(.small)
+        Button("Download") { updates.openDownload(release) }
+          .buttonStyle(MintButtonStyle(.secondary))
+          .controlSize(.small)
       }
     } else if let error = updates.checkError {
-      Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
+      Label(error, systemImage: "exclamationmark.triangle.fill").foregroundStyle(AppTheme.warning)
     } else if let result = updater.lastResult {
       switch result {
       case .newest:
@@ -70,7 +88,7 @@ struct UpdatesSettingsCard: View {
           .foregroundStyle(AppTheme.accentText)
       case .newerThanChannel:
         Label("This build is newer than anything on the \(channelName) channel.", systemImage: "checkmark.circle")
-          .foregroundStyle(.secondary)
+          .foregroundStyle(AppTheme.ink2)
       case .needsNewerMacOS:
         Label("A newer version is available but needs a newer version of macOS.", systemImage: "exclamationmark.circle")
           .foregroundStyle(AppTheme.warning)
