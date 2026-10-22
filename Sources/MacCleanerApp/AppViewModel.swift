@@ -73,6 +73,8 @@ final class AppViewModel: ObservableObject {
   /// Set with `showingAccount`: the account itself, or the gate of a paid action.
   @Published var accountPurpose: AccountSheetPurpose = .account
   @Published var showingHelp = false
+  /// The guided tour's current step; nil when the tour isn't showing.
+  @Published var tourStep: Int?
   @Published var deferredPlan: OperationPlan?
   var authorizeRemoval: () -> Bool = { false }
 

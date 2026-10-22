@@ -40,7 +40,7 @@ struct RootView: View {
             Text("⌘K").font(.caption).foregroundStyle(.secondary)
           }.font(.callout).foregroundStyle(.secondary).padding(10)
             .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-        }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 12)
+        }.buttonStyle(.plain).tourTarget(.goTo).padding(.horizontal, 16).padding(.bottom, 12)
         sidebarFooter.padding(.horizontal, 12).padding(.bottom, 12)
         Divider().padding(.horizontal, 16)
         HStack(spacing: 8) {
@@ -51,7 +51,7 @@ struct RootView: View {
           Spacer()
           Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle") }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Help & diagnostics")
-            .accessibilityLabel("Help and diagnostics")
+            .accessibilityLabel("Help and diagnostics").tourTarget(.help)
         }.padding(18)
       }
       .background(AppTheme.sidebar)
@@ -134,10 +134,12 @@ struct RootView: View {
       CommandPalette()
     }
     .sheet(isPresented: $showingOnboarding, onDismiss: {
-      guard scanAfterSetup else { return }
+      let scan = scanAfterSetup
       scanAfterSetup = false
       model.selectedSection = .dashboard
-      model.runSmartCare()
+      if scan { model.runSmartCare() }
+      // First run: show where everything is. It never blocks the scan, and it can be skipped.
+      if !UserDefaults.standard.bool(forKey: AppViewModel.tourSeenKey) { model.startTour() }
     }) {
       OnboardingView(onFinish: { scanAfterSetup = $0 })
     }
@@ -147,6 +149,13 @@ struct RootView: View {
       if old == .storage { model.compactStorageMap(); MemoryRelief.shared.relieveSoon() }
     }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
+    .overlayPreferenceValue(TourTargetFrames.self) { frames in
+      if let index = model.tourStep, GuidedTour.steps.indices.contains(index) {
+        let step = GuidedTour.steps[index]
+        TourOverlay(step: step, index: index, count: GuidedTour.steps.count, targetFrame: frames[step.target],
+          back: { model.retreatTour() }, next: { model.advanceTour() }, skip: { model.endTour(finished: false) })
+      }
+    }
     .onAppear {
       guard !SmokeTest.isRequested else { return }
       model.authorizeRemoval = { [weak account] in account?.isUnlocked == true }
@@ -194,6 +203,7 @@ struct RootView: View {
               }
               .contentShape(Capsule())
             }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+              .modifier(SidebarTourTarget(section: section, tab: true))
           }
         }
         // 30 pt tall, no taller than the plain tabs it replaced, so pages keep their first fold.
@@ -221,6 +231,7 @@ struct RootView: View {
           .background(model.queuedCount > 0 || model.selectedSection == .review ? AppTheme.selection : AppTheme.surface,
             in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8))
       }.buttonStyle(.plain).help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
+        .tourTarget(.review)
       Button { model.openAccount() } label: {
         Image(systemName: "person.crop.circle").font(.system(size: 19)).frame(width: 32, height: 32)
       }.buttonStyle(.plain).foregroundStyle(.secondary)
@@ -259,6 +270,7 @@ struct RootView: View {
     }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }
       .accessibilityAddTraits(selected ? .isSelected : []).accessibilityLabel(section.rawValue)
       .help(section.rawValue)
+      .modifier(SidebarTourTarget(section: section))
   }
 
   private var sidebarFooter: some View {
@@ -398,5 +410,30 @@ struct RootView: View {
     .padding(.vertical, 8)
     .background(AppTheme.surface)
     .overlay(alignment: .top) { Divider() }
+  }
+}
+
+/// Sidebar destinations and tabs that are stops on the guided tour.
+private struct SidebarTourTarget: ViewModifier {
+  let section: AppViewModel.Section
+  /// Tabs mark only tabs the tour visits; the sidebar owns each area's own stop.
+  var tab = false
+
+  func body(content: Content) -> some View {
+    if let target = Self.target(section), !tab || section == .performance { content.tourTarget(target) } else { content }
+  }
+
+  static func target(_ section: AppViewModel.Section) -> TourTarget? {
+    switch section {
+    case .dashboard: return .overview
+    case .performance: return .performance
+    case .cleaner: return .cleanup
+    case .storage: return .storage
+    case .applications: return .apps
+    case .photos: return .photos
+    case .developer: return .developer
+    case .history: return .history
+    default: return nil
+    }
   }
 }

@@ -208,6 +208,68 @@ struct EmptyState: View {
   }
 }
 
+/// What a page shows while its first results are on the way, instead of an empty list: what
+/// is happening, how far along it is when that's known, and placeholder rows in the shape of
+/// the results. The only motion is the system spinner, so it costs next to nothing to show.
+struct LoadingState: View {
+  let title: String
+  let detail: String
+  var symbol = "magnifyingglass"
+  var swatch: AppTheme.Swatch = .mint
+  /// 0...1 when the amount of work is known.
+  var progress: Double? = nil
+  /// Extra line under the detail, such as "42 of 180 apps".
+  var status: String? = nil
+  var rows = 5
+  var cancel: (() -> Void)? = nil
+
+  private static let titleWidths: [CGFloat] = [180, 140, 210, 120, 160]
+  private static let detailWidths: [CGFloat] = [90, 120, 70, 110, 80]
+
+  var body: some View {
+    VStack(spacing: 18) {
+      HStack(spacing: 14) {
+        SwatchBadge(symbol: symbol, swatch: swatch, size: 40)
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(AppTheme.ink)
+            ProgressView().controlSize(.small)
+          }
+          Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          if let status {
+            Text(status).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+          }
+        }
+        .accessibilityElement(children: .combine)
+        Spacer(minLength: 0)
+        if let cancel { Button("Cancel", action: cancel).controlSize(.small) }
+      }
+      if let progress {
+        ProgressView(value: min(1, max(0, progress))).tint(swatch.color)
+      }
+      VStack(spacing: 10) {
+        ForEach(0..<rows, id: \.self) { row in
+          HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8).fill(AppTheme.panel).frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 6) {
+              Capsule().fill(AppTheme.panel).frame(width: Self.titleWidths[row % 5], height: 9)
+              Capsule().fill(AppTheme.panel.opacity(0.7)).frame(width: Self.detailWidths[row % 5], height: 7)
+            }
+            Spacer()
+            Capsule().fill(AppTheme.panel).frame(width: 54, height: 9)
+          }
+          .opacity(1 - Double(row) * 0.14)
+        }
+      }
+      .accessibilityHidden(true)
+    }
+    .padding(24)
+    .frame(maxWidth: 620)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .padding(.top, 24)
+  }
+}
+
 struct StorageRing: View {
   let used: Int64
   let total: Int64

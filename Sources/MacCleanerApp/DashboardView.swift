@@ -4,11 +4,14 @@ import SwiftUI
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
   @Environment(\.colorSchemeContrast) private var contrast
+  @AppStorage(AppViewModel.tourSeenKey) private var tourSeen = false
+  @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
         PageHeader("Overview", subtitle: "Understand your storage. Choose what to keep.", eyebrow: "A little more breathing room")
+        if onboardingDone && !tourSeen && model.tourStep == nil { tourOffer }
         hero
         SystemHealthRow(volume: model.volume) { model.selectedSection = .performance }
         let categories = OverviewPresentation.categories(model.recommendations)
@@ -25,6 +28,23 @@ struct DashboardView: View {
     .onAppear {
       guard !SmokeTest.isRequested else { return }
       model.refreshTrashStatus(); model.recordFreeSpace(); model.refreshRecommendations()
+    }
+  }
+
+  /// For people who finished setup before the tour existed; new installs see it after setup.
+  private var tourOffer: some View {
+    SurfaceCard {
+      HStack(spacing: 14) {
+        SwatchBadge(symbol: "signpost.right.fill", swatch: .mint, size: 34)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("New here, or want a refresher?").font(.headline)
+          Text("A one-minute tour shows where everything is. Nothing runs or changes while it's open.")
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 12)
+        Button("Not Now") { tourSeen = true }
+        Button("Take the Tour") { model.startTour() }.buttonStyle(MintButtonStyle())
+      }
     }
   }
 
@@ -120,6 +140,7 @@ struct DashboardView: View {
     Button { model.runSmartCare() } label: {
       Label(model.isScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
     }.buttonStyle(MintButtonStyle()).disabled(model.isScanning || model.isWorking)
+      .tourTarget(.quickScan)
   }
 
   @ViewBuilder private var reviewButton: some View {

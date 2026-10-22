@@ -36,6 +36,10 @@ struct HelpView: View {
         topic("What is included in Quick Scan?", "Known cache locations, installed apps, startup metadata, Downloads, removed-app data and home Trash. Whole-folder storage maps, duplicate comparisons, photo analysis and deep project scans start only when you choose them.")
         topic("How does AI use my data?", "AI is optional and cannot select or remove items. Automatic context uses storage categories and known tool identifiers. Your typed question and recent conversation are sent as written. Preview the context before enabling AI.")
         HStack {
+          Button("Take the Quick Tour") {
+            dismiss()
+            model.startTour()
+          }.buttonStyle(MintButtonStyle(prominent: false))
           Button("Permissions & Setup…") { showPermissions = true }
           Button("Contact Support") { NSWorkspace.shared.open(URL(string: "mailto:support@macmint.co")!) }
         }

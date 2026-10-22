@@ -188,6 +188,13 @@ enum SmokeTest {
         render(prefix + "-Performance-Populated-" + state.rawValue, view)
         render(prefix + "-Performance-Compact-" + state.rawValue, view, width: 980, height: 660)
       }
+      model.selectedSection = .applications
+      model.tourStep = GuidedTour.steps.firstIndex { $0.target == .apps }
+      render(prefix + "-Tour-apps", RootView())
+      model.selectedSection = .dashboard
+      model.tourStep = GuidedTour.steps.firstIndex { $0.target == .review }
+      render(prefix + "-Tour-review", RootView(), width: 980, height: 660)
+      model.tourStep = nil
       render(prefix + "-Organizer", OrganizerView(), width: 840, height: 660)
       render(prefix + "-Photo-deck", PhotoReviewDeck(), width: 720, height: 480)
       let reviewSession = model.photoReviewSession
