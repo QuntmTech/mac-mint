@@ -21,23 +21,20 @@ struct DuplicatesView: View {
       controls
       Divider()
 
-      if model.duplicateGroups.isEmpty && !scanningHere {
+      if scanningHere {
+        LoadingState(title: "Comparing files…",
+          detail: "Matching files in \(model.duplicateRoot.lastPathComponent) by size, then by content. Large files are read in chunks so memory stays low. This can take a few minutes.",
+          symbol: "square.on.square.fill", swatch: .indigo, cancel: { model.cancelCurrentOperation() })
+      } else if model.duplicateGroups.isEmpty {
+        // Comparing every file is the heaviest scan, so it starts when you ask.
         EmptyState(
-          icon: "square.on.square", title: "No exact duplicates found",
-          detail:
-            "Choose a folder and scan. Files are matched by size, sample hash, then full streaming SHA-256."
-        )
-      } else if scanningHere {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Hashing candidate files…")
-            .foregroundStyle(.secondary)
-          Text("Large files are streamed in chunks to keep memory use bounded.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          Button("Cancel") { model.cancelCurrentOperation() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+          icon: "square.on.square",
+          title: model.duplicatesScanned ? "No exact duplicates found" : "Find exact duplicate files",
+          detail: model.duplicatesScanned
+            ? "Nothing in \(model.duplicateRoot.lastPathComponent) has an identical copy. Choose another folder above to look somewhere else."
+            : "Compares files in \(model.duplicateRoot.lastPathComponent) byte for byte: same size, then a sample, then the whole file. It can take a few minutes, and nothing is removed.",
+          actionTitle: model.duplicatesScanned ? "Scan Again" : "Find Duplicates",
+          action: { model.scanDuplicates() })
       } else {
         if model.isScanning { OtherScanNote() }
         List {

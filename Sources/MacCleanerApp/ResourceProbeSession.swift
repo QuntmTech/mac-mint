@@ -72,11 +72,22 @@ enum ResourceProbeSession {
     }
   }
 
+  /// Timed memory releases with the uptime of the event, so the probe can line them up
+  /// with its per-second CPU readings (both use system uptime).
+  private struct Trace: Encodable {
+    let uptime: TimeInterval
+    let releases: [MemoryRelief.Record]
+  }
+
   @MainActor
   private static func writeSamples(_ event: String, to folder: URL) {
     let counts = ["samples": SystemMonitor.samples, "publishedSamples": SystemMonitor.publishedSamples]
     if let data = try? JSONSerialization.data(withJSONObject: counts, options: [.sortedKeys]) {
       try? data.write(to: folder.appendingPathComponent("samples-\(event).json"), options: .atomic)
+    }
+    let trace = Trace(uptime: ProcessInfo.processInfo.systemUptime, releases: MemoryRelief.shared.records)
+    if let data = try? JSONEncoder().encode(trace) {
+      try? data.write(to: folder.appendingPathComponent("trace-\(event).json"), options: .atomic)
     }
   }
 

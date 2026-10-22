@@ -41,6 +41,8 @@ final class CareService: ObservableObject {
     static let lastLowSpaceAlert = "care.lastLowSpaceAlert"
     static let lastScanReminder = "care.lastScanReminder"
     static let showMenuBar = "care.showMenuBar"
+    /// Quick Scan when MacMint opens; on unless turned off in Settings.
+    static let scanOnLaunch = "care.scanOnLaunch"
     static let onboardingDone = SetupProgressStore.completedKey
   }
 
@@ -122,9 +124,8 @@ final class CareService: ObservableObject {
 
     if defaults.bool(forKey: Keys.lowSpaceAlerts) {
       let threshold = Int64(max(1, defaults.integer(forKey: Keys.lowSpaceThresholdGB))) * 1_000_000_000
-      let free = Self.freeSpace()
       let last = defaults.object(forKey: Keys.lastLowSpaceAlert) as? Date ?? .distantPast
-      if free > 0, free < threshold, now.timeIntervalSince(last) > 24 * 3600 {
+      if let free = Self.freeSpace(), free < threshold, now.timeIntervalSince(last) > 24 * 3600 {
         notify(
           id: "low-space",
           title: "Your Mac is running low on space",
@@ -172,11 +173,12 @@ final class CareService: ObservableObject {
     return hour >= 22 || hour < 8
   }
 
-  static func freeSpace() -> Int64 {
-    let values = try? FileManager.default.homeDirectoryForCurrentUser.resourceValues(forKeys: [
-      .volumeAvailableCapacityForImportantUsageKey
-    ])
-    return values?.volumeAvailableCapacityForImportantUsage ?? 0
+  /// Nil when macOS reports no reading, so a missing value never looks like a full disk and a
+  /// truly full disk (zero) still alerts.
+  static func freeSpace() -> Int64? {
+    let reading = VolumeSummary.capacity()
+    guard let free = reading.free, (reading.total ?? 0) > 0 else { return nil }
+    return max(0, free)
   }
 
   // MARK: Launch at login

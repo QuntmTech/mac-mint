@@ -77,6 +77,9 @@ struct MacCleanerDesktopApp: App {
 
         }
       }
+      CommandGroup(before: .help) {
+        Button("Quick Tour of MacMint") { model.startTour() }
+      }
       CommandMenu("Appearance") {
         Picker("Appearance", selection: $appearance) {
           ForEach(AppAppearance.allCases) { option in Text(option.title).tag(option) }

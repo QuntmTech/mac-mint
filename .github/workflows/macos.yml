@@ -40,6 +40,8 @@ jobs:
         run: swift build -c release --product MacMint
       - name: Package local app bundle
         run: NO_OPEN=1 ./scripts/build_app.sh
+        env:
+          REQUIRE_STYLED_INSTALLER: "1"
       - name: Embedded updater and version stamp
         run: |
           APP=dist/MacMint.app
@@ -124,6 +126,8 @@ jobs:
           ./scripts/smoke_test.sh candidate/extracted/MacMint.app
       - name: Verify downloaded drag-to-Applications installer
         run: ./scripts/verify_installer.sh candidate/MacMint.dmg
+        env:
+          REQUIRE_STYLED_INSTALLER: "1"
       - name: Normal startup from downloaded package
         run: ./scripts/native_startup_test.sh candidate/extracted/MacMint.app
         timeout-minutes: 4

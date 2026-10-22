@@ -35,12 +35,30 @@ final class UpdaterController: NSObject, ObservableObject {
   @Published private(set) var reminder: Update?
   /// Install and Relaunch was chosen while files were being moved; it continues when they finish.
   @Published private(set) var isWaitingForWork = false
+  /// What the last finished check of the selected channel found, so Settings can say it
+  /// plainly instead of only Sparkle's "up to date" window.
+  enum CheckResult: Equatable {
+    /// This is the channel's newest build.
+    case newest
+    /// This build is newer than anything on the channel (a developer build on Stable).
+    case newerThanChannel
+    /// A newer version exists but needs a newer macOS.
+    case needsNewerMacOS
+    /// The channel's newest version doesn't support this macOS yet.
+    case unsupportedMacOS
+    /// The channel's feed was missing, unreachable or unreadable.
+    case failed
+  }
+  @Published private(set) var lastResult: CheckResult?
+  /// The channel whose feed the current check reads; results of a channel switched away from are ignored.
+  private var checkedChannel: UpdateChannel?
   @Published var channel: UpdateChannel {
     didSet {
       guard channel != oldValue else { return }
       channel.save(in: defaults)
       availableUpdate = nil
       reminder = nil
+      lastResult = nil
       // The feed URL changed, so Sparkle checks the new channel straight away.
       controller?.updater.resetUpdateCycleAfterShortDelay()
     }
@@ -160,7 +178,8 @@ final class UpdaterController: NSObject, ObservableObject {
 
 extension UpdaterController: SPUUpdaterDelegate {
   func feedURLString(for updater: SPUUpdater) -> String? {
-    Self.feedURLString(for: channel)
+    checkedChannel = channel
+    return Self.feedURLString(for: channel)
   }
 
   func updater(_ updater: SPUUpdater, shouldProceedWithUpdate item: SUAppcastItem, updateCheck: SPUUpdateCheck) throws {
@@ -172,7 +191,10 @@ extension UpdaterController: SPUUpdaterDelegate {
   }
 
   func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+    // A check that started on the other channel finishes after the toggle; don't offer it.
+    guard checkedChannel == channel else { return }
     availableUpdate = Update(item)
+    lastResult = nil
   }
 
   func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
@@ -182,7 +204,29 @@ extension UpdaterController: SPUUpdaterDelegate {
 
   func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
     lastCheck = updater.lastUpdateCheckDate ?? lastCheck
+    if let error = error as NSError?, checkedChannel == channel,
+      let result = Self.checkResult(domain: error.domain, code: error.code,
+        reason: (error.userInfo[SPUNoUpdateFoundReasonKey] as? NSNumber)?.intValue) {
+      lastResult = result
+    }
     if updateCheck != .updateInformation { onCycleFinished?() }
+  }
+
+  /// Sparkle reports "no update" and feed problems as errors in its domain (SUErrors.h):
+  /// 1001 is SUNoUpdateError, with an SPUNoUpdateFoundReason (1 on the latest version, 2 newer
+  /// than the latest, 3 system too old, 4 system too new); 1000 and 1002 are an unreadable or
+  /// unreachable appcast. Anything else (cancellations, install errors, an unknown reason)
+  /// leaves the last result as it was.
+  nonisolated static func checkResult(domain: String, code: Int, reason: Int?) -> CheckResult? {
+    guard domain == "SUSparkleErrorDomain" else { return nil }
+    switch (code, reason) {
+    case (1001, 1?): return .newest
+    case (1001, 2?): return .newerThanChannel
+    case (1001, 3?): return .needsNewerMacOS
+    case (1001, 4?): return .unsupportedMacOS
+    case (1000, _), (1002, _): return .failed
+    default: return nil
+    }
   }
 
   func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,

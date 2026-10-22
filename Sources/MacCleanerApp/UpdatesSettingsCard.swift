@@ -19,7 +19,7 @@ struct UpdatesSettingsCard: View {
           }
           .disabled(!updater.canCheckForUpdates)
         }
-        Text(UpdaterController.current.displayString)
+        Text(UpdaterController.current.displayString + " · " + channelName + " channel")
           .font(.callout)
           .foregroundStyle(.secondary)
           .textSelection(.enabled)
@@ -63,8 +63,31 @@ struct UpdatesSettingsCard: View {
       }
     } else if let error = updates.checkError {
       Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(AppTheme.warning)
+    } else if let result = updater.lastResult {
+      switch result {
+      case .newest:
+        Label("This is the newest build on the \(channelName) channel.", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(AppTheme.accentText)
+      case .newerThanChannel:
+        Label("This build is newer than anything on the \(channelName) channel.", systemImage: "checkmark.circle")
+          .foregroundStyle(.secondary)
+      case .needsNewerMacOS:
+        Label("A newer version is available but needs a newer version of macOS.", systemImage: "exclamationmark.circle")
+          .foregroundStyle(AppTheme.warning)
+      case .unsupportedMacOS:
+        Label("The newest version on this channel doesn't support this version of macOS yet.", systemImage: "exclamationmark.circle")
+          .foregroundStyle(AppTheme.warning)
+      case .failed:
+        Label(updater.channel == .stable
+          ? "Couldn't check the Stable channel: no stable release feed was found, or it couldn't be reached. Developer builds can be turned on below."
+          : "Couldn't check the Developer channel: its feed was missing or couldn't be reached. Try again later.",
+          systemImage: "exclamationmark.triangle")
+          .foregroundStyle(AppTheme.warning).fixedSize(horizontal: false, vertical: true)
+      }
     }
   }
+
+  private var channelName: String { updater.channel == .developer ? "Developer" : "Stable" }
 
   private var channelNote: String {
     switch updater.channel {

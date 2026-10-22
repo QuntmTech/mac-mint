@@ -25,23 +25,17 @@ struct StorageExplorerView: View {
         Divider()
         coverageBar(scan)
       } else if model.isScanning && model.operationTitle == "Storage" {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Mapping \(model.storageRoot.lastPathComponent)…").font(.headline)
-          Text("\(model.storageScannedCount.formatted()) items so far")
-            .font(.callout.monospacedDigit())
-            .foregroundStyle(.secondary)
-          Text("Nothing is opened or downloaded — cloud-only files stay in the cloud.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          Button("Cancel") { model.cancelCurrentOperation() }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        LoadingState(title: "Mapping \(model.storageRoot.lastPathComponent)…",
+          detail: "Measuring every folder so you can see what takes up space. Nothing is opened or downloaded; cloud-only files stay in the cloud.",
+          symbol: "chart.pie.fill", swatch: .indigo,
+          status: "\(model.storageScannedCount.formatted()) items so far",
+          cancel: { model.cancelCurrentOperation() })
       } else {
+        // Walking a whole folder can take a minute and may ask for folder access, so it starts when you ask.
         EmptyState(
           icon: "chart.pie", title: "See what's using your space",
-          detail: "Map your home folder or inspect a connected drive. Open a folder to explore, then review what you no longer need.",
-          actionTitle: "Map storage", action: { model.scanStorage() })
+          detail: "Map your home folder or a connected drive to see which folders take up the most room. It usually takes under a minute, and nothing is changed.",
+          actionTitle: "Map Storage", action: { model.scanStorage() })
       }
     }
     .sheet(isPresented: $showOrganizer) { OrganizerView() }

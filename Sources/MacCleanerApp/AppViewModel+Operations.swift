@@ -331,7 +331,7 @@ extension AppViewModel {
     guard !plan.isEmpty else { return }
     guard authorizeRemoval() else {
       deferredPlan = plan
-      Task { await Task.yield(); showingAccount = true }
+      Task { await Task.yield(); accountPurpose = .paidAction; showingAccount = true }
       return
     }
     isWorking = true

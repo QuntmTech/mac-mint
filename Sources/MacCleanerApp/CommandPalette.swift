@@ -40,6 +40,9 @@ struct CommandPalette: View {
       $0.selectedSection = .storage
       $0.scanStorage()
     })
+    list.append(Entry(id: "action:tour", title: "Take the Quick Tour", subtitle: "Help", icon: "signpost.right") {
+      $0.startTour()
+    })
     list.append(Entry(id: "action:review", title: "Review Everything Selected", subtitle: "Action", icon: "checklist") {
       $0.selectedSection = .review
       $0.reviewEverything()

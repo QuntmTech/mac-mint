@@ -12,9 +12,15 @@ enum PerformancePresentation {
     let id: ProcessID
     let name: String
     let bundleID: String?
+    /// The app and its helper processes together.
     let memoryBytes: Int64
     let cpuPercent: Double?
     var fallbackSymbol = "app.fill"
+    /// Helper processes included in the totals; nil when helpers weren't measured.
+    var helpers: ProcessFamilies.Helpers? = nil
+    /// The app's own process, the first line of the breakdown.
+    var ownMemoryBytes: Int64? = nil
+    var ownCPUPercent: Double? = nil
   }
 
   enum SortKey: String, CaseIterable, Sendable {
@@ -48,6 +54,7 @@ enum PerformancePresentation {
     query.isEmpty || app.name.localizedCaseInsensitiveContains(query)
       || (app.bundleID?.localizedCaseInsensitiveContains(query) ?? false)
       || String(app.id.pid).contains(query)
+      || (app.helpers?.largest.contains { $0.name.localizedCaseInsensitiveContains(query) } ?? false)
   }
 
   static func matchCount(_ apps: [App], query: String) -> Int {
@@ -109,6 +116,36 @@ enum PerformancePresentation {
     return fraction(Double(bytes), capacity: Double(physicalMemory))
   }
 
+  /// One line of a row's breakdown: the app itself, a large helper, or the remaining helpers.
+  struct BreakdownLine: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let cpuText: String
+    let memoryText: String
+  }
+
+  static func helperCountText(_ count: Int) -> String { count == 1 ? "1 helper" : "\(count) helpers" }
+
+  /// The app's own process first, then its largest helpers, then the rest as one line.
+  static func breakdown(_ app: App) -> [BreakdownLine] {
+    guard let helpers = app.helpers, helpers.count > 0 else { return [] }
+    func cpu(_ value: Double?) -> String { validCPU(value).map { String(format: "%.1f%%", $0) } ?? "—" }
+    func memory(_ value: Int64?) -> String { value.flatMap { $0 >= 0 ? ByteFormatter.string($0) : nil } ?? "—" }
+    var lines = [BreakdownLine(id: "app", name: app.name + " (the app itself)", cpuText: cpu(app.ownCPUPercent),
+      memoryText: memory(app.ownMemoryBytes))]
+    lines += helpers.largest.map {
+      BreakdownLine(id: "pid-\($0.pid)", name: $0.name + " · PID \($0.pid)", cpuText: cpu($0.cpuPercent), memoryText: memory($0.memoryBytes))
+    }
+    let rest = helpers.count - helpers.largest.count
+    if rest > 0 {
+      let shown = helpers.largest.reduce(Int64(0)) { ProcessFamilies.add($0, $1.memoryBytes) }
+      let shownCPU = helpers.largest.compactMap { validCPU($0.cpuPercent) }.reduce(0, +)
+      lines.append(BreakdownLine(id: "rest", name: rest == 1 ? "1 more helper" : "\(rest) more helpers",
+        cpuText: cpu(max(0, helpers.cpuPercent - shownCPU)), memoryText: memory(max(0, helpers.memoryBytes - shown))))
+    }
+    return lines
+  }
+
   /// Display-ready row. Equal rows draw identically, so SwiftUI skips unchanged rows; meter
   /// fractions are rounded to half-percent steps, below what a bar can show.
   struct Row: Identifiable, Equatable, Sendable {
@@ -125,6 +162,11 @@ enum PerformancePresentation {
     let memoryFraction: Double?
     let fallbackSymbol: String
     let control: Control
+    /// Measured helpers, which decide whether the row can be expanded.
+    let helperCount: Int
+    let expanded: Bool
+    /// Built only for expanded rows, so collapsed rows don't format or compare helper lines.
+    let breakdown: [BreakdownLine]
   }
 
   /// Inputs of the per-row action controls, which change only with slowdown state.
@@ -145,6 +187,7 @@ enum PerformancePresentation {
     var physicalMemory: Int64
     var logicalCPUCount: Int
     var controllable: Set<ProcessID>
+    var expanded: Set<ProcessID> = []
   }
 
   static func quantized(_ fraction: Double?) -> Double? {
@@ -155,13 +198,25 @@ enum PerformancePresentation {
     apps(inputs.apps, query: inputs.query, sort: inputs.sort).enumerated().map { index, app in
       let receipt = inputs.taming.receipts.first { $0.identity.pid == app.id.pid && $0.identity.started == app.id.started }
       let excepted = app.bundleID.map { inputs.taming.exceptions[$0.lowercased()] != nil } ?? false
-      let detail = excepted ? "Never slowed · PID \(app.id.pid)" : receipt.map {
-        "\($0.automatic ? "Auto tamed" : "Slowed") until " + $0.expires.formatted(date: .omitted, time: .shortened)
-      } ?? "PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
+      let helperCount = app.helpers?.count ?? 0
+      let helperText: String = helperCount > 0 ? " · with " + helperCountText(helperCount) : ""
+      let detail: String
+      if excepted {
+        detail = "Never slowed · PID \(app.id.pid)" + helperText
+      } else if let receipt {
+        detail = (receipt.automatic ? "Auto tamed" : "Slowed") + " until " + receipt.expires.formatted(date: .omitted, time: .shortened)
+      } else if helperCount > 0 {
+        detail = "PID \(app.id.pid)" + helperText
+      } else {
+        detail = "PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
+      }
+      var help: String = app.name + " · PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? "")
+      if helperCount > 0 {
+        help += "\nCPU and memory include \(helperCountText(helperCount)) this app started. Quit and Slow act on the app itself."
+      }
       let cpu = validCPU(app.cpuPercent)
       let memory = app.memoryBytes >= 0 ? ByteFormatter.string(app.memoryBytes) : nil
-      return Row(id: app.id, stripe: index.isMultiple(of: 2), name: app.name, detail: detail,
-        help: app.name + " · PID \(app.id.pid)" + (app.bundleID.map { " · " + $0 } ?? ""),
+      return Row(id: app.id, stripe: index.isMultiple(of: 2), name: app.name, detail: detail, help: help,
         cpuText: cpu.map { String(format: "%.1f%%", $0) } ?? "—",
         cpuAccessibility: cpu.map { String(format: "%.1f percent of one core", $0) } ?? "Not measured yet",
         cpuFraction: quantized(cpuFraction(app.cpuPercent, logicalCPUCount: inputs.logicalCPUCount)),
@@ -169,7 +224,9 @@ enum PerformancePresentation {
         memoryFraction: quantized(memoryFraction(app.memoryBytes, physicalMemory: inputs.physicalMemory)),
         fallbackSymbol: app.fallbackSymbol,
         control: Control(id: app.id, name: app.name, bundleID: app.bundleID, slowed: receipt != nil,
-          excepted: excepted, canControl: inputs.controllable.contains(app.id)))
+          excepted: excepted, canControl: inputs.controllable.contains(app.id)),
+        helperCount: helperCount, expanded: inputs.expanded.contains(app.id) && helperCount > 0,
+        breakdown: inputs.expanded.contains(app.id) ? breakdown(app) : [])
     }
   }
 

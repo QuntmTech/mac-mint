@@ -81,6 +81,7 @@ struct ApplicationsView: View {
         uninstaller
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.applications) }
     .onDrop(of: [.fileURL], isTargeted: nil) { providers in
       mode = .uninstall
       guard let provider = providers.first else { return false }
@@ -92,7 +93,28 @@ struct ApplicationsView: View {
     }
   }
 
-  private var uninstaller: some View {
+  /// The app list fills itself the first time this page opens; until then it says what's happening.
+  @ViewBuilder private var uninstaller: some View {
+    if model.apps.isEmpty { firstLoad } else { appList }
+  }
+
+  @ViewBuilder private var firstLoad: some View {
+    let own = model.operationTitle == "Installed apps" || model.operationTitle == "Quick Scan"
+    if model.isScanning {
+      LoadingState(title: own ? "Finding your apps…" : "Your apps are next",
+        detail: own
+          ? "Reading your Applications folders, each app's size and when you last opened it. This takes a few seconds."
+          : "\(model.operationTitle ?? "Another scan") is running. Your apps load as soon as it finishes.",
+        symbol: "square.grid.2x2", swatch: .violet,
+        cancel: own ? { model.cancelCurrentOperation() } : nil)
+    } else {
+      EmptyState(icon: "square.grid.2x2", title: "Find your apps",
+        detail: "See every app with its size and when you last opened it, then uninstall the ones you don't need along with their leftover files.",
+        actionTitle: "Find Apps") { model.scanInstalledApps() }
+    }
+  }
+
+  private var appList: some View {
     // Keep both panes in the same SwiftUI layout tree. NSSplitView's nested
     // hosting roots on macOS 26 can misplace safe-area/footer coordinates.
     HStack(spacing: 0) {

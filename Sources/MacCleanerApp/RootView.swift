@@ -40,7 +40,7 @@ struct RootView: View {
             Text("⌘K").font(.caption).foregroundStyle(.secondary)
           }.font(.callout).foregroundStyle(.secondary).padding(10)
             .background(AppTheme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
-        }.buttonStyle(.plain).padding(.horizontal, 16).padding(.bottom, 12)
+        }.buttonStyle(.plain).tourTarget(.goTo).padding(.horizontal, 16).padding(.bottom, 12)
         sidebarFooter.padding(.horizontal, 12).padding(.bottom, 12)
         Divider().padding(.horizontal, 16)
         HStack(spacing: 8) {
@@ -51,7 +51,7 @@ struct RootView: View {
           Spacer()
           Button { model.showingHelp = true } label: { Image(systemName: "questionmark.circle") }
             .buttonStyle(.plain).foregroundStyle(.secondary).help("Help & diagnostics")
-            .accessibilityLabel("Help and diagnostics")
+            .accessibilityLabel("Help and diagnostics").tourTarget(.help)
         }.padding(18)
       }
       .background(AppTheme.sidebar)
@@ -94,14 +94,18 @@ struct RootView: View {
       }
     }
     .sheet(isPresented: $model.showingAccount, onDismiss: {
+      // Only a paid action's gate returns to its review; opening the account never does. A
+      // gate closed without access drops its plan (the selections stay in the review queue).
+      guard model.accountPurpose == .paidAction else { return }
       if account.isUnlocked, let plan = model.deferredPlan {
-        model.deferredPlan = nil
         model.pendingPlan = OperationPlanner.plan(title: plan.title, items: plan.items + plan.covered, ignoredPaths: model.ignoredPaths)
       }
-    }) { AccountAccessSheet() }
+      model.deferredPlan = nil
+    }) { AccountAccessSheet(purpose: model.accountPurpose, hasDeferredPlan: model.deferredPlan != nil) }
     .sheet(isPresented: $model.showingHelp) { HelpView() }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
       guard !SmokeTest.isRequested else { return }
+      model.runLaunchScanIfEnabled(inFront: !NSApp.isHidden)
       Task {
         await account.refreshAccess()
         await account.refreshAIStatusIfStale()
@@ -131,10 +135,12 @@ struct RootView: View {
       CommandPalette()
     }
     .sheet(isPresented: $showingOnboarding, onDismiss: {
-      guard scanAfterSetup else { return }
+      let scan = scanAfterSetup
       scanAfterSetup = false
       model.selectedSection = .dashboard
-      model.runSmartCare()
+      if scan { model.runSmartCare() }
+      // First run: show where everything is. It never blocks the scan, and it can be skipped.
+      if !UserDefaults.standard.bool(forKey: AppViewModel.tourSeenKey) { model.startTour() }
     }) {
       OnboardingView(onFinish: { scanAfterSetup = $0 })
     }
@@ -144,6 +150,13 @@ struct RootView: View {
       if old == .storage { model.compactStorageMap(); MemoryRelief.shared.relieveSoon() }
     }
     .onChange(of: account.snapshot?.user.id) { _, _ in model.resetAIState() }
+    .overlayPreferenceValue(TourTargetFrames.self) { frames in
+      if let index = model.tourStep, GuidedTour.steps.indices.contains(index) {
+        let step = GuidedTour.steps[index]
+        TourOverlay(step: step, index: index, count: GuidedTour.steps.count, targetFrame: frames[step.target],
+          back: { model.retreatTour() }, next: { model.advanceTour() }, skip: { model.endTour(finished: false) })
+      }
+    }
     .onAppear {
       guard !SmokeTest.isRequested else { return }
       model.authorizeRemoval = { [weak account] in account?.isUnlocked == true }
@@ -152,6 +165,12 @@ struct RootView: View {
       }
     }
     .task { await ResourceProbeSession.runIfRequested(model) }
+    .task(id: model.exclusionsReady) {
+      // Quick Scan when MacMint opens, once the window has settled (Settings can turn it off).
+      guard model.exclusionsReady, AppViewModel.autoLoadAllowed else { return }
+      try? await Task.sleep(for: .seconds(1))
+      model.runLaunchScanIfEnabled(inFront: NSApp.isActive && !NSApp.isHidden)
+    }
     .task {
       // The sidebar's disk reading: on appear, after operations (recordFreeSpace), and every
       // minute while the workspace is in front. Hidden or background windows skip it.
@@ -169,17 +188,34 @@ struct RootView: View {
       if model.selectedSection.tabs.isEmpty {
         Label("Your workspace", systemImage: "square.grid.2x2").font(.caption).foregroundStyle(.secondary)
       } else {
-        ForEach(model.selectedSection.tabs) { section in
-          Button { model.selectedSection = section } label: {
-            HStack(spacing: 6) {
-              Image(systemName: section.icon).font(.system(size: 11))
-              Text(section.rawValue).font(.system(size: 12, weight: model.selectedSection == section ? .semibold : .medium))
-            }.padding(.horizontal, 11).padding(.vertical, 8)
-              .foregroundStyle(model.selectedSection == section ? AppTheme.accentText : Color.secondary)
-              .background(model.selectedSection == section ? AppTheme.surface : .clear, in: RoundedRectangle(cornerRadius: 8))
-              .contentShape(RoundedRectangle(cornerRadius: 8))
-          }.buttonStyle(.plain).accessibilityAddTraits(model.selectedSection == section ? .isSelected : [])
+        // One pill-shaped segmented control; the selected tab is a raised capsule with its
+        // area's color badge, which reads in both Light and Dark Mode.
+        HStack(spacing: 2) {
+          ForEach(model.selectedSection.tabs) { section in
+            let selected = model.selectedSection == section
+            Button { model.selectedSection = section } label: {
+              HStack(spacing: 6) {
+                if selected {
+                  SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 16)
+                } else {
+                  Image(systemName: section.icon).font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.secondary).frame(width: 16, height: 16)
+                }
+                Text(section.rawValue).font(.system(size: 12, weight: selected ? .semibold : .medium))
+                  .foregroundStyle(selected ? AppTheme.ink : Color.secondary)
+              }
+              .padding(.horizontal, 12).padding(.vertical, 5)
+              .background {
+                if selected { Capsule().fill(AppTheme.surface).shadow(color: .black.opacity(0.12), radius: 2, y: 1) }
+              }
+              .contentShape(Capsule())
+            }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+              .modifier(SidebarTourTarget(section: section, tab: true))
+          }
         }
+        // 30 pt tall, no taller than the plain tabs it replaced, so pages keep their first fold.
+        .padding(2)
+        .background(AppTheme.panel, in: Capsule())
       }
       Spacer(minLength: 8)
       if account.aiAvailable {
@@ -202,7 +238,8 @@ struct RootView: View {
           .background(model.queuedCount > 0 || model.selectedSection == .review ? AppTheme.selection : AppTheme.surface,
             in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8))
       }.buttonStyle(.plain).help("Review selected items · " + ByteFormatter.string(model.queuedBytes))
-      Button { model.showingAccount = true } label: {
+        .tourTarget(.review)
+      Button { model.openAccount() } label: {
         Image(systemName: "person.crop.circle").font(.system(size: 19)).frame(width: 32, height: 32)
       }.buttonStyle(.plain).foregroundStyle(.secondary)
         .help(account.isUnlocked ? "Account" : "Connect your MacMint account")
@@ -229,18 +266,18 @@ struct RootView: View {
     let selected = model.selectedSection.parent == section
     return Button { model.selectedSection = lastTabs[section] ?? section } label: {
       HStack(spacing: 11) {
-        Image(systemName: section.icon).font(.system(size: 16, weight: selected ? .semibold : .regular))
-          .frame(width: 22)
+        SwatchBadge(symbol: section.icon, swatch: section.swatch, size: 24)
         Text(section.rawValue).font(.system(size: 13, weight: selected ? .semibold : .medium))
         Spacer(minLength: 0)
         if selected { Circle().fill(AppTheme.accentText).frame(width: 5, height: 5) }
-      }.foregroundStyle(selected ? AppTheme.accentText : AppTheme.ink.opacity(0.8))
-        .padding(.horizontal, 12).padding(.vertical, 11)
+      }.foregroundStyle(selected ? AppTheme.ink : AppTheme.ink.opacity(0.8))
+        .padding(.horizontal, 10).padding(.vertical, 8)
         .background(selected ? AppTheme.selection : hoveredSection == section ? AppTheme.panel : .clear, in: RoundedRectangle(cornerRadius: 10))
         .contentShape(RoundedRectangle(cornerRadius: 10))
     }.buttonStyle(.plain).onHover { hoveredSection = $0 ? section : nil }
       .accessibilityAddTraits(selected ? .isSelected : []).accessibilityLabel(section.rawValue)
       .help(section.rawValue)
+      .modifier(SidebarTourTarget(section: section))
   }
 
   private var sidebarFooter: some View {
@@ -256,10 +293,10 @@ struct RootView: View {
           .overlay(alignment: .leading) {
             Capsule().fill(AppTheme.accentText).frame(width: geometry.size.width * fraction)
           }
-      }.frame(height: 5).accessibilityLabel("Disk \(Int(fraction * 100)) percent used")
+      }.frame(height: 5).accessibilityLabel(stats.isMeasured ? "Disk \(Int(fraction * 100)) percent used" : "Disk space unavailable")
       HStack(alignment: .firstTextBaseline, spacing: 4) {
-        Text(stats.total > 0 ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
-        Text("available").font(.caption).foregroundStyle(.secondary)
+        Text(stats.isMeasured ? ByteFormatter.string(stats.free) : "—").font(.system(size: 17, weight: .semibold)).monospacedDigit()
+        Text(stats.isMeasured ? "available" : "unavailable").font(.caption).foregroundStyle(.secondary)
       }
     }.padding(14).background(AppTheme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
   }
@@ -380,5 +417,30 @@ struct RootView: View {
     .padding(.vertical, 8)
     .background(AppTheme.surface)
     .overlay(alignment: .top) { Divider() }
+  }
+}
+
+/// Sidebar destinations and tabs that are stops on the guided tour.
+private struct SidebarTourTarget: ViewModifier {
+  let section: AppViewModel.Section
+  /// Tabs mark only tabs the tour visits; the sidebar owns each area's own stop.
+  var tab = false
+
+  func body(content: Content) -> some View {
+    if let target = Self.target(section), !tab || section == .performance { content.tourTarget(target) } else { content }
+  }
+
+  static func target(_ section: AppViewModel.Section) -> TourTarget? {
+    switch section {
+    case .dashboard: return .overview
+    case .performance: return .performance
+    case .cleaner: return .cleanup
+    case .storage: return .storage
+    case .applications: return .apps
+    case .photos: return .photos
+    case .developer: return .developer
+    case .history: return .history
+    default: return nil
+    }
   }
 }

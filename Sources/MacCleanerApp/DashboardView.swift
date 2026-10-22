@@ -3,23 +3,20 @@ import SwiftUI
 
 struct DashboardView: View {
   @EnvironmentObject private var model: AppViewModel
+  @Environment(\.colorSchemeContrast) private var contrast
+  @AppStorage(AppViewModel.tourSeenKey) private var tourSeen = false
+  @AppStorage(CareService.Keys.onboardingDone) private var onboardingDone = false
 
   var body: some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
         PageHeader("Overview", subtitle: "Understand your storage. Choose what to keep.", eyebrow: "A little more breathing room")
+        if onboardingDone && !tourSeen && model.tourStep == nil { tourOffer }
         hero
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
-          MetricCard(title: "Rebuildable data", value: scannedValue(model.reclaimableBytes),
-            subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath",
-            action: { model.selectedSection = .cleaner })
-          MetricCard(title: "A closer look", value: scannedValue(model.reviewableBytes),
-            subtitle: "Items that need your judgment", icon: "eye",
-            action: { model.selectedSection = .cleaner })
-          MetricCard(title: "Installed apps", value: model.lastScanDate == nil && model.apps.isEmpty ? "—" : "\(model.apps.count)",
-            subtitle: "Inspect apps and related files", icon: "square.grid.2x2",
-            action: { model.selectedSection = .applications })
-        }
+        SystemHealthRow(volume: model.volume) { model.selectedSection = .performance }
+        let categories = OverviewPresentation.categories(model.recommendations)
+        StorageOverviewCard(categories: categories, volume: model.volume, scanned: model.lastScanDate != nil)
+        if categories.isEmpty { metrics } else { categoryTiles(categories) }
         if !model.recommendations.isEmpty { SmartCareList() }
         tools
         coverage
@@ -34,9 +31,61 @@ struct DashboardView: View {
     }
   }
 
+  /// For people who finished setup before the tour existed; new installs see it after setup.
+  private var tourOffer: some View {
+    SurfaceCard {
+      HStack(spacing: 14) {
+        SwatchBadge(symbol: "signpost.right.fill", swatch: .mint, size: 34)
+        VStack(alignment: .leading, spacing: 3) {
+          Text("New here, or want a refresher?").font(.headline)
+          Text("A one-minute tour shows where everything is. Nothing is removed or changed while it's open.")
+            .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+        Spacer(minLength: 12)
+        Button("Not Now") { tourSeen = true }
+        Button("Take the Tour") { model.startTour() }.buttonStyle(MintButtonStyle())
+      }
+    }
+  }
+
+  private var metrics: some View {
+    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 3), spacing: 14) {
+      MetricCard(title: "Rebuildable data", value: scannedValue(model.reclaimableBytes),
+        subtitle: "Caches and generated files", icon: "arrow.triangle.2.circlepath", swatch: AppTheme.Swatch.mint,
+        action: { model.selectedSection = .cleaner })
+      MetricCard(title: "A closer look", value: scannedValue(model.reviewableBytes),
+        subtitle: "Items that need your judgment", icon: "eye", swatch: AppTheme.Swatch.amber,
+        action: { model.selectedSection = .cleaner })
+      MetricCard(title: "Installed apps", value: model.lastScanDate == nil && model.apps.isEmpty ? "—" : "\(model.apps.count)",
+        subtitle: "Inspect apps and related files", icon: "square.grid.2x2", swatch: AppTheme.Swatch.violet,
+        action: { model.selectedSection = .applications })
+    }
+  }
+
+  /// What Quick Scan found, one colored tile per area, largest first.
+  private func categoryTiles(_ categories: [OverviewPresentation.Category]) -> some View {
+    VStack(alignment: .leading, spacing: 14) {
+      HStack(alignment: .firstTextBaseline) {
+        Text("Where space can come back").font(.system(size: 18, weight: .semibold)).tracking(-0.3)
+        Spacer()
+        Text("Estimates · you review everything first").font(.caption).foregroundStyle(.secondary)
+      }
+      LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: 14)], spacing: 14) {
+        ForEach(categories) { category in
+          CategoryTile(category: category) {
+            if category.destination == .trash { model.emptyTrash() } else { model.open(category.destination) }
+          }
+        }
+      }
+    }
+  }
+
   private func scannedValue(_ bytes: Int64) -> String {
     model.lastScanDate == nil && model.cleanupTargets.isEmpty ? "—" : ByteFormatter.string(bytes)
   }
+
+  /// Quick Scan itself, as opposed to another page's scan that also sets `isScanning`.
+  private var quickScanning: Bool { model.isScanning && model.operationTitle == "Quick Scan" }
 
   private var hero: some View {
     let stats = model.volume
@@ -45,7 +94,7 @@ struct DashboardView: View {
         Label("QUICK SCAN", systemImage: "sparkle")
           .font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(AppTheme.accentText)
         VStack(alignment: .leading, spacing: 10) {
-          Text(model.isScanning ? "Getting the full picture." : "Make space, confidently.")
+          Text(quickScanning ? "Getting the full picture." : "Make space, confidently.")
             .font(.system(size: 32, weight: .semibold)).tracking(-1.1).foregroundStyle(AppTheme.ink)
             .fixedSize(horizontal: false, vertical: true)
           Text("Find caches, app leftovers, and developer clutter. You review every change before anything moves.")
@@ -57,9 +106,12 @@ struct DashboardView: View {
           VStack(alignment: .leading, spacing: 10) { scanButton; reviewButton }
         }
         HStack(spacing: 6) {
-          if model.isScanning {
+          if quickScanning {
             ProgressView().controlSize(.mini)
-            Text(model.scanCompletedAreas.isEmpty ? "Checking known storage locations…" : "\(model.scanCompletedAreas.count) categories complete")
+            Text(model.scanCompletedAreas.isEmpty ? "Checking known storage locations…" : "\(model.scanCompletedAreas.count) of 5 checks done")
+          } else if model.isScanning {
+            ProgressView().controlSize(.mini)
+            Text("\(model.operationTitle ?? "A scan") is running · Quick Scan can start when it finishes")
           } else {
             Image(systemName: model.lastScanDate == nil ? "lock.shield" : "clock")
             if let date = model.lastScanDate {
@@ -70,14 +122,18 @@ struct DashboardView: View {
       }.frame(maxWidth: .infinity, alignment: .leading)
       VStack(spacing: 18) {
         StorageRing(used: stats.used, total: stats.total,
-          centerValue: ByteFormatter.string(stats.free), centerLabel: "available")
-        Text("\(ByteFormatter.string(stats.used)) of \(ByteFormatter.string(stats.total)) used")
+          centerValue: stats.isMeasured ? ByteFormatter.string(stats.free) : "—",
+          centerLabel: stats.isMeasured ? "available" : "unavailable")
+        Text(stats.isMeasured ? "\(ByteFormatter.string(stats.used)) of \(ByteFormatter.string(stats.total)) used"
+          : "macOS did not report this disk's capacity")
           .font(.caption).foregroundStyle(AppTheme.ink.opacity(0.82)).monospacedDigit()
       }.padding(.horizontal, 12)
     }
     .padding(28).frame(maxWidth: .infinity, alignment: .leading)
     .background {
-      RoundedRectangle(cornerRadius: 22).fill(AppTheme.hero)
+      RoundedRectangle(cornerRadius: 22).fill(LinearGradient(
+        colors: [AppTheme.heroStart, AppTheme.heroMiddle, AppTheme.heroEnd],
+        startPoint: .topLeading, endPoint: .bottomTrailing))
         .overlay(alignment: .topTrailing) {
           Circle().fill(AppTheme.ink.opacity(0.025)).frame(width: 280, height: 280)
             .offset(x: 75, y: -100).allowsHitTesting(false)
@@ -88,17 +144,18 @@ struct DashboardView: View {
 
   private var scanButton: some View {
     Button { model.runSmartCare() } label: {
-      Label(model.isScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
+      Label(quickScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
     }.buttonStyle(MintButtonStyle()).disabled(model.isScanning || model.isWorking)
+      .tourTarget(.quickScan)
   }
 
   @ViewBuilder private var reviewButton: some View {
-    if model.isScanning {
+    if quickScanning {
       Button("Cancel scan") { model.cancelCurrentOperation() }.buttonStyle(MintButtonStyle(prominent: false))
     } else if model.safeRecommendationBytes > 0 {
       Button { model.reviewAllSafe() } label: {
         Label("Review \(ByteFormatter.string(model.safeRecommendationBytes))", systemImage: "checklist")
-      }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking)
+      }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking || model.isScanning)
         .help("Review rebuildable items before moving them to Trash")
     }
   }
@@ -111,27 +168,38 @@ struct DashboardView: View {
         Text("Your files. Your decisions.").font(.caption).foregroundStyle(.secondary)
       }
       LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-        tool("Explore storage", detail: "See what’s taking up room, folder by folder.", symbol: "chart.pie", tint: AppTheme.accentText, section: .storage)
-        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", tint: AppTheme.info, section: .applications)
-        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", tint: AppTheme.violet, section: .photos)
-        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", tint: AppTheme.warning, section: .developer)
+        tool("Explore storage", detail: "See what’s taking up room, folder by folder.", symbol: "chart.pie", section: .storage)
+        tool("Manage apps", detail: "Inspect apps and the data they leave behind.", symbol: "square.grid.2x2", section: .applications)
+        tool("Review photos", detail: "Compare similar shots and choose your keeper.", symbol: "photo.on.rectangle.angled", section: .photos)
+        tool("Developer workspace", detail: "Understand build output, caches, and local models.", symbol: "hammer", section: .developer)
       }
     }
   }
 
-  private func tool(_ title: String, detail: String, symbol: String, tint: Color, section: AppViewModel.Section) -> some View {
-    Button { model.selectedSection = section } label: {
-      SurfaceCard {
-        HStack(alignment: .top, spacing: 13) {
-          IconTile(symbol: symbol, tint: tint)
-          VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink)
-            Text(detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-          }.frame(maxWidth: .infinity, alignment: .leading)
-          Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, minHeight: 48, alignment: .leading).contentShape(Rectangle())
+  /// A colored tile in its area's sidebar color; white text meets WCAG AA on every swatch.
+  private func tool(_ title: String, detail: String, symbol: String, section: AppViewModel.Section) -> some View {
+    let swatch = section.swatch
+    let shape = RoundedRectangle(cornerRadius: AppTheme.corner, style: .continuous)
+    return Button { model.selectedSection = section } label: {
+      HStack(alignment: .top, spacing: 13) {
+        Image(systemName: symbol).font(.system(size: 17, weight: .semibold))
+          .frame(width: 40, height: 40)
+          .background(Color.white.opacity(0.2), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+          .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 5) {
+          Text(title).font(.system(size: 13, weight: .semibold))
+          Text(detail).font(.caption).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+        Image(systemName: "arrow.up.right").font(.caption.weight(.semibold))
       }
-    }.buttonStyle(CardButtonStyle()).accessibilityElement(children: .combine)
+      .foregroundStyle(.white)
+      .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+      .padding(AppTheme.cardPadding)
+      .background(swatch.gradient, in: shape)
+      .overlay(shape.strokeBorder(Color.white.opacity(contrast == .increased ? 0.7 : 0.12), lineWidth: contrast == .increased ? 2 : 1))
+      .shadow(color: swatch.color.opacity(0.28), radius: 10, y: 5)
+      .contentShape(shape)
+    }.buttonStyle(TileButtonStyle()).accessibilityElement(children: .combine)
   }
 
   private var coverage: some View {
@@ -149,7 +217,7 @@ struct DashboardView: View {
         }.font(.callout).foregroundStyle(.secondary).padding(.top, 12)
       } label: {
         HStack(spacing: 12) {
-          IconTile(symbol: "checklist", size: 34)
+          IconTile(symbol: "checklist", size: 34, swatch: AppTheme.Swatch.slate)
           VStack(alignment: .leading, spacing: 3) {
             Text("Know what’s been checked").font(.system(size: 13, weight: .semibold))
             Text("\(model.scanCompletedAreas.count) completed categories · \(model.ignoredPaths.count) exclusions · \(model.scanIssues.count) issues")
@@ -165,7 +233,7 @@ struct DashboardView: View {
     if let status = model.trashStatus, status.items > 0 || !status.isComplete {
       SurfaceCard {
         HStack(spacing: 14) {
-          IconTile(symbol: "trash")
+          IconTile(symbol: "trash", swatch: AppTheme.Swatch.graphite)
           VStack(alignment: .leading, spacing: 4) {
             Text("Still in the Trash").font(.headline)
             Text(status.isComplete

@@ -9,12 +9,17 @@ final class AppearanceTests: XCTestCase {
     for name in [NSAppearance.Name.aqua, .darkAqua] {
       let appearance = try XCTUnwrap(NSAppearance(named: name))
       appearance.performAsCurrentDrawingAppearance {
-        for background in [AppTheme.canvas, AppTheme.surface, AppTheme.panel, AppTheme.hero, AppTheme.selection] {
+        for background in [AppTheme.canvas, AppTheme.surface, AppTheme.panel, AppTheme.heroStart, AppTheme.heroMiddle,
+          AppTheme.heroEnd, AppTheme.selection] {
           for foreground in [AppTheme.ink, AppTheme.accentText, AppTheme.warning, AppTheme.danger, AppTheme.info, AppTheme.violet] {
             XCTAssertGreaterThanOrEqual(contrast(foreground, background), 4.5, "Text contrast in \(name.rawValue)")
           }
         }
         XCTAssertGreaterThanOrEqual(contrast(.white, AppTheme.accent), 4.5, "Primary button label")
+        for swatch in [AppTheme.Swatch.mint, .sky, .indigo, .violet, .pink, .orange, .amber, .slate, .graphite, .iris, .teal, .rose] {
+          XCTAssertGreaterThanOrEqual(contrast(.white, swatch.start), 4.5, "White on a colored tile")
+          XCTAssertGreaterThanOrEqual(contrast(.white, swatch.end), 4.5, "White on a colored tile")
+        }
       }
     }
   }

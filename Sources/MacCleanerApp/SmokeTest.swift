@@ -188,6 +188,13 @@ enum SmokeTest {
         render(prefix + "-Performance-Populated-" + state.rawValue, view)
         render(prefix + "-Performance-Compact-" + state.rawValue, view, width: 980, height: 660)
       }
+      model.selectedSection = .applications
+      model.tourStep = GuidedTour.steps.firstIndex { $0.target == .apps }
+      render(prefix + "-Tour-apps", RootView())
+      model.selectedSection = .dashboard
+      model.tourStep = GuidedTour.steps.firstIndex { $0.target == .review }
+      render(prefix + "-Tour-review", RootView(), width: 980, height: 660)
+      model.tourStep = nil
       render(prefix + "-Organizer", OrganizerView(), width: 840, height: 660)
       render(prefix + "-Photo-deck", PhotoReviewDeck(), width: 720, height: 480)
       let reviewSession = model.photoReviewSession
@@ -223,7 +230,12 @@ enum SmokeTest {
     }
     scheme = .light
     render("Help", HelpView())
-    render("Account access", AccountAccessSheet())
+    render("Account access", AccountAccessSheet(), width: 560, height: 620)
+    render("Account paid action", AccountAccessSheet(purpose: .paidAction, hasDeferredPlan: true), width: 560, height: 620)
+    render("Account overview", AccountOverviewPanel(details: .init(email: "owner@example.com",
+      plan: "Pro • Access until Oct 20, 2027", planActive: true, devices: "2 of 3 in use",
+      thisMac: "Example MacBook Pro", offline: false), refresh: {}, manage: {}, signOut: {}).padding(24),
+      width: 560, height: 360)
     render("Command palette", CommandPalette())
 
     let seconds = Date().timeIntervalSince(started)
@@ -246,9 +258,17 @@ enum SmokeTest {
       swapUsedBytes: 512_000_000, pressure: .normal)
     let rows: [PerformancePresentation.App] = [
       .init(id: .init(pid: 401, started: 1), name: "Code Studio", bundleID: "example.code-studio",
-        memoryBytes: 3 * gb, cpuPercent: 185.4, fallbackSymbol: "hammer.fill"),
+        memoryBytes: 3 * gb, cpuPercent: 185.4, fallbackSymbol: "hammer.fill",
+        helpers: ProcessFamilies.Helpers(count: 6, memoryBytes: 2 * gb, cpuPercent: 120.2, largest: [
+          .init(pid: 501, name: "Code Studio Helper (Plugin)", memoryBytes: 900_000_000, cpuPercent: 96.3),
+          .init(pid: 502, name: "language-server", memoryBytes: 600_000_000, cpuPercent: 20.1),
+        ]), ownMemoryBytes: gb, ownCPUPercent: 65.2),
       .init(id: .init(pid: 402, started: 2), name: "Browser", bundleID: "example.browser",
-        memoryBytes: 2 * gb, cpuPercent: 32.6, fallbackSymbol: "globe"),
+        memoryBytes: 2 * gb, cpuPercent: 32.6, fallbackSymbol: "globe",
+        helpers: ProcessFamilies.Helpers(count: 9, memoryBytes: 1_600_000_000, cpuPercent: 28.1, largest: [
+          .init(pid: 511, name: "Browser Helper (Renderer)", memoryBytes: 700_000_000, cpuPercent: 18.0),
+          .init(pid: 512, name: "Browser Helper (GPU)", memoryBytes: 400_000_000, cpuPercent: 6.4),
+        ]), ownMemoryBytes: 400_000_000, ownCPUPercent: 4.5),
       .init(id: .init(pid: 403, started: 3), name: "Design Workspace with a longer application name", bundleID: "example.design-workspace",
         memoryBytes: 1_400_000_000, cpuPercent: 5.7, fallbackSymbol: "paintpalette.fill"),
       .init(id: .init(pid: 404, started: 4), name: "Music", bundleID: "example.music",

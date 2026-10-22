@@ -19,12 +19,14 @@ struct DeveloperView: View {
       Divider()
       projectBar
       Divider()
-      if model.isScanning && model.operationTitle == "Developer & AI" {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Looking through Xcode, package managers, and model caches…").foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      if model.isScanning && (model.operationTitle == "Developer & AI" || (model.devItems.isEmpty && !model.developerScanned)) {
+        let own = model.operationTitle == "Developer & AI" || model.operationTitle == "Quick Scan"
+        LoadingState(title: own ? "Looking through your developer tools…" : "Developer data is next",
+          detail: own
+            ? "Measuring Xcode build data, simulators, package-manager caches and local AI models."
+            : "\(model.operationTitle ?? "Another scan") is running. This page loads as soon as it finishes.",
+          symbol: "hammer.fill", swatch: .orange,
+          cancel: model.operationTitle == "Developer & AI" ? { model.cancelCurrentOperation() } : nil)
       } else if model.devItems.isEmpty {
         EmptyState(
           icon: "hammer", title: "Find developer and AI clutter",
@@ -48,6 +50,7 @@ struct DeveloperView: View {
         .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.developer) }
   }
 
   private var header: some View {

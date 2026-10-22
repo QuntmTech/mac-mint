@@ -32,6 +32,7 @@ extension AppViewModel {
         return
       }
       devItems = report.value
+      developerScanned = true
       selectedDevIDs = Set(report.value.filter(\.isSuggested).map(\.id))
       scanIssues = report.issues
       lastScanDuration = report.duration

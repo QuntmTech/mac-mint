@@ -33,9 +33,13 @@ struct HelpView: View {
         topic("Why didn't my free space increase?", "Moving files to Trash does not free their space. Review Trash in Finder when you no longer need recovery. APFS snapshots, shared file blocks and other activity can affect the observed change.")
         topic("An area could not be read", "Check the scan issues. Full Disk Access can improve coverage; choose System Settings → Privacy & Security → Full Disk Access. Continue without it to inspect permitted locations.")
         topic("How do I restore?", "Open History and expand an operation. Restore never overwrites another item. For conflicts, choose another folder. Photos assets are recovered through Photos, while available in Recently Deleted. iCloud Photos deletion also affects synced devices.")
-        topic("What is included in Quick Scan?", "Known cache locations, installed apps, startup metadata, Downloads, removed-app data and home Trash. Whole-folder storage maps, duplicate comparisons, photo analysis and deep project scans start only when you choose them.")
+        topic("What is included in Quick Scan?", "Known cache locations, installed apps, startup metadata, Downloads, removed-app data and home Trash. It runs when MacMint opens (turn that off in Settings), and pages that need it load the first time you open them. Whole-folder storage maps, duplicate comparisons and photo analysis start only when you choose them.")
         topic("How does AI use my data?", "AI is optional and cannot select or remove items. Automatic context uses storage categories and known tool identifiers. Your typed question and recent conversation are sent as written. Preview the context before enabling AI.")
         HStack {
+          Button("Take the Quick Tour") {
+            dismiss()
+            model.startTour()
+          }.buttonStyle(MintButtonStyle(prominent: false))
           Button("Permissions & Setup…") { showPermissions = true }
           Button("Contact Support") { NSWorkspace.shared.open(URL(string: "mailto:support@macmint.co")!) }
         }

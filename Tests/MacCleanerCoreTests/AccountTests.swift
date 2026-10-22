@@ -115,6 +115,18 @@ final class AccountTests: XCTestCase {
     XCTAssertEqual(body, ["code": "MINT-1", "device_id": "ABCDEF0123456789"])
   }
 
+  func testVerificationRequestSendsTheTrimmedEmailAndReportsFailure() async throws {
+    let box = RequestBox()
+    try await client(status: 204, json: "", capture: box).requestVerification(email: " new@b.co ")
+    XCTAssertEqual(box.request?.url?.path, "/api/collections/users/request-verification")
+    let body = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(box.request?.httpBody)) as? [String: String])
+    XCTAssertEqual(body, ["email": "new@b.co"])
+    do {
+      try await client(status: 400, json: #"{"message":"Failed"}"#).requestVerification(email: "new@b.co")
+      XCTFail("A refused request must not look like a sent email")
+    } catch is AccountAPIError {}
+  }
+
   func testTransportFailuresAreClassifiedWithoutMakingCancellationOrTLSOfflineEligible() async {
     let cases: [(Error, String)] = [
       (CancellationError(), "cancelled"), (URLError(.cancelled), "cancelled"),

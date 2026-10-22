@@ -21,7 +21,39 @@ struct AppTheme {
   static let danger = adaptive("Danger", light: 0xB33430, dark: 0xFF958D)
   static let info = adaptive("Info", light: 0x1C65A6, dark: 0x8AC4F4)
   static let violet = adaptive("Violet", light: 0x754B9B, dark: 0xCBB0EF)
-  static let hero = adaptive("Hero", light: 0xEEEEF2, dark: 0x26262D)
+  /// The Overview hero's soft wash: mint into sky into lavender, deep tones in Dark Mode.
+  static let heroStart = adaptive("HeroStart", light: 0xE4F7EE, dark: 0x0F2B25)
+  static let heroMiddle = adaptive("HeroMiddle", light: 0xE8F1FD, dark: 0x132238)
+  static let heroEnd = adaptive("HeroEnd", light: 0xF0EBFD, dark: 0x1E1B3A)
+
+  /// One color per area of the app, used for its sidebar badge, tiles and icons. White
+  /// labels meet WCAG AA (at least 4.5:1) on both stops of every swatch.
+  struct Swatch: Equatable, Sendable {
+    let start: Color
+    let end: Color
+    var color: Color { start }
+    var gradient: LinearGradient {
+      LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+
+    static let mint = Swatch(start: rgb(0x047857), end: rgb(0x0F766E))
+    static let sky = Swatch(start: rgb(0x0369A1), end: rgb(0x1D4ED8))
+    static let indigo = Swatch(start: rgb(0x4F46E5), end: rgb(0x7C3AED))
+    static let violet = Swatch(start: rgb(0x7C3AED), end: rgb(0xC026D3))
+    static let pink = Swatch(start: rgb(0xDB2777), end: rgb(0xE11D48))
+    static let orange = Swatch(start: rgb(0xC2410C), end: rgb(0xB45309))
+    static let amber = Swatch(start: rgb(0xB45309), end: rgb(0xA16207))
+    static let slate = Swatch(start: rgb(0x475569), end: rgb(0x334155))
+    static let graphite = Swatch(start: rgb(0x52525B), end: rgb(0x3F3F46))
+    static let iris = Swatch(start: rgb(0x6D28D9), end: rgb(0x2563EB))
+    static let teal = Swatch(start: rgb(0x0F766E), end: rgb(0x0E7490))
+    static let rose = Swatch(start: rgb(0xBE123C), end: rgb(0x9F1239))
+
+    private static func rgb(_ hex: UInt32) -> Color {
+      Color(.sRGB, red: Double((hex >> 16) & 255) / 255, green: Double((hex >> 8) & 255) / 255,
+        blue: Double(hex & 255) / 255)
+    }
+  }
 
   private static func adaptive(_ name: String, light: UInt32, dark: UInt32) -> Color {
     Color(nsColor: NSColor(name: "MacMint" + name) { appearance in
@@ -29,6 +61,40 @@ struct AppTheme {
       return NSColor(srgbRed: Double((hex >> 16) & 255) / 255,
         green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255, alpha: 1)
     })
+  }
+}
+
+extension AppViewModel.Section {
+  /// Tabs share their workspace's color, so a page always matches its sidebar badge.
+  var swatch: AppTheme.Swatch {
+    switch parent {
+    case .dashboard, .review: return .mint
+    case .cleaner: return .sky
+    case .storage: return .indigo
+    case .applications: return .violet
+    case .photos: return .pink
+    case .developer: return .orange
+    case .assistant: return .iris
+    case .history: return .slate
+    default: return .graphite
+    }
+  }
+}
+
+/// A System Settings–style badge: a white glyph on its area's color.
+struct SwatchBadge: View {
+  let symbol: String
+  let swatch: AppTheme.Swatch
+  var size: CGFloat = 24
+
+  var body: some View {
+    let shape = RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
+    Image(systemName: symbol).font(.system(size: size * 0.46, weight: .semibold))
+      .foregroundStyle(.white).frame(width: size, height: size)
+      .background(swatch.gradient, in: shape)
+      .overlay(shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5))
+      .shadow(color: swatch.color.opacity(0.25), radius: 1.5, y: 1)
+      .accessibilityHidden(true)
   }
 }
 
@@ -49,6 +115,7 @@ struct MetricCard: View {
   let value: String
   let subtitle: String
   let icon: String
+  var swatch: AppTheme.Swatch? = nil
   var action: (() -> Void)? = nil
 
   var body: some View {
@@ -62,7 +129,7 @@ struct MetricCard: View {
     SurfaceCard {
       VStack(alignment: .leading, spacing: 12) {
         HStack {
-          IconTile(symbol: icon, size: 34)
+          IconTile(symbol: icon, size: 34, swatch: swatch)
           Spacer()
           if action != nil { Image(systemName: "arrow.up.right").font(.caption).foregroundStyle(.secondary) }
         }
@@ -141,6 +208,68 @@ struct EmptyState: View {
   }
 }
 
+/// What a page shows while its first results are on the way, instead of an empty list: what
+/// is happening, how far along it is when that's known, and placeholder rows in the shape of
+/// the results. The only motion is the system spinner, so it costs next to nothing to show.
+struct LoadingState: View {
+  let title: String
+  let detail: String
+  var symbol = "magnifyingglass"
+  var swatch: AppTheme.Swatch = .mint
+  /// 0...1 when the amount of work is known.
+  var progress: Double? = nil
+  /// Extra line under the detail, such as "42 of 180 apps".
+  var status: String? = nil
+  var rows = 5
+  var cancel: (() -> Void)? = nil
+
+  private static let titleWidths: [CGFloat] = [180, 140, 210, 120, 160]
+  private static let detailWidths: [CGFloat] = [90, 120, 70, 110, 80]
+
+  var body: some View {
+    VStack(spacing: 18) {
+      HStack(spacing: 14) {
+        SwatchBadge(symbol: symbol, swatch: swatch, size: 40)
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            Text(title).font(.system(size: 17, weight: .semibold)).foregroundStyle(AppTheme.ink)
+            ProgressView().controlSize(.small)
+          }
+          Text(detail).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+          if let status {
+            Text(status).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+          }
+        }
+        .accessibilityElement(children: .combine)
+        Spacer(minLength: 0)
+        if let cancel { Button("Cancel", action: cancel).controlSize(.small) }
+      }
+      if let progress {
+        ProgressView(value: min(1, max(0, progress))).tint(swatch.color)
+      }
+      VStack(spacing: 10) {
+        ForEach(0..<rows, id: \.self) { row in
+          HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8).fill(AppTheme.panel).frame(width: 34, height: 34)
+            VStack(alignment: .leading, spacing: 6) {
+              Capsule().fill(AppTheme.panel).frame(width: Self.titleWidths[row % 5], height: 9)
+              Capsule().fill(AppTheme.panel.opacity(0.7)).frame(width: Self.detailWidths[row % 5], height: 7)
+            }
+            Spacer()
+            Capsule().fill(AppTheme.panel).frame(width: 54, height: 9)
+          }
+          .opacity(1 - Double(row) * 0.14)
+        }
+      }
+      .accessibilityHidden(true)
+    }
+    .padding(24)
+    .frame(maxWidth: 620)
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    .padding(.top, 24)
+  }
+}
+
 struct StorageRing: View {
   let used: Int64
   let total: Int64
@@ -157,9 +286,13 @@ struct StorageRing: View {
     ZStack {
       Circle()
         .stroke(AppTheme.accentText.opacity(0.13), lineWidth: 12)
+      // Mint into teal into blue along the used arc.
       Circle()
         .trim(from: 0, to: fraction)
-        .stroke(AppTheme.accentText, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+        .stroke(AngularGradient(colors: [AppTheme.brand, Color(red: 0.05, green: 0.58, blue: 0.53), Color(red: 0.15, green: 0.39, blue: 0.92)],
+          // Starting a little before 12 o'clock keeps the rounded start cap mint, not the end color.
+          center: .center, startAngle: .degrees(-10), endAngle: .degrees(360 * max(fraction, 0.01))),
+          style: StrokeStyle(lineWidth: 12, lineCap: .round))
         .rotationEffect(.degrees(-90))
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.35), value: fraction)
       VStack(spacing: 2) {
@@ -174,7 +307,9 @@ struct StorageRing: View {
     .frame(width: 148, height: 148)
     .accessibilityElement(children: .ignore)
     .accessibilityLabel("Storage usage")
-    .accessibilityValue("\(Int(fraction * 100)) percent used. \(centerValue) \(centerLabel). \(ByteFormatter.string(used)) of \(ByteFormatter.string(total)) used.")
+    .accessibilityValue(total > 0
+      ? "\(Int(fraction * 100)) percent used. \(centerValue) \(centerLabel). \(ByteFormatter.string(used)) of \(ByteFormatter.string(total)) used."
+      : "Disk space unavailable")
   }
 }
 

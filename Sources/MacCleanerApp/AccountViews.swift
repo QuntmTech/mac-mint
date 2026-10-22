@@ -396,7 +396,7 @@ struct AccountSettingsCard: View {
         }
         if let snapshot = account.snapshot {
           row("Email", snapshot.user.email)
-          row("Access", account.isUnlocked ? planLabel(snapshot.entitlement) : "Verification required")
+          row("Access", account.isUnlocked ? snapshot.entitlement.planDescription : "Verification required")
           row(
             "Devices",
             "\(snapshot.devices.count) of \(max(snapshot.entitlement.maxDevices, 1)) in use")
@@ -415,7 +415,7 @@ struct AccountSettingsCard: View {
           } else {
             Label("Local inspection", systemImage: "desktopcomputer").font(.caption).foregroundStyle(.secondary)
             Spacer()
-            Button("Connect account") { model.showingAccount = true }.buttonStyle(MintButtonStyle(prominent: false))
+            Button("Connect account") { model.openAccount() }.buttonStyle(MintButtonStyle(prominent: false))
           }
         }
       }
@@ -437,38 +437,186 @@ struct AccountSettingsCard: View {
     .font(.callout)
   }
 
-  private func planLabel(_ entitlement: Entitlement) -> String {
-    guard entitlement.active else { return "No active plan" }
-    if let expiry = entitlement.expiryDate {
-      if entitlement.source == "subscription_trial" { return "Trial ends \(expiry.formatted(date: .abbreviated, time: .omitted))" }
+}
+
+extension Entitlement {
+  /// The plan as people read it: trial end, access end, lifetime or no active plan.
+  var planDescription: String {
+    guard active else { return "No active plan" }
+    if let expiry = expiryDate {
+      if source == "subscription_trial" { return "Trial ends \(expiry.formatted(date: .abbreviated, time: .omitted))" }
       return "Pro • Access until \(expiry.formatted(date: .abbreviated, time: .omitted))"
     }
-    return entitlement.isLifetime ? "Pro • Lifetime" : "Refresh account to verify expiry"
+    return isLifetime ? "Pro • Lifetime" : "Refresh account to verify expiry"
+  }
+}
+
+/// Why the account sheet is open. The profile button and "Connect account" show the
+/// account itself; a paid action that needs access shows the gate and, once access is
+/// confirmed, can return to its review. Opening or closing the account never resumes one.
+enum AccountSheetPurpose: Equatable, Sendable { case account, paidAction }
+
+/// The signed-in account: plan, devices and this Mac, with the actions MacMint supports.
+/// Takes display values only, so fixtures can render it without an account.
+struct AccountOverviewPanel: View {
+  struct Details: Equatable {
+    var email: String
+    var plan: String
+    var planActive: Bool
+    var devices: String
+    var thisMac: String
+    var offline: Bool
+  }
+  let details: Details
+  var busy = false
+  let refresh: () -> Void
+  let manage: () -> Void
+  let signOut: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      HStack(spacing: 12) {
+        SwatchBadge(symbol: "person.crop.circle.fill", swatch: .mint, size: 40)
+        VStack(alignment: .leading, spacing: 4) {
+          Text(details.email).font(.title3.weight(.semibold)).lineLimit(1).truncationMode(.middle)
+            .textSelection(.enabled)
+          StatusPill(title: details.plan, icon: details.planActive ? "checkmark.seal.fill" : "exclamationmark.circle",
+            tint: details.planActive ? AppTheme.accentText : AppTheme.warning)
+        }
+        Spacer(minLength: 0)
+      }
+      SurfaceCard {
+        VStack(spacing: 10) {
+          row("Devices", details.devices)
+          row("This Mac", details.thisMac)
+          row("Connection", details.offline ? "Offline · using saved access" : "Online")
+        }
+      }
+      Text("Billing, receipts and the devices on your plan are managed on your account page.")
+        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      HStack(spacing: 10) {
+        Button("Manage Account…", action: manage)
+        Button("Refresh", action: refresh).disabled(busy)
+        Spacer()
+        Button("Sign Out", role: .destructive, action: signOut)
+      }
+    }
+  }
+
+  private func row(_ title: String, _ value: String) -> some View {
+    HStack {
+      Text(title)
+      Spacer()
+      Text(value).foregroundStyle(.secondary).textSelection(.enabled)
+    }
+    .font(.callout)
+    .accessibilityElement(children: .combine)
   }
 }
 
 /// Account access is a recoverable sheet, never a gate around local scans or History.
 struct AccountAccessSheet: View {
+  var purpose: AccountSheetPurpose = .account
+  /// A paid action is waiting for access; RootView resumes its review when the sheet closes.
+  var hasDeferredPlan = false
   @EnvironmentObject private var account: AccountStore
   @Environment(\.dismiss) private var dismiss
+  @State private var confirmSignOut = false
+
   var body: some View {
-    VStack(alignment: .trailing, spacing: 0) {
-      Button("Continue inspecting locally") { dismiss() }.padding()
-      Group {
-        switch account.phase {
-        case .active where account.accessLapsed: GateScaffold { AccessLapsedPanel() }
-        case .active: Text("MacMint Pro is active. Return to review to confirm your selection.").padding(32)
-        case .checking: ProgressView("Checking account…").padding(50)
-        case .signedOut: GateScaffold { AuthForm() }
-        case .needsPlan: GateScaffold { RedeemForm() }
-        case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
-        case .deviceRemoved: GateScaffold { DeviceRemovedPanel() }
-        case .failed(let message): GateScaffold { FailurePanel(message: message) }
-        }
+    VStack(spacing: 0) {
+      HStack(spacing: 12) {
+        Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+        Spacer()
+        Button(closeTitle) { dismiss() }.keyboardShortcut(.cancelAction)
+      }
+      .padding(.horizontal, 20).padding(.vertical, 14)
+      Divider()
+      content
+    }
+    .frame(width: 560, height: usesScaffold ? 560 : nil)
+    .background(AppTheme.canvas)
+    // A waiting action continues once access is confirmed; the account itself stays open.
+    .onChange(of: account.isUnlocked) { _, unlocked in if unlocked, purpose == .paidAction { dismiss() } }
+    .onExitCommand { dismiss() }
+    .alert("Sign out of MacMint?", isPresented: $confirmSignOut) {
+      Button("Cancel", role: .cancel) {}
+      Button("Sign Out", role: .destructive) { Task { await account.signOut() } }
+    } message: {
+      Text("Sign out on this Mac. Your cleanup history and exclusions stay available here.")
+    }
+  }
+
+  @ViewBuilder private var content: some View {
+    switch account.phase {
+    case .active where account.accessLapsed: GateScaffold { AccessLapsedPanel() }
+    case .active:
+      if purpose == .paidAction { accessConfirmed } else { overview }
+    case .checking: ProgressView("Checking account…").padding(50)
+    case .signedOut: GateScaffold { AuthForm() }
+    case .needsPlan: GateScaffold { RedeemForm() }
+    case .deviceLimit(let message, let devices): GateScaffold { DeviceLimitPanel(message: message, devices: devices) }
+    case .deviceRemoved: GateScaffold { DeviceRemovedPanel() }
+    case .failed(let message): GateScaffold { FailurePanel(message: message) }
+    }
+  }
+
+  private var overview: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      AccountOverviewPanel(details: details, busy: account.isBusy,
+        refresh: { Task { await account.refreshAccess(force: true) } },
+        manage: { account.openAccountPage() },
+        signOut: { confirmSignOut = true })
+      GateMessages()
+    }
+    .padding(24)
+  }
+
+  private var accessConfirmed: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Label("Your MacMint Pro access is confirmed.", systemImage: "checkmark.seal.fill")
+        .font(.callout.weight(.medium)).foregroundStyle(AppTheme.accentText)
+      Text(hasDeferredPlan
+        ? "Continue to review the items you selected. Nothing moves until you confirm there."
+        : "Choose the action again to continue.")
+        .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+      if hasDeferredPlan {
+        HStack { Spacer(); Button("Continue to Review") { dismiss() }.buttonStyle(MintButtonStyle()) }
       }
     }
-    .frame(width: 560, height: 560)
-    .onChange(of: account.isUnlocked) { _, unlocked in if unlocked { dismiss() } }
-    .onExitCommand { dismiss() }
+    .padding(24)
+  }
+
+  private var details: AccountOverviewPanel.Details {
+    let snapshot = account.snapshot
+    return AccountOverviewPanel.Details(
+      email: snapshot?.user.email ?? "Signed in",
+      plan: account.isUnlocked ? snapshot?.entitlement.planDescription ?? "Pro" : "Verification required",
+      planActive: account.isUnlocked,
+      devices: snapshot.map { "\($0.devices.count) of \(max($0.entitlement.maxDevices, 1)) in use" } ?? "—",
+      thisMac: account.deviceInfo.name,
+      offline: account.isOffline)
+  }
+
+  /// Sign-in and plan panels need the taller scaffold; the account and progress fit their content.
+  private var usesScaffold: Bool {
+    switch account.phase {
+    case .active: return account.accessLapsed
+    case .checking: return false
+    default: return true
+    }
+  }
+
+  private var title: String {
+    switch account.phase {
+    case .active where !account.accessLapsed: return purpose == .paidAction ? "MacMint Pro is active" : "Account"
+    case .signedOut: return purpose == .paidAction ? "Sign in to continue" : "Connect your MacMint account"
+    default: return purpose == .paidAction ? "MacMint Pro is needed for this step" : "Account"
+    }
+  }
+
+  private var closeTitle: String {
+    guard purpose == .paidAction else { return "Done" }
+    return account.isUnlocked ? "Not Now" : "Continue inspecting locally"
   }
 }

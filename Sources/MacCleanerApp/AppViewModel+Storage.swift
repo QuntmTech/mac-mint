@@ -9,16 +9,39 @@ struct VolumeSummary: Equatable, Sendable {
   var used: Int64 = 0
   var free: Int64 = 0
   var total: Int64 = 0
+  /// False when macOS did not report both capacities; the zeros are then unknown, not empty.
+  var isMeasured: Bool { total > 0 }
 
   static func read(_ url: URL = FileManager.default.homeDirectoryForCurrentUser) -> VolumeSummary {
+    let reading = capacity(url)
+    return summary(name: reading.name, total: reading.total, free: reading.free)
+  }
+
+  /// The one capacity reading of the startup (Data) volume used by the menu bar, the sidebar,
+  /// Overview, history and low-space alerts: space for important use (which includes space
+  /// macOS can purge), else plain available space. Missing values stay nil, never zero.
+  static func capacity(_ url: URL = FileManager.default.homeDirectoryForCurrentUser)
+    -> (name: String?, free: Int64?, total: Int64?) {
     let values = try? url.resourceValues(forKeys: [
       .volumeLocalizedNameKey, .volumeTotalCapacityKey,
       .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
     ])
-    let total = Int64(values?.volumeTotalCapacity ?? 0)
-    let free = values?.volumeAvailableCapacityForImportantUsage ?? Int64(values?.volumeAvailableCapacity ?? 0)
-    return VolumeSummary(name: values?.volumeLocalizedName ?? "Startup Disk",
-      used: max(0, total - free), free: max(0, free), total: max(0, total))
+    return (values?.volumeLocalizedName,
+      values?.volumeAvailableCapacityForImportantUsage ?? values?.volumeAvailableCapacity.map(Int64.init),
+      values?.volumeTotalCapacity.map(Int64.init))
+  }
+
+  /// True when the sidebar and Overview would show the same text and state.
+  func displaysSame(as other: VolumeSummary) -> Bool {
+    name == other.name && total == other.total && isMeasured == other.isMeasured
+      && ByteFormatter.string(free) == ByteFormatter.string(other.free)
+      && ByteFormatter.string(used) == ByteFormatter.string(other.used)
+  }
+
+  static func summary(name: String?, total: Int64?, free: Int64?) -> VolumeSummary {
+    let name = name ?? "Startup Disk"
+    guard let total, total > 0, let free, free >= 0 else { return VolumeSummary(name: name) }
+    return VolumeSummary(name: name, used: max(0, total - free), free: free, total: total)
   }
 }
 
@@ -26,7 +49,9 @@ extension AppViewModel {
   @discardableResult
   func refreshVolumeSummary() async -> VolumeSummary {
     let reading = await Task.detached(priority: .utility) { VolumeSummary.read() }.value
-    if reading != volume { volume = reading }
+    // Every view observing the model redraws when `volume` changes, and free space moves by a
+    // few bytes almost every minute; only a change people can see is published.
+    if !reading.displaysSame(as: volume) { volume = reading }
     return reading
   }
 

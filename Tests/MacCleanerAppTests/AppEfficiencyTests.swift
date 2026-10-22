@@ -46,6 +46,47 @@ final class AppEfficiencyTests: XCTestCase {
     XCTAssertEqual(diskReads, 2)
   }
 
+  func testFailedDiskReadsAreUnknownOrStaleNeverAFabricatedZero() async {
+    let now = LockedValue<TimeInterval>(0)
+    let next = LockedValue<(free: Int64, total: Int64)?>(nil)
+    let sampler = ResourceSampler(readDisk: { next.value }, clock: { now.value })
+    var snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertFalse(snapshot.hasDiskReading); XCTAssertNil(snapshot.diskUsedFraction)
+    XCTAssertFalse(snapshot.diskStale, "Nothing was ever measured, so nothing is stale")
+    next.value = (free: 0, total: 0); now.value = 60
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertFalse(snapshot.hasDiskReading, "A zero capacity is a missing reading, not a full disk")
+    next.value = (free: 40, total: 100); now.value = 120
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 40); XCTAssertEqual(snapshot.diskUsedFraction, 0.6); XCTAssertFalse(snapshot.diskStale)
+    next.value = nil; now.value = 180
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 40, "A failed read keeps the last good capacity")
+    XCTAssertEqual(snapshot.totalBytes, 100); XCTAssertTrue(snapshot.diskStale)
+    next.value = (free: 30, total: 100); now.value = 240
+    snapshot = await sampler.read(pids: []).snapshot
+    XCTAssertEqual(snapshot.freeBytes, 30); XCTAssertFalse(snapshot.diskStale)
+  }
+
+  func testVolumeSummaryTreatsMissingCapacityAsUnmeasured() {
+    XCTAssertFalse(VolumeSummary.summary(name: nil, total: nil, free: 5).isMeasured)
+    XCTAssertFalse(VolumeSummary.summary(name: "Data", total: 100, free: nil).isMeasured)
+    XCTAssertFalse(VolumeSummary.summary(name: "Data", total: 0, free: 0).isMeasured)
+    let measured = VolumeSummary.summary(name: "Data", total: 100, free: 0)
+    XCTAssertTrue(measured.isMeasured, "A measured zero is a real full disk")
+    XCTAssertEqual(measured.used, 100); XCTAssertEqual(measured.name, "Data")
+  }
+
+  func testVolumeReadingsThatLookTheSameDoNotRedrawTheWorkspace() {
+    let gb: Int64 = 1_000_000_000
+    let shown = VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 92_400_000_000)
+    XCTAssertTrue(shown.displaysSame(as: VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 92_400_004_096)),
+      "A few bytes of change display the same and aren't published")
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary.summary(name: "Macintosh HD", total: 500 * gb, free: 91 * gb)))
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary()), "Becoming unavailable is a visible change")
+    XCTAssertFalse(shown.displaysSame(as: VolumeSummary.summary(name: "Data", total: 500 * gb, free: 92_400_000_000)))
+  }
+
   func testWindowLeasesSampleOnlyWhileTheWorkspaceIsInFront() {
     let front = Box(false)
     let activity = AppActivity(center: NotificationCenter(), evaluate: { front.value })
@@ -56,13 +97,18 @@ final class AppEfficiencyTests: XCTestCase {
     XCTAssertNil(monitor.samplingInterval, "Hidden, inactive, minimized or covered windows don't sample")
     front.value = true; activity.refresh()
     XCTAssertEqual(monitor.samplingInterval, 20); XCTAssertTrue(monitor.publishesReadings)
+    XCTAssertTrue(monitor.listsHelpers, "The visible Performance list shows helper totals")
     front.value = false; activity.refresh()
     XCTAssertNil(monitor.samplingInterval); XCTAssertFalse(monitor.publishesReadings)
+    XCTAssertFalse(monitor.listsHelpers)
     monitor.start(lease: popover, interval: 15, kind: .popover)
     XCTAssertEqual(monitor.samplingInterval, 15, "An open menu bar popover keeps its own live readings")
     XCTAssertTrue(monitor.publishesReadings)
+    XCTAssertTrue(monitor.listsHelpers, "The open Performance list behind it still shows totals with helpers")
+    monitor.stop(lease: window)
+    XCTAssertFalse(monitor.listsHelpers, "The popover alone shows no per-app rows")
     monitor.stop(lease: popover); XCTAssertNil(monitor.samplingInterval)
-    monitor.stop(lease: window); XCTAssertEqual(monitor.activeLeaseCount, 0)
+    XCTAssertEqual(monitor.activeLeaseCount, 0)
   }
 
   func testAutoTameAddsNoPollingWhileOffAndSharesTheSamplerSilentlyWhileOn() throws {

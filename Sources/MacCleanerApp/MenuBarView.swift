@@ -77,12 +77,15 @@ private struct MenuBarReadings: View {
       HStack {
         Text(volumeName).font(.callout.weight(.medium))
         Spacer()
-        Text("\(ByteFormatter.string(snapshot.freeBytes)) free")
+        Text(diskText)
           .font(.callout.monospacedDigit())
           .foregroundStyle(.secondary)
+          .help(snapshot.diskStale ? "macOS did not answer the last disk check; this is the previous reading."
+            : "Space for new files, including space macOS can free on its own when needed")
       }
-      ProgressView(value: snapshot.diskUsedFraction)
-        .tint(snapshot.diskUsedFraction > 0.9 ? .orange : AppTheme.accent)
+      ProgressView(value: snapshot.diskUsedFraction ?? 0)
+        .tint((snapshot.diskUsedFraction ?? 0) > 0.9 ? .orange : AppTheme.accent)
+        .opacity(snapshot.hasDiskReading ? 1 : 0.35)
     }
 
     HStack(spacing: 8) {
@@ -103,13 +106,19 @@ private struct MenuBarReadings: View {
     }
   }
 
+  private var diskText: String {
+    guard snapshot.hasDiskReading else { return "Free space unavailable" }
+    return "\(ByteFormatter.string(snapshot.freeBytes)) free" + (snapshot.diskStale ? " (earlier reading)" : "")
+  }
+
   private var monitorSummary: String {
     switch snapshot.pressure {
     case .critical: return "Memory is under heavy pressure"
     case .warning: return "Memory is getting tight"
     case .unknown: return "Readings are not available yet"
     case .normal:
-      return snapshot.diskUsedFraction > 0.9 ? "Disk is almost full" : "Everything looks healthy"
+      guard let used = snapshot.diskUsedFraction else { return "Memory is normal · disk space unknown" }
+      return used > 0.9 ? "Disk is almost full" : "Everything looks healthy"
     }
   }
 

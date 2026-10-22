@@ -264,6 +264,14 @@ public struct AccountClient: Sendable {
     return try await signIn(email: trimmedEmail, password: password)
   }
 
+  /// Asks the server to email a verification link. Success means the request was accepted,
+  /// not that the email arrived.
+  public func requestVerification(email: String) async throws {
+    let _: EmptyResponse = try await send(
+      "POST", "/api/collections/users/request-verification",
+      body: ["email": email.trimmingCharacters(in: .whitespaces)])
+  }
+
   public func refresh(token: String) async throws -> AuthSession {
     let response: AuthResponse = try await send(
       "POST", "/api/collections/users/auth-refresh", token: token)

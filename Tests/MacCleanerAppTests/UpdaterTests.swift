@@ -98,4 +98,18 @@ final class UpdaterTests: XCTestCase {
     XCTAssertEqual(installs, 1, "The install continues once, after the operation ends")
     XCTAssertFalse(controller.isWaitingForWork)
   }
+
+  func testCheckResultsFollowSparklesReasonAndSeparateAMissingFeed() {
+    let domain = "SUSparkleErrorDomain"
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1001, reason: 1), .newest)
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1001, reason: 2), .newerThanChannel)
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1001, reason: 3), .needsNewerMacOS)
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1001, reason: 4), .unsupportedMacOS)
+    XCTAssertNil(UpdaterController.checkResult(domain: domain, code: 1001, reason: 0), "An unknown reason claims nothing")
+    XCTAssertNil(UpdaterController.checkResult(domain: domain, code: 1001, reason: nil))
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1002, reason: nil), .failed)
+    XCTAssertEqual(UpdaterController.checkResult(domain: domain, code: 1000, reason: nil), .failed)
+    XCTAssertNil(UpdaterController.checkResult(domain: domain, code: 4007, reason: nil), "A cancelled install says nothing new")
+    XCTAssertNil(UpdaterController.checkResult(domain: NSURLErrorDomain, code: -1009, reason: nil))
+  }
 }

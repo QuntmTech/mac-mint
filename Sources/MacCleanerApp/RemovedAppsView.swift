@@ -40,18 +40,22 @@ struct RemovedAppsView: View {
       .padding(AppTheme.pagePadding)
       Divider()
 
-      if model.isScanning && model.operationTitle == "Removed Apps" {
-        VStack(spacing: 12) {
-          ProgressView().controlSize(.large)
-          Text("Comparing your Library with installed apps…").foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      if model.isScanning && (model.operationTitle == "Removed Apps" || (model.orphans.isEmpty && !model.orphansScanned)) {
+        let own = model.operationTitle == "Removed Apps" || model.operationTitle == "Quick Scan"
+        LoadingState(title: own ? "Looking for app leftovers…" : "Removed-app data is next",
+          detail: own
+            ? "Comparing your Library with the apps you have installed. Only data no installed app claims is listed."
+            : "\(model.operationTitle ?? "Another scan") is running. This page loads as soon as it finishes.",
+          symbol: "folder.badge.questionmark", swatch: .violet,
+          cancel: model.operationTitle == "Removed Apps" ? { model.cancelCurrentOperation() } : nil)
       } else if model.orphans.isEmpty {
         EmptyState(
           icon: model.orphansScanned ? "checkmark.seal" : "folder.badge.questionmark",
           title: model.orphansScanned ? "No leftovers found" : "Find leftovers from apps you've deleted",
           detail:
-            "Only data whose app identifier no installed app claims is listed. macOS's own data is never included.")
+            "Only data whose app identifier no installed app claims is listed. macOS's own data is never included.",
+          actionTitle: model.orphansScanned ? nil : "Find Leftovers",
+          action: model.orphansScanned ? nil : { model.scanOrphans() })
       } else {
         List {
           ForEach(grouped, id: \.0) { bundleID, items in
@@ -74,6 +78,7 @@ struct RemovedAppsView: View {
         .listStyle(.inset)
       }
     }
+    .task(id: model.autoLoadKey) { model.autoLoadIfNeeded(.removedApps) }
   }
 
   private func row(_ item: OrphanedItem) -> some View {
