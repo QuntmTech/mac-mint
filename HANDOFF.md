@@ -10,6 +10,13 @@ Updated 2026-10-19. This is the entry point for Claude Code or another reviewer.
 - **Installer** (`scripts/build_dmg.sh`, `scripts/dmg_settings.py`): a designed drag-to-Applications window using pinned dmgbuild. The app's extension is not hidden, because the FinderInfo that hiding writes fails `codesign --verify --strict`.
 - **Sign-up** (`Account.swift`): in-app sign-up now requests the verification email, as the website does.
 - **Resource probe**: the heavy-session hidden window now starts 5 s after hiding, like scenario (c). The trace showed the overage was the hide itself (one second at about 10% of a core). Budgets are unchanged. See [Performance interface notes](docs/PERFORMANCE_UX.md).
+- **Guided tour** (`GuidedTour.swift`): after setup, a skippable tour dims the window and explains each area one at a time. Existing users get a "Take the Tour" card on Overview, and the tour is also in the Help menu, the Help sheet and ⌘K.
+- **Pages fill themselves** (`AppViewModel+AutoLoad.swift`):
+  - Quick Scan runs when MacMint opens (setting `care.scanOnLaunch`, default on; only after setup and with the window in front).
+  - Apps, Cleanup, Startup Items, Removed Apps, Downloads, Developer and Large Files load themselves the first time they open: once per session, not during the tour, and after any running scan.
+  - Storage, Duplicates and Photos keep explicit start screens.
+  - `LoadingState` replaces the blank lists and one-off spinners.
+  - Probe launches pass `-care.scanOnLaunch NO`, and `--resource-probe` starts nothing automatically.
 - **Backend, read-only audit** (owner actions, not code):
   - No email is delivered. PocketBase SMTP is off, with the placeholder `smtp.example.com`. Verification and password-reset mails fail.
   - No installer can be downloaded. `app_releases` is empty, and every GitHub release is a pre-release.

@@ -84,6 +84,9 @@ struct DashboardView: View {
     model.lastScanDate == nil && model.cleanupTargets.isEmpty ? "—" : ByteFormatter.string(bytes)
   }
 
+  /// Quick Scan itself, as opposed to another page's scan that also sets `isScanning`.
+  private var quickScanning: Bool { model.isScanning && model.operationTitle == "Quick Scan" }
+
   private var hero: some View {
     let stats = model.volume
     return HStack(spacing: 24) {
@@ -91,7 +94,7 @@ struct DashboardView: View {
         Label("QUICK SCAN", systemImage: "sparkle")
           .font(.system(size: 10, weight: .semibold)).tracking(1.6).foregroundStyle(AppTheme.accentText)
         VStack(alignment: .leading, spacing: 10) {
-          Text(model.isScanning ? "Getting the full picture." : "Make space, confidently.")
+          Text(quickScanning ? "Getting the full picture." : "Make space, confidently.")
             .font(.system(size: 32, weight: .semibold)).tracking(-1.1).foregroundStyle(AppTheme.ink)
             .fixedSize(horizontal: false, vertical: true)
           Text("Find caches, app leftovers, and developer clutter. You review every change before anything moves.")
@@ -103,9 +106,12 @@ struct DashboardView: View {
           VStack(alignment: .leading, spacing: 10) { scanButton; reviewButton }
         }
         HStack(spacing: 6) {
-          if model.isScanning {
+          if quickScanning {
             ProgressView().controlSize(.mini)
-            Text(model.scanCompletedAreas.isEmpty ? "Checking known storage locations…" : "\(model.scanCompletedAreas.count) categories complete")
+            Text(model.scanCompletedAreas.isEmpty ? "Checking known storage locations…" : "\(model.scanCompletedAreas.count) of 5 checks done")
+          } else if model.isScanning {
+            ProgressView().controlSize(.mini)
+            Text("\(model.operationTitle ?? "A scan") is running · Quick Scan can start when it finishes")
           } else {
             Image(systemName: model.lastScanDate == nil ? "lock.shield" : "clock")
             if let date = model.lastScanDate {
@@ -138,18 +144,18 @@ struct DashboardView: View {
 
   private var scanButton: some View {
     Button { model.runSmartCare() } label: {
-      Label(model.isScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
+      Label(quickScanning ? "Scanning…" : "Run Quick Scan", systemImage: "sparkles")
     }.buttonStyle(MintButtonStyle()).disabled(model.isScanning || model.isWorking)
       .tourTarget(.quickScan)
   }
 
   @ViewBuilder private var reviewButton: some View {
-    if model.isScanning {
+    if quickScanning {
       Button("Cancel scan") { model.cancelCurrentOperation() }.buttonStyle(MintButtonStyle(prominent: false))
     } else if model.safeRecommendationBytes > 0 {
       Button { model.reviewAllSafe() } label: {
         Label("Review \(ByteFormatter.string(model.safeRecommendationBytes))", systemImage: "checklist")
-      }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking)
+      }.buttonStyle(MintButtonStyle(prominent: false)).disabled(model.isWorking || model.isScanning)
         .help("Review rebuildable items before moving them to Trash")
     }
   }
