@@ -120,13 +120,13 @@ struct OnboardingView: View {
   }
 
   private var sidePanelBackground: some View {
-    ZStack {
-      AppTheme.heroGradient
-      Image(systemName: "leaf.fill").font(.system(size: 170)).foregroundStyle(Color.white.opacity(0.06))
-        .rotationEffect(.degrees(-18)).offset(x: 60, y: 30)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-    }
-    .clipped()
+    // An overlay takes the panel's size; the leaf can never make the panel bigger.
+    AppTheme.heroGradient
+      .overlay(alignment: .bottomTrailing) {
+        Image(systemName: "leaf.fill").font(.system(size: 170)).foregroundStyle(Color.white.opacity(0.06))
+          .rotationEffect(.degrees(-18)).offset(x: 60, y: 30)
+      }
+      .clipped()
     .accessibilityHidden(true)
   }
 

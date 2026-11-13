@@ -115,13 +115,13 @@ private struct AccountBrandPanel: View {
   }
 
   private var panelBackground: some View {
-    ZStack {
-      AppTheme.heroGradient
-      Image(systemName: "leaf.fill").font(.system(size: 150)).foregroundStyle(Color.white.opacity(0.06))
-        .rotationEffect(.degrees(-18)).offset(x: 54, y: 24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-    }
-    .clipped()
+    // An overlay takes the panel's size; the leaf can never make the panel bigger.
+    AppTheme.heroGradient
+      .overlay(alignment: .bottomTrailing) {
+        Image(systemName: "leaf.fill").font(.system(size: 150)).foregroundStyle(Color.white.opacity(0.06))
+          .rotationEffect(.degrees(-18)).offset(x: 54, y: 24)
+      }
+      .clipped()
     .accessibilityHidden(true)
   }
 
