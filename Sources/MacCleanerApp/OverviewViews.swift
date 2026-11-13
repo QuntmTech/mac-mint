@@ -366,12 +366,12 @@ struct CategoryTile: View {
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
       .padding(.horizontal, 16).padding(.vertical, 15)
       .background {
-        ZStack(alignment: .bottomTrailing) {
-          shape.fill(category.swatch.gradient)
-          Image(systemName: category.symbol).font(.system(size: 104)).foregroundStyle(Color.white.opacity(0.08))
-            .offset(x: 18, y: 26)
-        }
-        .clipShape(shape)
+        shape.fill(category.swatch.gradient)
+          .overlay(alignment: .bottomTrailing) {
+            Image(systemName: category.symbol).font(.system(size: 104)).foregroundStyle(Color.white.opacity(0.08))
+              .offset(x: 18, y: 26)
+          }
+          .clipShape(shape)
       }
       .overlay(shape.strokeBorder(Color.white.opacity(contrast == .increased ? 0.7 : 0.18), lineWidth: contrast == .increased ? 2 : 0.5))
       .shadow(color: category.swatch.color.opacity(0.3), radius: 6, y: 4)

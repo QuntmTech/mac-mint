@@ -106,24 +106,29 @@ struct DashboardView: View {
     .fixedSize(horizontal: false, vertical: true)
     .foregroundStyle(.white)
     .background {
-      ZStack {
-        shape.fill(AppTheme.heroGradient)
-        Circle().fill(RadialGradient(colors: [AppTheme.hex(0xA7F0D2).opacity(0.35), .clear], center: .center, startRadius: 0, endRadius: 160))
-          .frame(width: 320, height: 320).offset(x: 60, y: -90)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        Ellipse().fill(RadialGradient(colors: [AppTheme.hex(0x7DD3FC).opacity(0.22), .clear], center: .center, startRadius: 0, endRadius: 180))
-          .frame(width: 360, height: 260).offset(x: 0, y: 140)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        Image(systemName: "leaf.fill").font(.system(size: 200)).foregroundStyle(Color.white.opacity(0.05))
-          .rotationEffect(.degrees(-18)).offset(x: -190, y: 70)
-          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-      }
-      .clipShape(shape)
-      // Flattened once into one layer: the glows, leaf and shadow don't re-render when the
-      // hero's text changes (the disk reading refreshes about once a minute).
-      .drawingGroup()
-      .shadow(color: AppTheme.hex(0x045A46).opacity(0.35), radius: 12, y: 8)
-      .accessibilityHidden(true)
+      // The glows and the leaf are overlays of the gradient, so they take the hero's size and
+      // can never grow it. In a ZStack their fixed 320 pt and 260 pt frames made the
+      // background taller than the hero, so it covered the cards (and their buttons) around it.
+      shape.fill(AppTheme.heroGradient)
+        .overlay(alignment: .topTrailing) {
+          Circle().fill(RadialGradient(colors: [AppTheme.hex(0xA7F0D2).opacity(0.35), .clear], center: .center, startRadius: 0, endRadius: 160))
+            .frame(width: 320, height: 320).offset(x: 60, y: -90)
+        }
+        .overlay(alignment: .bottom) {
+          Ellipse().fill(RadialGradient(colors: [AppTheme.hex(0x7DD3FC).opacity(0.22), .clear], center: .center, startRadius: 0, endRadius: 180))
+            .frame(width: 360, height: 260).offset(x: 0, y: 140)
+        }
+        .overlay(alignment: .bottomTrailing) {
+          Image(systemName: "leaf.fill").font(.system(size: 200)).foregroundStyle(Color.white.opacity(0.05))
+            .rotationEffect(.degrees(-18)).offset(x: -190, y: 70)
+        }
+        .clipShape(shape)
+        // Flattened once into one layer: the glows, leaf and shadow don't re-render when the
+        // hero's text changes (the disk reading refreshes about once a minute).
+        .drawingGroup()
+        .shadow(color: AppTheme.hex(0x045A46).opacity(0.35), radius: 12, y: 8)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
   }
 
