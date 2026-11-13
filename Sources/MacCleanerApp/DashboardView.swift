@@ -91,18 +91,15 @@ struct DashboardView: View {
   private func hero(_ categories: [OverviewPresentation.Category]) -> some View {
     let found = categories.filter { $0.destination != .trash }.reduce(Int64(0)) { OverviewPresentation.add($0, $1.bytes) }
     let shape = RoundedRectangle(cornerRadius: 22, style: .continuous)
-    return ViewThatFits(in: .horizontal) {
-      HStack(spacing: 28) {
-        heroText(found: found, top: categories.first)
-        heroRing(found: found)
-      }
-      VStack(alignment: .leading, spacing: 20) {
-        heroText(found: found, top: categories.first)
-        heroRing(found: found)
-      }
+    // One plain row with a fixed height: a ViewThatFits here measured one height and drew
+    // another inside the scroll view, so the hero spilled over the cards above and below it.
+    return HStack(alignment: .center, spacing: 28) {
+      heroText(found: found, top: categories.first)
+      heroRing(found: found).fixedSize()
     }
     .padding(.horizontal, 28).padding(.vertical, 26)
     .frame(maxWidth: .infinity, alignment: .leading)
+    .fixedSize(horizontal: false, vertical: true)
     .foregroundStyle(.white)
     .background {
       ZStack {
@@ -148,11 +145,9 @@ struct DashboardView: View {
           .font(.system(size: 13.5)).foregroundStyle(Color.white.opacity(0.86))
           .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 470, alignment: .leading)
       }
-      ViewThatFits(in: .horizontal) {
-        HStack(spacing: 8) { reviewButton; scanButton }
-        VStack(alignment: .leading, spacing: 8) { reviewButton; scanButton }
-      }
-      .padding(.top, 4)
+      HStack(spacing: 8) { reviewButton; scanButton }
+        .fixedSize()
+        .padding(.top, 4)
       HStack(spacing: 6) {
         if model.isScanning && !quickScanning {
           ProgressView().controlSize(.mini).tint(.white)

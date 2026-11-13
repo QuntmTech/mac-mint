@@ -155,7 +155,8 @@ struct SystemHealthRow: View {
   var body: some View {
     let reading = health.reading
     let cards = cardsFor(reading)
-    LazyVGrid(columns: [GridItem(.adaptive(minimum: 160), spacing: 12)], spacing: 12) {
+    // One even row: three or four cards share the full width, with no empty slot at the end.
+    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: max(1, cards.count)), spacing: 12) {
       ForEach(cards, id: \.title) { card in
         HealthCard(card: card, action: card.title == "Disk" ? nil : openPerformance)
       }
