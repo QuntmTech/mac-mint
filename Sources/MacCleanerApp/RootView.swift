@@ -181,7 +181,8 @@ struct RootView: View {
       .padding(.horizontal, 10)
 
       Spacer(minLength: 12)
-      diskCard.padding(.horizontal, 12).padding(.bottom, 10)
+      VolumeReader(store: model.volumeStore) { stats in diskCard(stats) }
+        .padding(.horizontal, 12).padding(.bottom, 10)
       Rectangle().fill(AppTheme.divider).frame(height: 1)
       HStack(spacing: 6) {
         Button { model.selectedSection = .settings } label: {
@@ -286,8 +287,7 @@ struct RootView: View {
 
   /// The startup disk: name, share used, the same colored breakdown as Overview's disk bar,
   /// and what is available.
-  private var diskCard: some View {
-    let stats = model.volume
+  private func diskCard(_ stats: VolumeSummary) -> some View {
     let fraction = stats.isMeasured ? min(1, Double(stats.used) / Double(stats.total)) : 0
     let bar = OverviewPresentation.bar(OverviewPresentation.categories(model.recommendations), used: stats.used, total: stats.total)
     return VStack(alignment: .leading, spacing: 9) {

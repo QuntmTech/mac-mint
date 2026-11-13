@@ -79,15 +79,32 @@ if [[ "${MODE}" == "pr" ]]; then
 fi
 
 step "Finding the latest green build of ${TARGET}..."
+# A run's MacMint-<os>-<sha> artifact exists only when that runner's build job passed its tests,
+# startup and resource checks and the smoke test, so "green" means that artifact is present and
+# not expired. Judging by the whole run instead would let one unrelated red job (or this
+# script's own CI check, after the previous build's artifact expired) hide every good build.
 if [[ "${MODE}" == "sha" ]]; then
   TARGET=$(gh api "repos/${REPO}/commits/${TARGET}" -q .sha 2>/dev/null) || die "Commit not found on GitHub."
-  RUN=$(gh run list --repo "${REPO}" --workflow macos.yml --commit "${TARGET}" --event push --status success \
-    --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"')
+  CANDIDATES=$(gh run list --repo "${REPO}" --workflow macos.yml --commit "${TARGET}" --event push \
+    --limit 10 --json databaseId,headSha -q '.[] | "\(.databaseId) \(.headSha)"')
 else
-  RUN=$(gh run list --repo "${REPO}" --workflow macos.yml --branch "${TARGET}" --event push --status success \
-    --limit 1 --json databaseId,headSha -q '.[0] | "\(.databaseId) \(.headSha)"')
+  CANDIDATES=$(gh run list --repo "${REPO}" --workflow macos.yml --branch "${TARGET}" --event push \
+    --limit 30 --json databaseId,headSha -q '.[] | "\(.databaseId) \(.headSha)"')
 fi
-[[ -n "${RUN}" ]] || die "No successful macOS build found for ${TARGET} (CI may still be running, or the artifact expired after 14 days)."
+RUN=""
+while read -r CANDIDATE_ID CANDIDATE_SHA; do
+  [[ -n "${CANDIDATE_ID}" ]] || continue
+  # Captured rather than piped to grep -q: with pipefail, grep closing the pipe early could
+  # make a found artifact look missing.
+  FOUND=$(gh api "repos/${REPO}/actions/runs/${CANDIDATE_ID}/artifacts?per_page=100" \
+    -q ".artifacts[] | select(.name == \"MacMint-${RUNNER}-${CANDIDATE_SHA}\" and .expired == false) | .id" \
+    2>/dev/null || true)
+  if [[ -n "${FOUND}" ]]; then
+    RUN="${CANDIDATE_ID} ${CANDIDATE_SHA}"
+    break
+  fi
+done <<< "${CANDIDATES}"
+[[ -n "${RUN}" ]] || die "No tested ${RUNNER} build found for ${TARGET} (CI may still be running, or the build expired after 14 days)."
 RUN_ID=${RUN%% *}
 SHA=${RUN##* }
 ARTIFACT="MacMint-${RUNNER}-${SHA}"

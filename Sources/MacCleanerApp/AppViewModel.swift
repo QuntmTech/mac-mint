@@ -193,7 +193,13 @@ final class AppViewModel: ObservableObject {
   @Published var operationProgress: OperationProgress?
   /// Views read these stored summaries; planning and volume queries run off the main actor.
   @Published var queueSummary = QueueSummary()
-  @Published var volume = VolumeSummary()
+  /// The startup disk's reading lives in its own store: free space moves about once a minute
+  /// while files change, and only the few views that show it should redraw, not the window.
+  let volumeStore = VolumeStore()
+  var volume: VolumeSummary {
+    get { volumeStore.summary }
+    set { volumeStore.summary = newValue }
+  }
   var queueInputsGeneration = 0
   var queueSummaryTask: Task<Void, Never>?
   var planPreparationTask: Task<Void, Never>?

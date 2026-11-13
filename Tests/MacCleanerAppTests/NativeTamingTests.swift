@@ -48,8 +48,19 @@ final class NativeTamingTests: XCTestCase {
     let backend = DarwinTamingBackend()
     XCTAssertEqual(backend.status(target), .current)
     defer { try? backend.setBackground(false, for: target) }
-    try backend.setBackground(true, for: target)
-    try backend.setBackground(false, for: target)
+    do {
+      try backend.setBackground(true, for: target)
+      try backend.setBackground(false, for: target)
+    } catch {
+      // Say which guard refused, so a CI failure explains itself instead of a bare Cocoa code.
+      let app = NSRunningApplication(processIdentifier: pid)
+      XCTFail("""
+        Slowing the fixture failed: \(error). Fixture running: \(process.isRunning), \
+        status: \(backend.status(target)), policy: \(String(describing: app?.activationPolicy.rawValue)), \
+        bundle: \(app?.bundleURL?.resolvingSymlinksInPath().path ?? "none") vs \(target.path)
+        """)
+      return
+    }
     let replacement = TamingIdentity(pid: pid, started: target.started &+ 1, boot: target.boot,
       bundleID: bundleID, path: target.path)
     XCTAssertEqual(backend.status(replacement), .goneOrChanged)
