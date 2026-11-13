@@ -14,8 +14,12 @@ struct DashboardView: View {
         greeting
         if onboardingDone && !tourSeen && model.tourStep == nil { tourOffer }
         hero(categories)
-        SystemHealthRow(volume: model.volume) { model.selectedSection = .performance }
-        StorageOverviewCard(categories: categories, volume: model.volume, scanned: model.lastScanDate != nil)
+        VolumeReader(store: model.volumeStore) { volume in
+          SystemHealthRow(volume: volume) { model.selectedSection = .performance }
+        }
+        VolumeReader(store: model.volumeStore) { volume in
+          StorageOverviewCard(categories: categories, volume: volume, scanned: model.lastScanDate != nil)
+        }
         if !categories.isEmpty { categoryTiles(categories) }
         LazyVGrid(columns: [GridItem(.flexible(minimum: 300), spacing: 14, alignment: .top),
           GridItem(.flexible(minimum: 280), spacing: 14, alignment: .top)], alignment: .leading, spacing: 14) {
@@ -95,7 +99,7 @@ struct DashboardView: View {
     // another inside the scroll view, so the hero spilled over the cards above and below it.
     return HStack(alignment: .center, spacing: 28) {
       heroText(found: found, top: categories.first)
-      heroRing(found: found).fixedSize()
+      VolumeReader(store: model.volumeStore) { stats in heroRing(found: found, stats: stats) }.fixedSize()
     }
     .padding(.horizontal, 28).padding(.vertical, 26)
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -188,8 +192,7 @@ struct DashboardView: View {
     .background(done ? Color.white.opacity(0.92) : Color.white.opacity(0.14), in: Capsule())
   }
 
-  private func heroRing(found: Int64) -> some View {
-    let stats = model.volume
+  private func heroRing(found: Int64, stats: VolumeSummary) -> some View {
     let used = stats.isMeasured ? min(1, Double(stats.used) / Double(stats.total)) : 0
     let foundShare = stats.isMeasured ? min(used, Double(found) / Double(stats.total)) : 0
     return VStack(spacing: 10) {

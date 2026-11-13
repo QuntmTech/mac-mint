@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import MacCleanerCore
+import SwiftUI
 
 /// Startup-volume reading. Important-usage capacity can take noticeable time to compute,
 /// so views show a cached value refreshed off the main actor.
@@ -43,6 +44,20 @@ struct VolumeSummary: Equatable, Sendable {
     guard let total, total > 0, let free, free >= 0 else { return VolumeSummary(name: name) }
     return VolumeSummary(name: name, used: max(0, total - free), free: free, total: total)
   }
+}
+
+/// Observed only by the views that display the disk reading (see `VolumeReader`).
+@MainActor
+final class VolumeStore: ObservableObject {
+  @Published var summary = VolumeSummary()
+}
+
+/// Shows its content with the current disk reading, and is the only part of a page that redraws
+/// when the reading changes.
+struct VolumeReader<Content: View>: View {
+  @ObservedObject var store: VolumeStore
+  @ViewBuilder let content: (VolumeSummary) -> Content
+  var body: some View { content(store.summary) }
 }
 
 extension AppViewModel {
