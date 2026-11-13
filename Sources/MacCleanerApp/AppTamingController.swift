@@ -19,33 +19,44 @@ struct DarwinTamingBackend: TamingBackend {
     guard sysctlbyname("kern.boottime", &value, &size, nil, 0) == 0 else { return "" }
     return "\(value.tv_sec):\(value.tv_usec)"
   }()
-  func status(_ identity: TamingIdentity) -> TamingTargetStatus {
-    let boot = Self.boot
-    guard !boot.isEmpty else { return .unavailable }
-    guard identity.boot == boot, ProcessControlPolicy.allows(pid: identity.pid, bundleID: identity.bundleID) else { return .goneOrChanged }
-    guard let usage = ResourceSampler.usage(identity.pid) else {
-      errno = 0
-      return kill(identity.pid, 0) == -1 && errno == ESRCH ? .goneOrChanged : .unavailable
-    }
-    guard usage.ri_proc_start_abstime == identity.started else { return .goneOrChanged }
-    guard let app = NSRunningApplication(processIdentifier: identity.pid) else { return .unavailable }
-    guard !app.isTerminated else { return .goneOrChanged }
-    // A still-live birth identity with changed metadata/ownership is uncertain, not gone.
-    guard app.bundleIdentifier == identity.bundleID,
-      app.bundleURL?.resolvingSymlinksInPath().path == identity.path else { return .unavailable }
-    var info = proc_bsdinfo()
-    let size = MemoryLayout<proc_bsdinfo>.stride
-    guard proc_pidinfo(identity.pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == Int32(size) else { return .unavailable }
-    return info.pbi_uid == geteuid() ? .current : .unavailable
-  }
+  func status(_ identity: TamingIdentity) -> TamingTargetStatus { check(identity).status }
+
   func setBackground(_ background: Bool, for identity: TamingIdentity) throws {
-    guard status(identity) == .current else { throw CocoaError(.executableNotLoadable) }
-    if background, NSRunningApplication(processIdentifier: identity.pid)?.activationPolicy != .regular {
-      throw CocoaError(.executableNotLoadable)
-    }
+    // One look at the app for both checks: macOS can briefly answer "no such app" for a running
+    // one, and a second, separate lookup turned that into a spurious failure to slow it.
+    let checked = check(identity)
+    guard checked.status == .current, let app = checked.app else { throw CocoaError(.executableNotLoadable) }
+    if background, app.activationPolicy != .regular { throw CocoaError(.executableNotLoadable) }
     guard setpriority(PRIO_DARWIN_PROCESS, id_t(identity.pid), background ? PRIO_DARWIN_BG : 0) == 0 else {
       throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }
+  }
+
+  private func check(_ identity: TamingIdentity) -> (status: TamingTargetStatus, app: NSRunningApplication?) {
+    let boot = Self.boot
+    guard !boot.isEmpty else { return (.unavailable, nil) }
+    guard identity.boot == boot, ProcessControlPolicy.allows(pid: identity.pid, bundleID: identity.bundleID) else { return (.goneOrChanged, nil) }
+    guard let usage = ResourceSampler.usage(identity.pid) else {
+      errno = 0
+      return (kill(identity.pid, 0) == -1 && errno == ESRCH ? .goneOrChanged : .unavailable, nil)
+    }
+    guard usage.ri_proc_start_abstime == identity.started else { return (.goneOrChanged, nil) }
+    guard let app = Self.runningApplication(identity.pid) else { return (.unavailable, nil) }
+    guard !app.isTerminated else { return (.goneOrChanged, nil) }
+    // A still-live birth identity with changed metadata/ownership is uncertain, not gone.
+    guard app.bundleIdentifier == identity.bundleID,
+      app.bundleURL?.resolvingSymlinksInPath().path == identity.path else { return (.unavailable, nil) }
+    var info = proc_bsdinfo()
+    let size = MemoryLayout<proc_bsdinfo>.stride
+    guard proc_pidinfo(identity.pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == Int32(size) else { return (.unavailable, nil) }
+    return info.pbi_uid == geteuid() ? (.current, app) : (.unavailable, nil)
+  }
+
+  /// The direct lookup can come back empty for a moment while the app is running; the
+  /// workspace's list of running apps is the second source before calling it unavailable.
+  private static func runningApplication(_ pid: pid_t) -> NSRunningApplication? {
+    NSRunningApplication(processIdentifier: pid)
+      ?? NSWorkspace.shared.runningApplications.first { $0.processIdentifier == pid }
   }
 }
 
