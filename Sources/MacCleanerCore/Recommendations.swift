@@ -109,9 +109,10 @@ public enum RecommendationEngine {
       && $0.ownerBundleID != nil && !inputs.runningBundleIDs.contains($0.ownerBundleID ?? "") }
     let unconfirmed = inputs.cleanupTargets.filter { $0.category == .userCaches && $0.ownerBundleID == nil }.count
     let cacheItems = take(caches.map { PlanItem.cleanup($0) })
+    let knownApps = Set(caches.compactMap(\.ownerBundleID)).count
     add(
       "caches", symbol: "shippingbox", title: "Caches that rebuild themselves",
-      detail: "From \(cacheItems.count) app\(cacheItems.count == 1 ? "" : "s") and browsers MacMint can identify. Apps that are open are skipped."
+      detail: "From \(knownApps) app\(knownApps == 1 ? "" : "s") and browser\(knownApps == 1 ? "" : "s") MacMint can identify. Apps that are open are skipped."
         + (unconfirmed > 0 ? " \(unconfirmed) cache\(unconfirmed == 1 ? "" : "s") with no known app \(unconfirmed == 1 ? "is" : "are") left in Cleanup for you to review." : ""),
       confidence: .safe, items: cacheItems, destination: .cleaner)
 
@@ -170,7 +171,7 @@ public enum RecommendationEngine {
     add(
       "removed-apps", symbol: "folder.badge.questionmark", title: "App caches with no owner found",
       detail: "Caches for \(Set(orphans.map(\.bundleID)).count) app ID\(Set(orphans.map(\.bundleID)).count == 1 ? "" : "s") no installed app claims."
-        + (heldBack > 0 ? " \(heldBack) other item\(heldBack == 1 ? "" : "s") (settings and saved data) \(heldBack == 1 ? "is" : "are") left in Removed Apps to review one by one." : ""),
+        + (heldBack > 0 ? " \(heldBack) other item\(heldBack == 1 ? " stays" : "s stay") in Removed Apps to review one by one, such as settings, saved data, or items MacMint is less sure about." : ""),
       confidence: .likely, items: orphanItems, destination: .removedApps)
 
     // 6. Downloads opened long ago (or with no usage record).

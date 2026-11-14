@@ -409,4 +409,41 @@ final class ActivityBeforeMoveTests: XCTestCase {
     XCTAssertTrue(report.outcomes.first?.message?.contains("node") ?? false)
     XCTAssertTrue(fm.fileExists(atPath: modules.path))
   }
+
+  func testTheCleanupPagesDerivedDataItemIsCheckedForARunningBuildToo() async throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    let derived = root.appendingPathComponent("Library/Developer/Xcode/DerivedData")
+    try fm.createDirectory(at: derived.appendingPathComponent("App-abc"), withIntermediateDirectories: true)
+    let item = PlanItem(url: derived, displayName: "Xcode DerivedData", kind: .cleanupTarget(category: .developerJunk, risk: .safe),
+      expectedBytes: 1, reason: "test", source: "Cleanup", identity: FileSystem.fileIdentity(at: derived))
+    let executor = OperationExecutor(
+      trashService: MovingTrashService(trashDirectory: root.appendingPathComponent(".Trash")),
+      safetyPolicy: SafetyPolicy(homeDirectory: root), developerRoots: [],
+      activeProcesses: { [ActiveProcess(pid: 5, name: "xcodebuild", workingDirectory: "/tmp/elsewhere")] })
+    let report = await executor.run(OperationPlanner.plan(title: "t", items: [item]))
+    XCTAssertEqual(report.outcomes.first?.status, .skipped, "Xcode closed doesn't mean no build is running")
+    XCTAssertTrue(fm.fileExists(atPath: derived.path))
+  }
+
+  func testScriptBasedToolsAreRecognizedByTheirInterpreter() {
+    let project = URL(fileURLWithPath: "/Users/u/Code/ios")
+    let podInstall = [ActiveProcess(pid: 6, name: "ruby", workingDirectory: project.path)]
+    XCTAssertNotNil(ProcessActivity.conflict(for: project.appendingPathComponent("Pods"), projectFolder: project, processes: podInstall),
+      "pod install runs as ruby")
+  }
+
+  func testAnOpenChromiumProfileMarksItsCachesInUse() throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    let profile = root.appendingPathComponent("WebCatalog/photon/profiles/mail")
+    let cache = profile.appendingPathComponent("Partitions/app/Cache")
+    try fm.createDirectory(at: cache, withIntermediateDirectories: true)
+    XCTAssertFalse(ProcessActivity.chromiumProfileInUse(cache: cache))
+    // Chromium's lock is a symlink to "host-pid" that doesn't exist as a file.
+    try fm.createSymbolicLink(atPath: profile.appendingPathComponent("SingletonLock").path, withDestinationPath: "host-1234")
+    XCTAssertTrue(ProcessActivity.chromiumProfileInUse(cache: cache))
+  }
 }

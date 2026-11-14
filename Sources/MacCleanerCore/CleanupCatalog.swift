@@ -180,6 +180,8 @@ public struct CleanupCatalog: Sendable {
   // MARK: App caches (Electron/Chromium apps that keep caches in Application Support)
 
   public static let vsCodeBundleID = "com.microsoft.VSCode"
+  /// VS Code's own cache folders directly inside its data folder. Shared with SafetyPolicy.
+  public static let vsCodeCacheFolderNames: Set<String> = ["Cache", "Code Cache", "GPUCache", "CachedExtensionVSIXs"]
   public static let webCatalogBundleID = "com.webcatalog.jordan"
 
   /// Chromium's disposable cache folders. Everything else in a profile (Cookies, Local Storage,
