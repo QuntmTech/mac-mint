@@ -270,6 +270,21 @@ public actor DeveloperStorageScanner {
           lastUsed: modified(goModules), rebuild: .redownload,
           removal: .command("go clean -modcache")))
     }
+    // uv locks its cache while it works and warns against changing it by hand, so it is
+    // cleared with uv's own command (which keeps installed tools and environments), never
+    // moved to the Trash. That also means it can't be restored from History.
+    let uvCache = environment["UV_CACHE_DIR"].map { URL(fileURLWithPath: $0) }
+      ?? environment["XDG_CACHE_HOME"].map { URL(fileURLWithPath: $0).appendingPathComponent("uv") }
+      ?? home.appendingPathComponent(".cache/uv")
+    if exists(uvCache), uvCache.path.hasPrefix(home.path + "/") {
+      items.append(
+        DevStorageItem(
+          id: uvCache.path, group: .packageCaches, tool: "uv", title: "uv package cache",
+          subtitle: "Managed by uv — clear it with uv's own command. Installed tools and environments are kept; this can't be restored from History",
+          url: uvCache, bytes: FileSystem.itemSize(at: uvCache, fileManager: fileManager),
+          lastUsed: modified(uvCache), rebuild: .redownload,
+          removal: .command("uv cache prune")))
+    }
     return items
   }
 

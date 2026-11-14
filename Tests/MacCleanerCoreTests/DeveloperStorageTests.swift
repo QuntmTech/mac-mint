@@ -105,6 +105,16 @@ final class DeveloperStorageTests: XCTestCase {
     XCTAssertNotNil(DeveloperStorageScanner.preservedBuildEvidence(in: home), "Couldn't check is not the same as clean")
   }
 
+  func testUvCacheIsClearedWithUvsOwnCommandNotTheTrash() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    try write(home, ".cache/uv/wheels-v5/pkg.whl")
+    let item = try XCTUnwrap(await scanner(home).scan().value.first { $0.tool == "uv" })
+    XCTAssertEqual(item.removal, .command("uv cache prune"))
+    XCTAssertFalse(item.canTrash, "uv locks its cache; files are never moved behind its back")
+    XCTAssertFalse(item.isSuggested)
+  }
+
   func testOllamaModelsAreSizedFromManifestsAndRemovedWithOllama() async throws {
     let home = makeTempDirectory()
     defer { try? fm.removeItem(at: home) }
