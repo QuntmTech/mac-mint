@@ -104,7 +104,7 @@ public enum RecommendationEngine {
     // 1. Caches that rebuild themselves. Only caches with an owner MacMint can check: the
     // scanner leaves unknown-owner caches and all logs for review, so "skipped while open"
     // is true for everything here. What was held back is said, not hidden.
-    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .browserCaches]
+    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .browserCaches, .appCaches]
     let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
       && $0.ownerBundleID != nil && !inputs.runningBundleIDs.contains($0.ownerBundleID ?? "") }
     let unconfirmed = inputs.cleanupTargets.filter { $0.category == .userCaches && $0.ownerBundleID == nil }.count
@@ -114,6 +114,20 @@ public enum RecommendationEngine {
       detail: "From \(cacheItems.count) app\(cacheItems.count == 1 ? "" : "s") and browsers MacMint can identify. Apps that are open are skipped."
         + (unconfirmed > 0 ? " \(unconfirmed) cache\(unconfirmed == 1 ? "" : "s") with no known app \(unconfirmed == 1 ? "is" : "are") left in Cleanup for you to review." : ""),
       confidence: .safe, items: cacheItems, destination: .cleaner)
+
+    // 1b. The same kind of cache, held by an app that's open right now. Shown as potential
+    // space with nothing to review: MacMint never closes an app or works around the
+    // running-app check to make the number bigger.
+    let blocked = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
+      && $0.ownerBundleID.map(inputs.runningBundleIDs.contains) == true }
+    if !blocked.isEmpty {
+      let apps = Set(blocked.compactMap(\.ownerBundleID)).count
+      add(
+        "caches-open-apps", symbol: "lock.open", title: "Caches you can clear after quitting \(apps == 1 ? "an app" : "\(apps) apps")",
+        detail: "These rebuild themselves, but the app\(apps == 1 ? " is" : "s are") open now, so they're skipped. Quit \(apps == 1 ? "it" : "them") and scan again. MacMint never closes apps for you.",
+        confidence: .safe, items: [], destination: .cleaner,
+        bytes: blocked.reduce(Int64(0)) { $0 + $1.size }, count: blocked.count)
+    }
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
     let devTrash = inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }.compactMap(PlanItem.developer)

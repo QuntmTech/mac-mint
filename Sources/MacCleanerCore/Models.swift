@@ -17,6 +17,9 @@ public enum CleanupCategory: String, Codable, Sendable, CaseIterable, Identifiab
   case installers = "Old Installers"
   case mailAttachments = "Mail Attachments"
   case deviceFirmware = "Device Firmware"
+  /// Web and code caches inside specific apps' Application Support folders (VS Code,
+  /// WebCatalog). Only named cache folders, never the app's profile, sign-ins or site data.
+  case appCaches = "App Caches"
 
   public var id: String { rawValue }
 }
