@@ -115,6 +115,9 @@ public actor OperationExecutor {
   /// Custom model/cache locations configured through environment variables (e.g. HF_HUB_CACHE).
   private let developerRoots: [URL]
   private let isAppRunning: @Sendable (String) -> Bool
+  /// Running processes, read right before each developer or leftover item moves. Defaults to
+  /// none so tests are deterministic; the app passes `ProcessActivity.current`.
+  private let activeProcesses: @Sendable () -> [ActiveProcess]
 
   public init(
     trashService: any TrashService,
@@ -123,9 +126,11 @@ public actor OperationExecutor {
     journalDirectory: URL? = nil,
     journalWriter: (@Sendable (Data, URL) throws -> Void)? = nil,
     developerRoots: [URL] = DeveloperStorageScanner.configuredRoots(),
-    isAppRunning: @escaping @Sendable (String) -> Bool = { _ in false }
+    isAppRunning: @escaping @Sendable (String) -> Bool = { _ in false },
+    activeProcesses: @escaping @Sendable () -> [ActiveProcess] = { [] }
   ) {
     self.isAppRunning = isAppRunning
+    self.activeProcesses = activeProcesses
     self.trashService = trashService
     self.safetyPolicy = safetyPolicy
     self.fileManager = fileManager
@@ -221,6 +226,19 @@ public actor OperationExecutor {
     }
     if let owner = item.ownerBundleID, isAppRunning(owner) {
       return skip("The app that uses this data is open. Quit it and try again.")
+    }
+    // A closed app doesn't mean a terminal build, package manager or script isn't using it.
+    if item.kind == .developerArtifact || item.kind == .appLeftover {
+      let isProjectArtifact = item.kind == .developerArtifact
+        && DeveloperStorageScanner.projectArtifactNames.contains(item.url.lastPathComponent)
+        && !item.url.path.contains("/Library/Developer/Xcode/")
+      if let conflict = ProcessActivity.conflict(
+        for: item.url, projectFolder: isProjectArtifact ? item.url.deletingLastPathComponent() : nil,
+        xcodeBuildData: item.url.path.contains("/Library/Developer/Xcode/DerivedData"),
+        processes: activeProcesses())
+      {
+        return skip(conflict)
+      }
     }
     guard fileManager.fileExists(atPath: item.url.path) || isSymlink(item.url) else {
       return skip("No longer exists; it may already have been removed.")
