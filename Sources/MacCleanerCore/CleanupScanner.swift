@@ -83,6 +83,15 @@ public actor CleanupScanner {
   /// it is left for review instead of being offered as rebuildable. The rule's own rating
   /// applies otherwise.
   static func assess(_ piece: URL, rule: CleanupRule) -> (risk: CleanupRisk, reason: String, owner: String?) {
+    // The whole DerivedData folder as one item: if any project's build data holds debug
+    // symbols or package checkouts, the whole item is review, never a rebuildable default.
+    if rule.risk == .safe, piece.standardizedFileURL.path.hasSuffix("/Library/Developer/Xcode/DerivedData") {
+      let projects = (try? FileManager.default.contentsOfDirectory(at: piece, includingPropertiesForKeys: nil)) ?? []
+      if let evidence = projects.lazy.compactMap({ DeveloperStorageScanner.preservedBuildEvidence(in: $0) }).first {
+        return (.review, "Build data Xcode regenerates, but some of it can't be rebuilt: " + evidence.prefix(1).lowercased()
+          + evidence.dropFirst() + ". Review it in Developer.", rule.ownerBundleID)
+      }
+    }
     if let explicit = rule.ownerBundleID { return (rule.risk, rule.reason, explicit) }
     guard rule.category == .userCaches || rule.category == .userLogs else { return (rule.risk, rule.reason, nil) }
     let owner = OwnerResolver.hint(for: piece)?.bundleID

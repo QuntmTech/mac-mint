@@ -95,6 +95,11 @@ public actor DeveloperStorageScanner {
     ".turbo", ".parcel-cache", ".svelte-kit", "Pods",
   ]
 
+  /// Installed packages, not build output: they can hold local edits (patch-package,
+  /// CocoaPods post_install hooks, hand fixes) or private packages that no longer download, so
+  /// reinstalling from the manifest isn't guaranteed to bring them back. Always review-only.
+  public static let installedDependencyNames: Set<String> = ["node_modules", "Pods"]
+
   public init(
     fileManager: FileManager = .default, homeDirectory: URL? = nil,
     environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -173,9 +178,10 @@ public actor DeveloperStorageScanner {
     return children(of: root).filter { $0.lastPathComponent != "ModuleCache.noindex" }.map { url in
       // Folder names are "<Project>-<hash>".
       let name = url.lastPathComponent.split(separator: "-").dropLast().joined(separator: "-")
+      let evidence = Self.preservedBuildEvidence(in: url, fileManager: fileManager)
       return item(
         url, group: .xcode, tool: "Xcode", title: name.isEmpty ? url.lastPathComponent : name,
-        subtitle: "Build data", rebuild: .rebuildable)
+        subtitle: evidence.map { "Build data — " + $0 } ?? "Build data", rebuild: evidence == nil ? .rebuildable : .review)
     }
       + children(of: root).filter { $0.lastPathComponent == "ModuleCache.noindex" }.map {
         item($0, group: .xcode, tool: "Xcode", title: "Module cache", subtitle: "Shared by all projects", rebuild: .rebuildable)
@@ -294,10 +300,18 @@ public actor DeveloperStorageScanner {
     }
     let items = found.map { url -> DevStorageItem in
       let project = url.deletingLastPathComponent()
+      let location = "\(url.lastPathComponent) in \(project.path.replacingOccurrences(of: home.path, with: "~"))"
+      if Self.installedDependencyNames.contains(url.lastPathComponent) {
+        return item(
+          url, group: .projects, tool: url.lastPathComponent, title: project.lastPathComponent,
+          subtitle: location + " — installed packages; reinstalling may not bring back local edits or private packages",
+          rebuild: .review, activityURL: project)
+      }
+      let evidence = Self.preservedBuildEvidence(in: url, fileManager: fileManager)
       return item(
         url, group: .projects, tool: url.lastPathComponent, title: project.lastPathComponent,
-        subtitle: "\(url.lastPathComponent) in \(project.path.replacingOccurrences(of: home.path, with: "~"))",
-        rebuild: .rebuildable, activityURL: project)
+        subtitle: evidence.map { location + " — " + $0 } ?? location,
+        rebuild: evidence == nil ? .rebuildable : .review, activityURL: project)
     }
     return (items, [])
   }
@@ -324,6 +338,47 @@ public actor DeveloperStorageScanner {
     case "DerivedData": return has("Package.swift") || hasXcodeProject(project)
     default: return false
     }
+  }
+
+  /// What in a build folder a rebuild can't reproduce: release debug symbols (a dSYM matches one
+  /// exact build by UUID, so rebuilding doesn't recreate the one for a binary already shipped)
+  /// and package checkouts (which can be edited in place). Nil when the folder is plain build
+  /// output. A folder that can't be looked into counts as "couldn't check", never as clean.
+  public static func preservedBuildEvidence(in folder: URL, fileManager fm: FileManager = .default) -> String? {
+    var dSYMs = 0
+    var unreadable = false
+    // dSYMs sit in Build/Products/<Configuration>/ (DerivedData) or a level or two below a
+    // custom build folder; nested ones are named <Product>.app.dSYM, <Framework>.framework.dSYM.
+    func scan(_ dir: URL, depth: Int) {
+      guard depth > 0 else { return }
+      var isDirectory: ObjCBool = false
+      guard fm.fileExists(atPath: dir.path, isDirectory: &isDirectory), isDirectory.boolValue else { return }
+      guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else {
+        unreadable = true
+        return
+      }
+      for entry in entries {
+        if entry.pathExtension.lowercased() == "dsym" { dSYMs += 1; continue }
+        let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values?.isDirectory == true, values?.isSymbolicLink != true,
+          !["intermediates.noindex", "index.noindex", "index", "modulecache.noindex", "node_modules"].contains(entry.lastPathComponent.lowercased())
+        else { continue }
+        scan(entry, depth: depth - 1)
+      }
+    }
+    scan(folder.appendingPathComponent("Build/Products"), depth: 3)
+    scan(folder, depth: 3)
+    let checkoutRoots = ["SourcePackages/checkouts", "checkouts"].map { folder.appendingPathComponent($0) }
+    let checkouts = checkoutRoots.reduce(0) { count, root in
+      count + ((try? fm.contentsOfDirectory(atPath: root.path))?.filter { !$0.hasPrefix(".") }.count ?? 0)
+    }
+    var reasons: [String] = []
+    if dSYMs > 0 { reasons.append("contains \(dSYMs) debug symbol file\(dSYMs == 1 ? "" : "s") (dSYM) a rebuild won't recreate for a shipped build") }
+    if checkouts > 0 { reasons.append("contains \(checkouts) package checkout\(checkouts == 1 ? "" : "s") that may have local edits") }
+    if unreadable, reasons.isEmpty { reasons.append("MacMint couldn't look inside it to rule out debug symbols") }
+    guard !reasons.isEmpty else { return nil }
+    let text = reasons.joined(separator: "; ")
+    return text.prefix(1).uppercased() + String(text.dropFirst())
   }
 
   private static func hasXcodeProject(_ folder: URL) -> Bool {
