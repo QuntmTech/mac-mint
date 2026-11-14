@@ -109,7 +109,8 @@ final class DeveloperStorageTests: XCTestCase {
     let home = makeTempDirectory()
     defer { try? fm.removeItem(at: home) }
     try write(home, ".cache/uv/wheels-v5/pkg.whl")
-    let item = try XCTUnwrap(await scanner(home).scan().value.first { $0.tool == "uv" })
+    let scanned = await scanner(home).scan().value
+    let item = try XCTUnwrap(scanned.first { $0.tool == "uv" })
     XCTAssertEqual(item.removal, .command("uv cache prune"))
     XCTAssertFalse(item.canTrash, "uv locks its cache; files are never moved behind its back")
     XCTAssertFalse(item.isSuggested)
