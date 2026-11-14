@@ -286,6 +286,10 @@ final class RunningOwnerTests: XCTestCase {
     XCTAssertEqual(owners["com.tinyspeck.slackmacgap"], "com.tinyspeck.slackmacgap")
     XCTAssertEqual(owners["Spotify"], "com.spotify.client")
     XCTAssertEqual(owners["unowned-cache"], .some(nil))
+    let risks = Dictionary(uniqueKeysWithValues: targets.map { ($0.url.lastPathComponent, $0.risk) })
+    XCTAssertEqual(risks["com.tinyspeck.slackmacgap"], .safe, "A cache with a known owner stays rebuildable")
+    XCTAssertEqual(risks["unowned-cache"], .review, "Nobody can be checked for an unknown cache, so it isn't offered as safe")
+    XCTAssertEqual(targets.first { $0.url.lastPathComponent == "unowned-cache" }?.isSelected, false)
 
     let slack = try XCTUnwrap(targets.first { $0.url.lastPathComponent == "com.tinyspeck.slackmacgap" })
     let executor = OperationExecutor(
@@ -332,5 +336,77 @@ final class MoveProofTests: XCTestCase {
     let outcome = try XCTUnwrap(report.outcomes.first)
     XCTAssertEqual(outcome.status, .uncertain)
     XCTAssertNil(outcome.receipt, "a receipt would claim the reviewed item is restorable from Trash")
+  }
+
+  func testLogsAreReviewOnlyAndCarryTheirOwner() async throws {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    for name in ["com.tinyspeck.slackmacgap", "mystery-tool"] {
+      let dir = home.appendingPathComponent("Library/Logs/\(name)")
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      try Data(repeating: 1, count: 4096).write(to: dir.appendingPathComponent("run.log"))
+    }
+    let logs = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scan()
+      .filter { $0.category == .userLogs }
+    XCTAssertEqual(logs.count, 2)
+    XCTAssertTrue(logs.allSatisfy { $0.risk == .review && !$0.isSelected }, "Removed logs don't come back")
+    XCTAssertEqual(logs.first { $0.url.lastPathComponent == "com.tinyspeck.slackmacgap" }?.ownerBundleID, "com.tinyspeck.slackmacgap")
+
+    var inputs = RecommendationEngine.Inputs()
+    inputs.cleanupTargets = logs
+    XCTAssertFalse(RecommendationEngine.recommend(inputs).contains { $0.id == "caches" }, "Logs are never in the rebuildable bundle")
+  }
+}
+
+final class ActivityBeforeMoveTests: XCTestCase {
+  private let home = URL(fileURLWithPath: "/Users/u")
+
+  func testAProcessWorkingInsideTheFolderBlocksIt() {
+    let folder = home.appendingPathComponent("Code/bot/node_modules")
+    let inside = [ActiveProcess(pid: 1, name: "node", workingDirectory: folder.appendingPathComponent("tool").path)]
+    XCTAssertNotNil(ProcessActivity.conflict(for: folder, processes: inside))
+    let elsewhere = [ActiveProcess(pid: 1, name: "node", workingDirectory: "/Users/u/Code/other")]
+    XCTAssertNil(ProcessActivity.conflict(for: folder, processes: elsewhere))
+    let sibling = [ActiveProcess(pid: 1, name: "zsh", workingDirectory: folder.path + "-old")]
+    XCTAssertNil(ProcessActivity.conflict(for: folder, processes: sibling), "A sibling with a longer name isn't inside")
+  }
+
+  func testARuntimeOrBuildInTheProjectBlocksItsPackagesAndOutput() {
+    let project = home.appendingPathComponent("Code/bot")
+    let server = [ActiveProcess(pid: 2, name: "node", workingDirectory: project.path)]
+    XCTAssertNotNil(ProcessActivity.conflict(for: project.appendingPathComponent("node_modules"), projectFolder: project, processes: server),
+      "A Node server runs from the project, not from node_modules")
+    let shell = [ActiveProcess(pid: 3, name: "zsh", workingDirectory: project.path)]
+    XCTAssertNil(ProcessActivity.conflict(for: project.appendingPathComponent("node_modules"), projectFolder: project, processes: shell))
+  }
+
+  func testARunningXcodeBuildBlocksDerivedDataFromAnywhere() {
+    let derived = home.appendingPathComponent("Library/Developer/Xcode/DerivedData/App-abc")
+    let build = [ActiveProcess(pid: 4, name: "xcodebuild", workingDirectory: "/Users/u/Code/App")]
+    XCTAssertNotNil(ProcessActivity.conflict(for: derived, xcodeBuildData: true, processes: build))
+    XCTAssertNil(ProcessActivity.conflict(for: derived, xcodeBuildData: true, processes: []))
+  }
+
+  func testTheExecutorSkipsAProjectFolderInUseAndLeavesItInPlace() async throws {
+    let fm = FileManager.default
+    let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: root) }
+    let project = root.appendingPathComponent("Code/bot")
+    let modules = project.appendingPathComponent("node_modules")
+    try fm.createDirectory(at: modules, withIntermediateDirectories: true)
+    try Data("{}".utf8).write(to: project.appendingPathComponent("package.json"))
+    try Data(repeating: 1, count: 4096).write(to: modules.appendingPathComponent("lib.js"))
+    let item = PlanItem(url: modules, displayName: "node_modules", kind: .developerArtifact, expectedBytes: 4096,
+      reason: "test", source: "Developer", identity: FileSystem.fileIdentity(at: modules))
+    let running = [ActiveProcess(pid: 9, name: "node", workingDirectory: project.path)]
+    let executor = OperationExecutor(
+      trashService: MovingTrashService(trashDirectory: root.appendingPathComponent(".Trash")),
+      safetyPolicy: SafetyPolicy(homeDirectory: root), developerRoots: [],
+      activeProcesses: { running })
+    let report = await executor.run(OperationPlanner.plan(title: "t", items: [item]))
+    XCTAssertEqual(report.outcomes.first?.status, .skipped)
+    XCTAssertTrue(report.outcomes.first?.message?.contains("node") ?? false)
+    XCTAssertTrue(fm.fileExists(atPath: modules.path))
   }
 }

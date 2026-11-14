@@ -105,6 +105,8 @@ public struct SafetyPolicy: Sendable {
     case .mailAttachments:
       allowed = inside(
         path, homePath("Library/Containers/com.apple.mail/Data/Library/Mail Downloads"), strict: true)
+    case .appCaches:
+      allowed = isAppCache(url, path: path)
     case .deviceFirmware:
       allowed =
         ["iPhone", "iPad", "iPod"].contains { device in
@@ -240,6 +242,24 @@ public struct SafetyPolicy: Sendable {
       ".gradle/caches", ".m2/repository", ".cargo/registry/cache", ".lmstudio/models",
       ".cache/lm-studio/models", ".cache/huggingface/hub",
     ].map(homePath)
+  }
+
+  /// A named cache folder (or an old VS Code code cache) inside VS Code or WebCatalog, never a
+  /// profile, its parent or anything holding sign-ins or site data.
+  private func isAppCache(_ url: URL, path: String) -> Bool {
+    let code = homePath("Library/Application Support/Code")
+    let webCatalog = homePath("Library/Application Support/WebCatalog")
+    let components = url.standardizedFileURL.pathComponents
+    if components.contains(where: CleanupCatalog.profileDataFolderNames.contains) { return false }
+    let name = url.lastPathComponent
+    let parent = url.deletingLastPathComponent().lastPathComponent
+    if inside(path, code, strict: true) {
+      let relative = path.dropFirst(code.count + 1)
+      let depth = relative.split(separator: "/").count
+      if depth == 1 { return ["Cache", "Code Cache", "GPUCache", "CachedExtensionVSIXs"].contains(name) }
+      return depth == 2 && parent == "CachedData"
+    }
+    return inside(path, webCatalog, strict: true) && CleanupCatalog.chromiumCacheFolderNames.contains(name)
   }
 
   private func appLeftoverRoots() -> [String] {

@@ -348,7 +348,8 @@ extension AppViewModel {
       isAppRunning: { bundleID in
         runningAtStart.contains(bundleID.lowercased())
           || !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
-      })
+      },
+      activeProcesses: { ProcessActivity.current() })
 
     currentTask = Task { [weak self] in
       guard let self else { return }

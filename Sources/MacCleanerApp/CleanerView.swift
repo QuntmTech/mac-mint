@@ -365,6 +365,7 @@ struct CleanerView: View {
     case .installers: return "shippingbox.and.arrow.backward"
     case .mailAttachments: return "paperclip"
     case .deviceFirmware: return "iphone.and.arrow.forward"
+    case .appCaches: return "square.stack.3d.down.right.fill"
     }
   }
 
@@ -380,6 +381,7 @@ struct CleanerView: View {
     case .installers: return .teal
     case .mailAttachments: return .iris
     case .deviceFirmware: return .graphite
+    case .appCaches: return .sky
     }
   }
 }

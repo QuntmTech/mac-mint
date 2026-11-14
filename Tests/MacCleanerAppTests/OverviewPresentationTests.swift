@@ -8,7 +8,7 @@ final class OverviewPresentationTests: XCTestCase {
 
   private func cache(_ name: String, _ megabytes: Int64) -> CleanupTarget {
     CleanupTarget(category: .userCaches, url: URL(fileURLWithPath: "/Users/test/Library/Caches/\(name)"),
-      displayName: name, size: megabytes * megabyte, risk: .safe, reason: "Rebuildable")
+      displayName: name, size: megabytes * megabyte, risk: .safe, reason: "Rebuildable", ownerBundleID: name)
   }
 
   func testCategoriesGroupQuickScanFindingsByAreaLargestFirst() {
@@ -35,6 +35,14 @@ final class OverviewPresentationTests: XCTestCase {
     XCTAssertEqual(cleaner.destination, .cleaner)
     XCTAssertEqual(cleaner.bytes, 70 * megabyte)
     XCTAssertEqual(cleaner.detail, "2 items · some need review")
+  }
+
+  func testAnAreaWithProblemsIsPartlyCheckedNotComplete() {
+    XCTAssertEqual(AppViewModel.checkedArea("Downloads", issues: [], cancelled: false), "Downloads")
+    let partial = AppViewModel.checkedArea("Downloads", issues: [ScanIssue(area: "Downloads", message: "Denied")], cancelled: false)
+    XCTAssertTrue(partial.hasSuffix(AppViewModel.partialAreaSuffix))
+    XCTAssertTrue(AppViewModel.checkedArea("Developer", issues: [], cancelled: true).hasSuffix(AppViewModel.partialAreaSuffix),
+      "A stopped area isn't fully checked")
   }
 
   private func category(_ destination: Recommendation.Destination, _ bytes: Int64) -> OverviewPresentation.Category {

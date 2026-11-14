@@ -42,7 +42,78 @@ final class DeveloperStorageTests: XCTestCase {
     let items = await scanner(home).scan(projectRoots: [home.appendingPathComponent("Code")]).value
       .filter { $0.group == .projects }
     XCTAssertEqual(Set(items.map(\.title)), ["web", "rusty"])
-    XCTAssertTrue(items.allSatisfy { $0.removal == .trash && $0.rebuild == .rebuildable })
+    XCTAssertTrue(items.allSatisfy { $0.removal == .trash })
+    XCTAssertEqual(items.first { $0.title == "rusty" }?.rebuild, .rebuildable, "Compiler output rebuilds")
+    XCTAssertEqual(items.first { $0.title == "web" }?.rebuild, .review, "Installed packages are not build output")
+  }
+
+  func testInstalledDependenciesAreNeverSuggestedEvenWhenIdle() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    // A CocoaPods project with a locally patched pod, and a Node project using patch-package.
+    try write(home, "Code/ios/Podfile", 10)
+    try write(home, "Code/ios/Pods/SomeKit/Source.swift")
+    try write(home, "Code/ios/patches/SomeKit.patch", 10)
+    try write(home, "Code/bot/package.json", 10)
+    try write(home, "Code/bot/node_modules/private-lib/index.js")
+    try write(home, "Code/bot/patches/private-lib+1.0.0.patch", 10)
+    for project in ["Code/ios", "Code/bot"] { try age(home.appendingPathComponent(project), days: 120) }
+
+    let items = await scanner(home).scan(projectRoots: [home.appendingPathComponent("Code")]).value
+      .filter { $0.group == .projects }
+    XCTAssertEqual(Set(items.map(\.tool)), ["Pods", "node_modules"])
+    XCTAssertTrue(items.allSatisfy { $0.rebuild == .review && !$0.isSuggested })
+    XCTAssertTrue(items.allSatisfy { $0.subtitle.contains("local edits") })
+    XCTAssertFalse(items.contains { $0.url?.lastPathComponent == "patches" }, "The project itself is never offered")
+  }
+
+  func testBuildFoldersWithDebugSymbolsOrCheckoutsAreReviewOnly() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let derived = "Library/Developer/Xcode/DerivedData"
+    try write(home, "\(derived)/Shipped-aaa/Build/Products/Release-iphoneos/Shipped.app.dSYM/Contents/Info.plist")
+    try write(home, "\(derived)/Shipped-aaa/Build/Products/Release-iphoneos/Shipped.app/Shipped")
+    try write(home, "\(derived)/Patched-bbb/SourcePackages/checkouts/swift-thing/Sources/a.swift")
+    try write(home, "\(derived)/Plain-ccc/Build/Intermediates.noindex/x.o")
+    for name in ["Shipped-aaa", "Patched-bbb", "Plain-ccc"] {
+      try age(home.appendingPathComponent("\(derived)/\(name)"), days: 30)
+    }
+    try write(home, "Code/pkg/Package.swift", 10)
+    try write(home, "Code/pkg/.build/checkouts/dep/Package.swift")
+    try write(home, "Code/pkg2/Package.swift", 10)
+    try write(home, "Code/pkg2/.build/debug/pkg2")
+
+    let items = await scanner(home).scan(projectRoots: [home.appendingPathComponent("Code")]).value
+    let byTitle = Dictionary(items.map { ($0.title, $0) }, uniquingKeysWith: { first, _ in first })
+    XCTAssertEqual(byTitle["Shipped"]?.rebuild, .review, "A dSYM matches one exact build; a rebuild doesn't recreate it")
+    XCTAssertTrue(byTitle["Shipped"]?.subtitle.contains("1 debug symbol file") ?? false)
+    XCTAssertEqual(byTitle["Patched"]?.rebuild, .review, "Package checkouts can be edited in place")
+    XCTAssertEqual(byTitle["Plain"]?.rebuild, .rebuildable)
+    XCTAssertTrue(byTitle["Plain"]?.isSuggested ?? false, "Plain build output is still suggested once idle")
+    XCTAssertEqual(byTitle["pkg"]?.rebuild, .review)
+    XCTAssertEqual(byTitle["pkg2"]?.rebuild, .rebuildable)
+  }
+
+  func testAFolderThatCantBeLookedIntoIsNotCalledPlainBuildOutput() throws {
+    let home = makeTempDirectory()
+    defer {
+      try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: home.appendingPathComponent("Build/Products").path)
+      try? fm.removeItem(at: home)
+    }
+    let products = try write(home, "Build/Products/Release/App").deletingLastPathComponent().deletingLastPathComponent()
+    try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: products.path)
+    XCTAssertNotNil(DeveloperStorageScanner.preservedBuildEvidence(in: home), "Couldn't check is not the same as clean")
+  }
+
+  func testUvCacheIsClearedWithUvsOwnCommandNotTheTrash() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    try write(home, ".cache/uv/wheels-v5/pkg.whl")
+    let scanned = await scanner(home).scan().value
+    let item = try XCTUnwrap(scanned.first { $0.tool == "uv" })
+    XCTAssertEqual(item.removal, .command("uv cache prune"))
+    XCTAssertFalse(item.canTrash, "uv locks its cache; files are never moved behind its back")
+    XCTAssertFalse(item.isSuggested)
   }
 
   func testOllamaModelsAreSizedFromManifestsAndRemovedWithOllama() async throws {

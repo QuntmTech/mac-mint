@@ -143,7 +143,7 @@ struct DashboardView: View {
       } else if found > 0 {
         Text("\(ByteFormatter.string(found)) is worth a look.").font(.system(size: 34, weight: .bold)).tracking(-1.1)
           .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 520, alignment: .leading)
-        Text((top.map { "\($0.title) is the largest part. " } ?? "") + "You check every item before anything moves to the Trash.")
+        Text(staleNote ?? ((top.map { "\($0.title) is the largest part. " } ?? "") + "You check every item before anything moves to the Trash."))
           .font(.system(size: 13.5)).foregroundStyle(Color.white.opacity(0.86))
           .fixedSize(horizontal: false, vertical: true).frame(maxWidth: 470, alignment: .leading)
       } else {
@@ -291,7 +291,7 @@ struct DashboardView: View {
         SwatchBadge(symbol: "checklist.checked", swatch: .slate, size: 32)
         VStack(alignment: .leading, spacing: 2) {
           Text("Know what's been checked").font(.system(size: 13, weight: .semibold)).foregroundStyle(AppTheme.ink)
-          Text("\(model.scanCompletedAreas.count) of 5 areas · \(model.ignoredPaths.count) exclusion\(model.ignoredPaths.count == 1 ? "" : "s") · \(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")")
+          Text(coverageLine)
             .font(.system(size: 11.5)).foregroundStyle(AppTheme.ink3).monospacedDigit()
         }
         Spacer(minLength: 8)
@@ -302,7 +302,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
           Text(model.scanCompletedAreas.isEmpty
             ? "Quick Scan checks known cache, app, developer, Downloads, and home Trash locations. Run a scan to see coverage here."
-            : "Completed: " + model.scanCompletedAreas.joined(separator: "; "))
+            : "Checked: " + model.scanCompletedAreas.joined(separator: "; "))
           Text("Storage mapping, duplicate matching, Photos analysis, and project searches run separately.")
           HStack(spacing: 8) {
             if !model.scanIssues.isEmpty {
@@ -319,6 +319,21 @@ struct DashboardView: View {
     }
     .padding(.horizontal, 16).padding(.vertical, 14)
     .cardBackground()
+  }
+
+  /// Areas that ran with problems are "partly checked", not counted as fully checked.
+  private var coverageLine: String {
+    let full = model.fullyCheckedAreas
+    let partial = model.scanCompletedAreas.count - full
+    let areas = model.scanCompletedAreas.isEmpty ? "Not checked yet"
+      : "\(full) of 5 areas fully checked" + (partial > 0 ? ", \(partial) partly" : "")
+    return areas + " · \(model.ignoredPaths.count) exclusion\(model.ignoredPaths.count == 1 ? "" : "s") · \(model.scanIssues.count) issue\(model.scanIssues.count == 1 ? "" : "s")"
+  }
+
+  /// Findings older than a day are estimates from then, not space available now.
+  private var staleNote: String? {
+    guard let date = model.smartCareRanAt ?? model.lastScanDate, Date().timeIntervalSince(date) > 86_400 else { return nil }
+    return "These are estimates from \(date.formatted(.relative(presentation: .named))). Scan again for current numbers."
   }
 
   @ViewBuilder private var trashCard: some View {

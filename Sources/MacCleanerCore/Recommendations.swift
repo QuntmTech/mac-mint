@@ -52,6 +52,10 @@ public struct Recommendation: Identifiable, Hashable, Sendable {
 }
 
 public enum RecommendationEngine {
+  /// Orphaned data that apps recreate. Preferences, Application Support, containers, cookies,
+  /// web storage and saved state can be the only copy of someone's settings or data.
+  static let regenerableOrphanLocations: Set<String> = ["Caches", "HTTP Storage"]
+
   public struct Inputs: Sendable {
     public var cleanupTargets: [CleanupTarget] = []
     public var developer: [DevStorageItem] = []
@@ -97,15 +101,33 @@ public enum RecommendationEngine {
           count: count ?? items.count, confidence: confidence, items: items, destination: destination))
     }
 
-    // 1. Caches and logs that rebuild themselves.
-    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .userLogs, .browserCaches]
+    // 1. Caches that rebuild themselves. Only caches with an owner MacMint can check: the
+    // scanner leaves unknown-owner caches and all logs for review, so "skipped while open"
+    // is true for everything here. What was held back is said, not hidden.
+    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .browserCaches, .appCaches]
     let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
-      && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }
+      && $0.ownerBundleID != nil && !inputs.runningBundleIDs.contains($0.ownerBundleID ?? "") }
+    let unconfirmed = inputs.cleanupTargets.filter { $0.category == .userCaches && $0.ownerBundleID == nil }.count
     let cacheItems = take(caches.map { PlanItem.cleanup($0) })
     add(
-      "caches", symbol: "shippingbox", title: "Caches and logs that rebuild themselves",
-      detail: "From \(cacheItems.count) apps and browsers. They're recreated as needed; data for apps that are open is skipped.",
+      "caches", symbol: "shippingbox", title: "Caches that rebuild themselves",
+      detail: "From \(cacheItems.count) app\(cacheItems.count == 1 ? "" : "s") and browsers MacMint can identify. Apps that are open are skipped."
+        + (unconfirmed > 0 ? " \(unconfirmed) cache\(unconfirmed == 1 ? "" : "s") with no known app \(unconfirmed == 1 ? "is" : "are") left in Cleanup for you to review." : ""),
       confidence: .safe, items: cacheItems, destination: .cleaner)
+
+    // 1b. The same kind of cache, held by an app that's open right now. Shown as potential
+    // space with nothing to review: MacMint never closes an app or works around the
+    // running-app check to make the number bigger.
+    let blocked = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
+      && $0.ownerBundleID.map(inputs.runningBundleIDs.contains) == true }
+    if !blocked.isEmpty {
+      let apps = Set(blocked.compactMap(\.ownerBundleID)).count
+      add(
+        "caches-open-apps", symbol: "lock.open", title: "Caches you can clear after quitting \(apps == 1 ? "an app" : "\(apps) apps")",
+        detail: "These rebuild themselves, but the app\(apps == 1 ? " is" : "s are") open now, so they're skipped. Quit \(apps == 1 ? "it" : "them") and scan again. MacMint never closes apps for you.",
+        confidence: .safe, items: [], destination: .cleaner,
+        bytes: blocked.reduce(Int64(0)) { $0 + $1.size }, count: blocked.count)
+    }
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
     let devTrash = inputs.developer.filter { $0.isSuggested && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }.compactMap(PlanItem.developer)
@@ -139,12 +161,16 @@ public enum RecommendationEngine {
       detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago, with no recorded opens.",
       confidence: .likely, items: neverItems, destination: .downloads)
 
-    // 5. Leftovers from deleted apps (only the stronger matches).
-    let orphans = inputs.orphans.filter { $0.confidence == .medium }
+    // 5. App data with no owner found. No owner in the places checked is not proof the app was
+    // deleted, and settings, saved data and containers are worth keeping for a reinstall: only
+    // caches from the stronger matches are recommended. Everything else stays in Removed Apps.
+    let orphans = inputs.orphans.filter { $0.confidence == .medium && Self.regenerableOrphanLocations.contains($0.location) }
     let orphanItems = take(orphans.map(PlanItem.orphan))
+    let heldBack = inputs.orphans.count - orphans.count
     add(
-      "removed-apps", symbol: "folder.badge.questionmark", title: "Leftovers from apps you've deleted",
-      detail: "\(Set(orphans.map(\.bundleID)).count) removed apps left settings and caches behind.",
+      "removed-apps", symbol: "folder.badge.questionmark", title: "App caches with no owner found",
+      detail: "Caches for \(Set(orphans.map(\.bundleID)).count) app ID\(Set(orphans.map(\.bundleID)).count == 1 ? "" : "s") no installed app claims."
+        + (heldBack > 0 ? " \(heldBack) other item\(heldBack == 1 ? "" : "s") (settings and saved data) \(heldBack == 1 ? "is" : "are") left in Removed Apps to review one by one." : ""),
       confidence: .likely, items: orphanItems, destination: .removedApps)
 
     // 6. Downloads opened long ago (or with no usage record).

@@ -47,8 +47,10 @@ public struct CleanupCatalog: Sendable {
         ]),
       .init(
         category: .userLogs, name: "Application logs",
-        url: h.appendingPathComponent("Library/Logs"), risk: .safe,
-        reason: "Historical per-user logs that apps recreate as needed.", expandChildren: true,
+        // Apps write new logs, but removed logs don't come back: they can be the only record
+        // of a crash or problem. Review, never a rebuildable default.
+        url: h.appendingPathComponent("Library/Logs"), risk: .review,
+        reason: "Past logs. Apps write new ones, but removed logs don't come back, and they can help explain a crash or problem.", expandChildren: true,
         excludedChildNames: ["DiagnosticReports"]),
 
       .init(
@@ -172,6 +174,99 @@ public struct CleanupCatalog: Sendable {
         reason:
           "Scanned for old installer/archive files only; the Downloads folder itself is never targeted."
       ),
-    ]
+    ] + appCacheRules()
+  }
+
+  // MARK: App caches (Electron/Chromium apps that keep caches in Application Support)
+
+  public static let vsCodeBundleID = "com.microsoft.VSCode"
+  public static let webCatalogBundleID = "com.webcatalog.jordan"
+
+  /// Chromium's disposable cache folders. Everything else in a profile (Cookies, Local Storage,
+  /// IndexedDB, Session Storage, service workers, sign-ins) is someone's data.
+  public static let chromiumCacheFolderNames: Set<String> = [
+    "Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "ShaderCache",
+  ]
+  /// Folders never searched into for caches: they hold site data and sign-ins.
+  static let profileDataFolderNames: Set<String> = [
+    "Cookies", "Local Storage", "IndexedDB", "Session Storage", "Service Worker", "databases",
+    "Login Data", "Network", "WebStorage", "User", "Extensions", "blob_storage", "File System",
+  ]
+
+  func appCacheRules(applicationRoots: [URL]? = nil) -> [CleanupRule] {
+    let h = homeDirectory
+    var rules: [CleanupRule] = []
+
+    // VS Code: its HTTP and GPU caches, compiled-code caches of versions no longer running (the
+    // current version's is kept, as VS Code's own cleaner does), and downloaded extension
+    // packages (installed extensions live in ~/.vscode/extensions and aren't touched).
+    let code = h.appendingPathComponent("Library/Application Support/Code")
+    if FileManager.default.fileExists(atPath: code.path) {
+      for name in ["Cache", "Code Cache", "GPUCache"] {
+        rules.append(.init(
+          category: .appCaches, name: "VS Code \(name.lowercased())", url: code.appendingPathComponent(name), risk: .safe,
+          reason: "VS Code recreates this cache. Settings, extensions and open workspaces are kept.",
+          ownerBundleID: Self.vsCodeBundleID))
+      }
+      let commit = Self.vsCodeCommit(applicationRoots: applicationRoots ?? [
+        URL(fileURLWithPath: "/Applications"), h.appendingPathComponent("Applications"),
+      ])
+      rules.append(.init(
+        category: .appCaches, name: "VS Code code caches", url: code.appendingPathComponent("CachedData"),
+        risk: commit == nil ? .review : .safe,
+        reason: commit == nil
+          ? "Compiled-code caches. MacMint couldn't tell which one the installed VS Code uses, so review them."
+          : "Compiled-code caches from VS Code versions you no longer run. The current version's cache is kept.",
+        expandChildren: true, excludedChildNames: commit.map { [$0] } ?? [], ownerBundleID: Self.vsCodeBundleID))
+      rules.append(.init(
+        category: .appCaches, name: "VS Code extension downloads", url: code.appendingPathComponent("CachedExtensionVSIXs"),
+        risk: .safe,
+        reason: "Downloaded extension packages. Installed extensions are kept; VS Code downloads a package again if it needs one.",
+        ownerBundleID: Self.vsCodeBundleID))
+    }
+
+    // WebCatalog: each web app keeps a Chromium profile. Only its named cache folders are
+    // offered, and as review: profile layouts differ between WebCatalog versions.
+    let webCatalog = h.appendingPathComponent("Library/Application Support/WebCatalog")
+    for folder in Self.cacheFolders(in: webCatalog, depth: 7) {
+      let profile = folder.deletingLastPathComponent().lastPathComponent
+      rules.append(.init(
+        category: .appCaches, name: "WebCatalog \(profile) \(folder.lastPathComponent.lowercased())", url: folder, risk: .review,
+        reason: "A web app's cache inside WebCatalog. Sign-ins, cookies and site data are kept. Review it because WebCatalog's folder layout varies between versions.",
+        ownerBundleID: Self.webCatalogBundleID))
+    }
+    return rules
+  }
+
+  /// Chromium cache folders under `root`, without descending into profile data or into a cache
+  /// once found. Symlinks are not followed.
+  static func cacheFolders(in root: URL, depth: Int) -> [URL] {
+    guard depth > 0,
+      let entries = try? FileManager.default.contentsOfDirectory(
+        at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [])
+    else { return [] }
+    var found: [URL] = []
+    for entry in entries {
+      let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+      guard values?.isDirectory == true, values?.isSymbolicLink != true else { continue }
+      let name = entry.lastPathComponent
+      if chromiumCacheFolderNames.contains(name) { found.append(entry); continue }
+      if profileDataFolderNames.contains(name) { continue }
+      found += cacheFolders(in: entry, depth: depth - 1)
+    }
+    return found
+  }
+
+  /// The commit of the installed VS Code, whose code cache is the one in use.
+  static func vsCodeCommit(applicationRoots: [URL]) -> String? {
+    for root in applicationRoots {
+      let product = root.appendingPathComponent("Visual Studio Code.app/Contents/Resources/app/product.json")
+      guard let data = try? Data(contentsOf: product),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let commit = json["commit"] as? String, !commit.isEmpty
+      else { continue }
+      return commit
+    }
+    return nil
   }
 }
