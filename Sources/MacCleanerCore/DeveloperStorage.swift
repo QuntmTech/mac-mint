@@ -280,10 +280,10 @@ public actor DeveloperStorageScanner {
       items.append(
         DevStorageItem(
           id: uvCache.path, group: .packageCaches, tool: "uv", title: "uv package cache",
-          subtitle: "Managed by uv — clear it with uv's own command. Installed tools and environments are kept; this can't be restored from History",
+          subtitle: "Managed by uv — clear it with uv's own command, which frees this whole size. Installed tools and environments are kept; it can't be restored from History",
           url: uvCache, bytes: FileSystem.itemSize(at: uvCache, fileManager: fileManager),
           lastUsed: modified(uvCache), rebuild: .redownload,
-          removal: .command("uv cache prune")))
+          removal: .command("uv cache clean")))
     }
     return items
   }
@@ -362,10 +362,11 @@ public actor DeveloperStorageScanner {
   public static func preservedBuildEvidence(in folder: URL, fileManager fm: FileManager = .default) -> String? {
     var dSYMs = 0
     var unreadable = false
+    var visited: Set<String> = []
     // dSYMs sit in Build/Products/<Configuration>/ (DerivedData) or a level or two below a
     // custom build folder; nested ones are named <Product>.app.dSYM, <Framework>.framework.dSYM.
     func scan(_ dir: URL, depth: Int) {
-      guard depth > 0 else { return }
+      guard depth > 0, visited.insert(dir.standardizedFileURL.path).inserted else { return }
       var isDirectory: ObjCBool = false
       guard fm.fileExists(atPath: dir.path, isDirectory: &isDirectory), isDirectory.boolValue else { return }
       guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey]) else {
@@ -373,7 +374,10 @@ public actor DeveloperStorageScanner {
         return
       }
       for entry in entries {
-        if entry.pathExtension.lowercased() == "dsym" { dSYMs += 1; continue }
+        if entry.pathExtension.lowercased() == "dsym" {
+          if visited.insert(entry.standardizedFileURL.path).inserted { dSYMs += 1 }
+          continue
+        }
         let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard values?.isDirectory == true, values?.isSymbolicLink != true,
           !["intermediates.noindex", "index.noindex", "index", "modulecache.noindex", "node_modules"].contains(entry.lastPathComponent.lowercased())

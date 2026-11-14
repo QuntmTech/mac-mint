@@ -94,6 +94,23 @@ final class DeveloperStorageTests: XCTestCase {
     XCTAssertEqual(byTitle["pkg2"]?.rebuild, .rebuildable)
   }
 
+  func testDebugSymbolsAreCountedOnceAndProjectPiecesAreCheckedToo() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let derived = "Library/Developer/Xcode/DerivedData"
+    try write(home, "\(derived)/Shipped-aaa/Build/Products/App.dSYM/Contents/Info.plist")
+    XCTAssertEqual(DeveloperStorageScanner.preservedBuildEvidence(in: home.appendingPathComponent("\(derived)/Shipped-aaa"))?
+      .contains("1 debug symbol file"), true)
+
+    // Excluding one project splits DerivedData into per-project pieces; each is still checked.
+    let excluded = try write(home, "\(derived)/Other-bbb/Build/x.o").deletingLastPathComponent().deletingLastPathComponent()
+    let targets = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home))
+      .scan(ignoredPaths: [excluded.standardizedFileURL.path])
+    let shipped = try XCTUnwrap(targets.first { $0.url.lastPathComponent == "Shipped-aaa" })
+    XCTAssertEqual(shipped.risk, .review)
+    XCTAssertFalse(shipped.isSelected)
+  }
+
   func testAFolderThatCantBeLookedIntoIsNotCalledPlainBuildOutput() throws {
     let home = makeTempDirectory()
     defer {
@@ -111,7 +128,7 @@ final class DeveloperStorageTests: XCTestCase {
     try write(home, ".cache/uv/wheels-v5/pkg.whl")
     let scanned = await scanner(home).scan().value
     let item = try XCTUnwrap(scanned.first { $0.tool == "uv" })
-    XCTAssertEqual(item.removal, .command("uv cache prune"))
+    XCTAssertEqual(item.removal, .command("uv cache clean"), "The size shown is what this command frees")
     XCTAssertFalse(item.canTrash, "uv locks its cache; files are never moved behind its back")
     XCTAssertFalse(item.isSuggested)
   }

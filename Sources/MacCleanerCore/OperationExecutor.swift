@@ -217,6 +217,26 @@ public actor OperationExecutor {
   }
 
   /// Returns a skip outcome when the item must not be moved, or nil when it may proceed.
+  /// Folders a build, package manager, script or web app may be writing to right now.
+  static func needsActivityCheck(_ kind: PlanItemKind) -> Bool {
+    switch kind {
+    case .developerArtifact, .appLeftover: return true
+    case .cleanupTarget(let category, _): return category == .developerJunk || category == .appCaches
+    default: return false
+    }
+  }
+
+  private var processSnapshot: (taken: Date, processes: [ActiveProcess])?
+
+  /// One reading of the running processes, reused for two seconds: a plan of hundreds of items
+  /// doesn't list every process hundreds of times, and a new process still shows up quickly.
+  private func currentProcesses() -> [ActiveProcess] {
+    if let snapshot = processSnapshot, Date().timeIntervalSince(snapshot.taken) < 2 { return snapshot.processes }
+    let processes = activeProcesses()
+    processSnapshot = (Date(), processes)
+    return processes
+  }
+
   private func validate(
     _ item: PlanItem, plan: OperationPlan, movedIDs: Set<UUID>, movedPaths: [String], ignoredPaths: Set<String>
   ) -> ItemOutcome? {
@@ -228,16 +248,20 @@ public actor OperationExecutor {
       return skip("The app that uses this data is open. Quit it and try again.")
     }
     // A closed app doesn't mean a terminal build, package manager or script isn't using it.
-    if item.kind == .developerArtifact || item.kind == .appLeftover {
+    if Self.needsActivityCheck(item.kind) {
       let isProjectArtifact = item.kind == .developerArtifact
         && DeveloperStorageScanner.projectArtifactNames.contains(item.url.lastPathComponent)
         && !item.url.path.contains("/Library/Developer/Xcode/")
       if let conflict = ProcessActivity.conflict(
         for: item.url, projectFolder: isProjectArtifact ? item.url.deletingLastPathComponent() : nil,
         xcodeBuildData: item.url.path.contains("/Library/Developer/Xcode/DerivedData"),
-        processes: activeProcesses())
+        processes: currentProcesses())
       {
         return skip(conflict)
+      }
+      // A Chromium-based web app (WebCatalog's run as their own apps) marks its profile in use.
+      if case .cleanupTarget(.appCaches, _) = item.kind, ProcessActivity.chromiumProfileInUse(cache: item.url) {
+        return skip("The web app that uses this cache is open. Quit it and try again.")
       }
     }
     guard fileManager.fileExists(atPath: item.url.path) || isSymlink(item.url) else {

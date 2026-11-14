@@ -256,7 +256,7 @@ public struct SafetyPolicy: Sendable {
     if inside(path, code, strict: true) {
       let relative = path.dropFirst(code.count + 1)
       let depth = relative.split(separator: "/").count
-      if depth == 1 { return ["Cache", "Code Cache", "GPUCache", "CachedExtensionVSIXs"].contains(name) }
+      if depth == 1 { return CleanupCatalog.vsCodeCacheFolderNames.contains(name) }
       return depth == 2 && parent == "CachedData"
     }
     return inside(path, webCatalog, strict: true) && CleanupCatalog.chromiumCacheFolderNames.contains(name)

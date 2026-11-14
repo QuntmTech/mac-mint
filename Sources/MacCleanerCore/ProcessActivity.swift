@@ -20,9 +20,12 @@ public struct ActiveProcess: Hashable, Sendable {
 /// terminal build, a package manager or a Node script isn't using the folder.
 public enum ProcessActivity {
   /// Tools that write into build output while they run.
+  /// Matched against the process name, which for script-based tools is their interpreter:
+  /// `pod` runs as ruby, `pip` and many build scripts as Python.
   public static let buildToolNames: Set<String> = [
     "xcodebuild", "XCBBuildService", "swift-build", "swift-frontend", "swift-package", "swift-test",
-    "pod", "gradle", "java", "cargo", "rustc", "npm", "pnpm", "yarn", "bun", "node", "uv", "pip",
+    "pod", "ruby", "gradle", "java", "cargo", "rustc", "npm", "pnpm", "yarn", "bun", "node", "deno",
+    "uv", "pip", "Python", "python", "python3", "make", "cmake", "ninja",
   ]
 
   /// This user's processes. Other users' processes can't be inspected and are left out.
@@ -56,6 +59,21 @@ public enum ProcessActivity {
       String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
     }
     return path.isEmpty ? nil : path
+  }
+
+  /// Chromium writes a SingletonLock (a symlink) into a profile while it's open. A cache whose
+  /// profile, or any folder above it up to the app's data folder, has one is in use. The link
+  /// usually points at nothing, so it's checked without following it.
+  public static func chromiumProfileInUse(cache: URL, fileManager fm: FileManager = .default) -> Bool {
+    var folder = cache.deletingLastPathComponent()
+    for _ in 0..<8 {
+      for marker in ["SingletonLock", "SingletonSocket", "lockfile"] {
+        if (try? fm.attributesOfItem(atPath: folder.appendingPathComponent(marker).path)) != nil { return true }
+      }
+      if ["WebCatalog", "Application Support"].contains(folder.lastPathComponent) { break }
+      folder = folder.deletingLastPathComponent()
+    }
+    return false
   }
 
   /// Tools that write Xcode's DerivedData while they run, from any folder.
