@@ -20,6 +20,17 @@ extension AppViewModel {
 
   // MARK: Smart Care
 
+  /// An area that reported problems or stopped early ran, but wasn't fully checked; coverage
+  /// says so instead of counting it as complete.
+  nonisolated static let partialAreaSuffix = " (partly checked)"
+
+  nonisolated static func checkedArea(_ name: String, issues: [ScanIssue], cancelled: Bool) -> String {
+    issues.isEmpty && !cancelled ? name : name + partialAreaSuffix
+  }
+
+  /// Areas checked without any problem, out of the five Quick Scan covers.
+  var fullyCheckedAreas: Int { scanCompletedAreas.filter { !$0.hasSuffix(Self.partialAreaSuffix) }.count }
+
   func runSmartCare() {
     guard !isScanning, !isWorking else { return }
     guard beginScan(title: "Quick Scan", message: "Checking known storage locations…") else { return }
@@ -54,29 +65,29 @@ extension AppViewModel {
             startupItems = report.startupItems
             startupScanned = true
             scanIssues += report.issues
-            scanCompletedAreas.append("Caches, apps and startup inventory")
+            scanCompletedAreas.append(Self.checkedArea("Caches, apps and startup inventory", issues: report.issues, cancelled: report.wasCancelled))
           case .developer(let report):
             // Keep explicitly scanned project results when refreshing known tool caches.
             devItems = report.value + devItems.filter { $0.group == .projects }
             selectedDevIDs.formIntersection(devItems.map(\.id))
             scanIssues += report.issues
-            scanCompletedAreas.append("Known developer caches")
+            scanCompletedAreas.append(Self.checkedArea("Known developer caches", issues: report.issues, cancelled: report.wasCancelled))
           case .leftovers(let report):
             orphans = report.value
             selectedOrphanIDs.formIntersection(orphans.map(\.id))
             orphansScanned = true
             scanIssues += report.issues
-            scanCompletedAreas.append("Removed-app data")
+            scanCompletedAreas.append(Self.checkedArea("Removed-app data", issues: report.issues, cancelled: report.wasCancelled))
           case .downloads(let report):
             downloadItems = report.value
             selectedDownloadIDs.formIntersection(downloadItems.map(\.id))
             downloadsScanned = true
             scanIssues += report.issues
-            scanCompletedAreas.append("Downloads")
+            scanCompletedAreas.append(Self.checkedArea("Downloads", issues: report.issues, cancelled: report.wasCancelled))
           case .trash(let status):
             trashStatus = status
             if !status.isComplete { scanIssues.append(ScanIssue(area: "Trash", message: "Trash could not be fully measured. Review it in Finder.")) }
-            scanCompletedAreas.append("Home Trash")
+            scanCompletedAreas.append(status.isComplete ? "Home Trash" : "Home Trash" + Self.partialAreaSuffix)
           }
           for index in cleanupTargets.indices where cleanupTargets[index].category == .developerJunk {
             if devItems.contains(where: { dev in
@@ -85,7 +96,7 @@ extension AppViewModel {
             }) { cleanupTargets[index].isSelected = false }
           }
           refreshRecommendations()
-          statusMessage = "\(scanCompletedAreas.count) of 5 checks complete — results are available"
+          statusMessage = "\(scanCompletedAreas.count) of 5 checks done — results are available"
         }
       }
       guard !Task.isCancelled else { finishCancelledOperation(); return }

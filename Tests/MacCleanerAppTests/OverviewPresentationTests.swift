@@ -37,6 +37,14 @@ final class OverviewPresentationTests: XCTestCase {
     XCTAssertEqual(cleaner.detail, "2 items · some need review")
   }
 
+  func testAnAreaWithProblemsIsPartlyCheckedNotComplete() {
+    XCTAssertEqual(AppViewModel.checkedArea("Downloads", issues: [], cancelled: false), "Downloads")
+    let partial = AppViewModel.checkedArea("Downloads", issues: [ScanIssue(area: "Downloads", message: "Denied")], cancelled: false)
+    XCTAssertTrue(partial.hasSuffix(AppViewModel.partialAreaSuffix))
+    XCTAssertTrue(AppViewModel.checkedArea("Developer", issues: [], cancelled: true).hasSuffix(AppViewModel.partialAreaSuffix),
+      "A stopped area isn't fully checked")
+  }
+
   private func category(_ destination: Recommendation.Destination, _ bytes: Int64) -> OverviewPresentation.Category {
     let style = OverviewPresentation.style(destination)
     return .init(destination: destination, title: style.title, symbol: style.symbol, swatch: style.swatch,
