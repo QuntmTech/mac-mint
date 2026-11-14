@@ -166,7 +166,8 @@ public struct PlanItem: Identifiable, Codable, Hashable, Sendable {
     PlanItem(
       url: item.url, displayName: item.url.lastPathComponent, kind: .appLeftover,
       expectedBytes: item.bytes, reason: item.reason, source: "Removed apps", needsAttention: true,
-      identity: item.identity)
+      // If its app turns out to be installed and is running when the move happens, it's skipped.
+      identity: item.identity, ownerBundleID: item.bundleID)
   }
 
   public static func largeFile(_ file: LargeFile) -> PlanItem {

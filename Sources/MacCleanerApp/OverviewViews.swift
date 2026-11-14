@@ -21,7 +21,7 @@ enum OverviewPresentation {
     case .developer: return ("Developer", "hammer.fill", AppTheme.Swatch.orange)
     case .cleaner: return ("Caches & cleanup", "archivebox.fill", AppTheme.Swatch.sky)
     case .downloads: return ("Downloads", "arrow.down.circle.fill", AppTheme.Swatch.teal)
-    case .removedApps: return ("Removed-app data", "folder.badge.questionmark", AppTheme.Swatch.rose)
+    case .removedApps: return ("App data with no owner", "folder.badge.questionmark", AppTheme.Swatch.rose)
     case .applications: return ("Unused apps", "app.dashed", AppTheme.Swatch.violet)
     case .photos: return ("Screenshots", "camera.viewfinder", AppTheme.Swatch.pink)
     case .duplicates: return ("Duplicates", "square.on.square.fill", AppTheme.Swatch.indigo)

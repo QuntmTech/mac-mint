@@ -122,6 +122,49 @@ final class OrphanScannerTests: XCTestCase {
     XCTAssertFalse(items.contains { $0.bundleID == "com.jetbrains.ide" })
   }
 
+  func testAnUnreadableAppFolderMeansNothingIsCalledOwnerless() async throws {
+    let home = makeTempDirectory()
+    let locked = home.appendingPathComponent("Apps/Locked")
+    defer {
+      try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path)
+      try? fm.removeItem(at: home)
+    }
+    try makeApp(locked, "Hidden.app", id: "com.other.hidden")
+    try fm.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+    let data = try write(home, "Library/Caches/com.other.hidden/c")
+    try age(data.deletingLastPathComponent(), days: 400)
+
+    let report = await scanner(home, apps: [home.appendingPathComponent("Apps")]).scan()
+    XCTAssertTrue(report.value.allSatisfy { $0.confidence == .low }, "The app may live in the folder that couldn't be read")
+    XCTAssertTrue(report.issues.contains { $0.area == "App inventory" })
+    XCTAssertTrue(report.value.first?.reason.contains("Not every app location could be checked") ?? false)
+  }
+
+  func testOnlyCachesWithNoOwnerAreRecommendedAndTheyCarryTheirApp() async throws {
+    let home = makeTempDirectory()
+    defer { try? fm.removeItem(at: home) }
+    let cache = try write(home, "Library/Caches/com.gone.editor/c").deletingLastPathComponent()
+    let prefs = try write(home, "Library/Preferences/com.gone.editor.plist")
+    let support = try write(home, "Library/Application Support/com.gone.editor/library.db").deletingLastPathComponent()
+    for url in [cache, prefs, support] { try age(url, days: 400) }
+
+    let orphans = await scanner(home, apps: []).scan().value
+    XCTAssertEqual(orphans.count, 3)
+    XCTAssertTrue(orphans.allSatisfy { $0.confidence == .medium })
+    var inputs = RecommendationEngine.Inputs()
+    // Real sizes are tiny; recommendations need at least 20 MB to show.
+    inputs.orphans = orphans.map {
+      OrphanedItem(url: $0.url, bundleID: $0.bundleID, location: $0.location, bytes: 50 * 1_048_576,
+        modified: $0.modified, identity: $0.identity, confidence: $0.confidence, reason: $0.reason)
+    }
+    let rec = try XCTUnwrap(RecommendationEngine.recommend(inputs).first { $0.id == "removed-apps" })
+    XCTAssertEqual(rec.items.map(\.url.lastPathComponent), ["com.gone.editor"], "Only the cache; settings and saved data stay for review")
+    XCTAssertEqual(rec.items.first?.url.deletingLastPathComponent().lastPathComponent, "Caches")
+    XCTAssertFalse(rec.title.contains("deleted"), "No owner found isn't proof the app was deleted")
+    XCTAssertTrue(rec.detail.contains("2 other items"))
+    XCTAssertEqual(rec.items.first?.ownerBundleID, "com.gone.editor", "The move skips it if that app is running")
+  }
+
   private func scanner(_ home: URL, apps: [URL]) -> OrphanScanner {
     OrphanScanner(homeDirectory: home, applicationRoots: apps, helperRoots: [])
   }

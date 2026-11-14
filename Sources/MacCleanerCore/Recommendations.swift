@@ -52,6 +52,10 @@ public struct Recommendation: Identifiable, Hashable, Sendable {
 }
 
 public enum RecommendationEngine {
+  /// Orphaned data that apps recreate. Preferences, Application Support, containers, cookies,
+  /// web storage and saved state can be the only copy of someone's settings or data.
+  static let regenerableOrphanLocations: Set<String> = ["Caches", "HTTP Storage"]
+
   public struct Inputs: Sendable {
     public var cleanupTargets: [CleanupTarget] = []
     public var developer: [DevStorageItem] = []
@@ -143,12 +147,16 @@ public enum RecommendationEngine {
       detail: summary(neverOpened.map(\.kind)) + ", downloaded months ago, with no recorded opens.",
       confidence: .likely, items: neverItems, destination: .downloads)
 
-    // 5. Leftovers from deleted apps (only the stronger matches).
-    let orphans = inputs.orphans.filter { $0.confidence == .medium }
+    // 5. App data with no owner found. No owner in the places checked is not proof the app was
+    // deleted, and settings, saved data and containers are worth keeping for a reinstall: only
+    // caches from the stronger matches are recommended. Everything else stays in Removed Apps.
+    let orphans = inputs.orphans.filter { $0.confidence == .medium && Self.regenerableOrphanLocations.contains($0.location) }
     let orphanItems = take(orphans.map(PlanItem.orphan))
+    let heldBack = inputs.orphans.count - orphans.count
     add(
-      "removed-apps", symbol: "folder.badge.questionmark", title: "Leftovers from apps you've deleted",
-      detail: "\(Set(orphans.map(\.bundleID)).count) removed apps left settings and caches behind.",
+      "removed-apps", symbol: "folder.badge.questionmark", title: "App caches with no owner found",
+      detail: "Caches for \(Set(orphans.map(\.bundleID)).count) app ID\(Set(orphans.map(\.bundleID)).count == 1 ? "" : "s") no installed app claims."
+        + (heldBack > 0 ? " \(heldBack) other item\(heldBack == 1 ? "" : "s") (settings and saved data) \(heldBack == 1 ? "is" : "are") left in Removed Apps to review one by one." : ""),
       confidence: .likely, items: orphanItems, destination: .removedApps)
 
     // 6. Downloads opened long ago (or with no usage record).

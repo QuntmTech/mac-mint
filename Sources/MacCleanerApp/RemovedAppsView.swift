@@ -59,7 +59,7 @@ struct RemovedAppsView: View {
       } else if model.orphans.isEmpty {
         EmptyState(
           icon: model.orphansScanned ? "checkmark.seal" : "folder.badge.questionmark",
-          title: model.orphansScanned ? "No leftovers found" : "Find leftovers from apps you've deleted",
+          title: model.orphansScanned ? "No leftovers found" : "Find app data with no owner",
           detail:
             "Only data whose app identifier no installed app claims is listed. macOS's own data is never included.",
           actionTitle: model.orphansScanned ? nil : "Find Leftovers",

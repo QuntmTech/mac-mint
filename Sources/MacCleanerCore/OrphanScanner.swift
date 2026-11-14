@@ -88,10 +88,15 @@ public actor OrphanScanner {
   {
     let started = Date()
     // Exclusions limit what is offered, never what counts as evidence that an app is installed.
-    let installed = installedBundleIDs().union(knownBundleIDs.map { $0.lowercased() })
+    let inventory = installedInventory()
+    let installed = inventory.ids.union(knownBundleIDs.map { $0.lowercased() })
     let vendors = Set(installed.compactMap(Self.vendor))
     var items: [OrphanedItem] = []
-    var issues: [ScanIssue] = []
+    var issues: [ScanIssue] = inventory.failures
+    // "No owner found" only means something when every app location was read. If one couldn't be,
+    // or the search stopped early, an owner may simply have been missed: nothing is called
+    // ownerless with confidence, so nothing here is recommended.
+    let inventoryComplete = inventory.failures.isEmpty && !Task.isCancelled
 
     for (relative, label) in Self.locations {
       if Task.isCancelled { break }
@@ -114,8 +119,10 @@ public actor OrphanScanner {
 
         let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         let sameVendor = Self.vendor(candidate).map(vendors.contains) ?? false
-        let confidence = Self.confidence(modified: modified, recentWindow: recentWindow, sameVendor: sameVendor)
+        let confidence = inventoryComplete
+          ? Self.confidence(modified: modified, recentWindow: recentWindow, sameVendor: sameVendor) : .low
         var reason = "No matching owner was found in the inspected app locations for \(candidate)."
+        if !inventoryComplete { reason += " Not every app location could be checked, so its app may still be installed." }
         if sameVendor { reason += " Another app from the same developer is installed and may share it." }
         if let modified, Date().timeIntervalSince(modified) < recentWindow {
           reason += " Changed recently — something may still use it."
@@ -140,24 +147,48 @@ public actor OrphanScanner {
 
   // MARK: Installed apps
 
-  func installedBundleIDs() -> Set<String> {
+  func installedBundleIDs() -> Set<String> { installedInventory().ids }
+
+  /// Every app and helper identifier found, and each app location that couldn't be read. A
+  /// location that doesn't exist is fine; one that exists but can't be read (or a folder inside
+  /// an Applications root that can't be) means an installed app could have been missed.
+  func installedInventory() -> (ids: Set<String>, failures: [ScanIssue]) {
     var ids: Set<String> = []
+    var failures: [ScanIssue] = []
     for root in applicationRoots {
       if Task.isCancelled { break }
+      guard fileManager.fileExists(atPath: root.path) else { continue }
+      var unreadable: [String] = []
       guard
         let enumerator = fileManager.enumerator(
           at: root, includingPropertiesForKeys: [.isDirectoryKey],
-          options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { _, _ in true })
-      else { continue }
+          options: [.skipsHiddenFiles, .skipsPackageDescendants], errorHandler: { url, _ in
+            unreadable.append(url.path)
+            return true
+          })
+      else {
+        failures.append(ScanIssue(area: "App inventory", path: root.path, message: "Couldn't read this app folder, so apps in it couldn't be checked."))
+        continue
+      }
       FileSystem.walk(enumerator) { url in
         if Task.isCancelled { return .stop }
         guard url.pathExtension.lowercased() == "app" else { return .continue }
         ids.formUnion(bundleIDs(inApp: url))
         return .skipDescendants
       }
+      for path in unreadable.prefix(5) {
+        failures.append(ScanIssue(area: "App inventory", path: path, message: "Couldn't read this folder, so apps in it couldn't be checked."))
+      }
     }
-    for root in helperRoots { ids.formUnion(helperBundleIDs(in: root, depth: 6)) }
-    return ids
+    for root in helperRoots {
+      // Vendors' private folders inside these are often unreadable and rarely hold apps; only a
+      // helper location that can't be listed at all counts as a gap.
+      if fileManager.fileExists(atPath: root.path), (try? fileManager.contentsOfDirectory(atPath: root.path)) == nil {
+        failures.append(ScanIssue(area: "App inventory", path: root.path, message: "Couldn't read this folder, so helper apps in it couldn't be checked."))
+      }
+      ids.formUnion(helperBundleIDs(in: root, depth: 6))
+    }
+    return (ids, failures)
   }
 
   /// Vendor-installed apps and helpers outside Applications (updaters, Toolbox-managed IDEs,
