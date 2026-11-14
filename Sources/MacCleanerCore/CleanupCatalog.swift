@@ -47,8 +47,10 @@ public struct CleanupCatalog: Sendable {
         ]),
       .init(
         category: .userLogs, name: "Application logs",
-        url: h.appendingPathComponent("Library/Logs"), risk: .safe,
-        reason: "Historical per-user logs that apps recreate as needed.", expandChildren: true,
+        // Apps write new logs, but removed logs don't come back: they can be the only record
+        // of a crash or problem. Review, never a rebuildable default.
+        url: h.appendingPathComponent("Library/Logs"), risk: .review,
+        reason: "Past logs. Apps write new ones, but removed logs don't come back, and they can help explain a crash or problem.", expandChildren: true,
         excludedChildNames: ["DiagnosticReports"]),
 
       .init(

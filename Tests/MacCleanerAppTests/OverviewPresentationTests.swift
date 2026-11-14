@@ -8,7 +8,7 @@ final class OverviewPresentationTests: XCTestCase {
 
   private func cache(_ name: String, _ megabytes: Int64) -> CleanupTarget {
     CleanupTarget(category: .userCaches, url: URL(fileURLWithPath: "/Users/test/Library/Caches/\(name)"),
-      displayName: name, size: megabytes * megabyte, risk: .safe, reason: "Rebuildable")
+      displayName: name, size: megabytes * megabyte, risk: .safe, reason: "Rebuildable", ownerBundleID: name)
   }
 
   func testCategoriesGroupQuickScanFindingsByAreaLargestFirst() {

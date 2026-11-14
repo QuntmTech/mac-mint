@@ -204,7 +204,22 @@ final class SmartCareTests: XCTestCase {
   private func target(_ category: CleanupCategory, _ path: String, mb: Int64, risk: CleanupRisk) -> CleanupTarget {
     CleanupTarget(
       category: category, url: URL(fileURLWithPath: path), displayName: URL(fileURLWithPath: path).lastPathComponent,
-      size: mb * 1_048_576, risk: risk, reason: "test")
+      size: mb * 1_048_576, risk: risk, reason: "test",
+      // Generic caches are only offered as rebuildable when their app is known.
+      ownerBundleID: category == .userCaches ? URL(fileURLWithPath: path).lastPathComponent : nil)
+  }
+
+  func testCachesWithNoKnownAppAreHeldBackAndCounted() {
+    var inputs = RecommendationEngine.Inputs()
+    inputs.now = now
+    let unknown = CleanupTarget(category: .userCaches, url: URL(fileURLWithPath: "/Users/u/Library/Caches/mystery"),
+      displayName: "mystery", size: 300 * 1_048_576, risk: .safe, reason: "test")
+    inputs.cleanupTargets = [target(.userCaches, "/Users/u/Library/Caches/com.a", mb: 100, risk: .safe), unknown]
+    let caches = RecommendationEngine.recommend(inputs).first { $0.id == "caches" }
+    XCTAssertEqual(caches?.items.map(\.url.lastPathComponent), ["com.a"], "An unknown owner can't be checked for being open")
+    XCTAssertTrue(caches?.detail.contains("1 cache with no known app") ?? false)
+    inputs.runningBundleIDs = ["com.a"]
+    XCTAssertNil(RecommendationEngine.recommend(inputs).first { $0.id == "caches" }, "Known open apps are skipped")
   }
 
   private func download(_ path: String, mb: Int64, neverOpened: Bool, idle: Int = 200) -> DownloadItem {

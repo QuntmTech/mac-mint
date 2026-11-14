@@ -51,6 +51,7 @@ public actor CleanupScanner {
         issues.append(contentsOf: accessIssues(measurement, area: rule.name, url: piece))
         guard measurement.bytes > 0 else { continue }
         let isWholeRule = piece.standardizedFileURL == rule.url.standardizedFileURL
+        let assessed = Self.assess(piece, rule: rule)
         results.append(
           CleanupTarget(
             category: rule.category,
@@ -58,10 +59,10 @@ public actor CleanupScanner {
             displayName: isWholeRule ? rule.name : "\(rule.name): \(piece.lastPathComponent)",
             detail: piece.path,
             size: measurement.bytes,
-            risk: rule.risk,
-            reason: rule.reason,
-            isSelected: rule.risk == .safe,
-            ownerBundleID: owner(of: piece, rule: rule),
+            risk: assessed.risk,
+            reason: assessed.reason,
+            isSelected: assessed.risk == .safe,
+            ownerBundleID: assessed.owner,
             identity: FileSystem.fileIdentity(at: piece)
           ))
       }
@@ -76,12 +77,23 @@ public actor CleanupScanner {
       wasCancelled: Task.isCancelled)
   }
 
-  /// Generic cache children are named after their app, so the running-app check can apply to them.
-  private func owner(of piece: URL, rule: CleanupRule) -> String? {
-    if let explicit = rule.ownerBundleID { return explicit }
-    guard rule.category == .userCaches else { return nil }
-    return OwnerResolver.hint(for: piece)?.bundleID
+  /// Generic cache and log children are named after their app, so the running-app check can
+  /// apply to them. Only an owner MacMint can identify can be checked: a generic cache whose
+  /// owner is unknown (or is a tool family with no single app) could be in use right now, so
+  /// it is left for review instead of being offered as rebuildable. The rule's own rating
+  /// applies otherwise.
+  static func assess(_ piece: URL, rule: CleanupRule) -> (risk: CleanupRisk, reason: String, owner: String?) {
+    if let explicit = rule.ownerBundleID { return (rule.risk, rule.reason, explicit) }
+    guard rule.category == .userCaches || rule.category == .userLogs else { return (rule.risk, rule.reason, nil) }
+    let owner = OwnerResolver.hint(for: piece)?.bundleID
+    if rule.category == .userCaches, rule.risk == .safe, owner == nil {
+      return (.review, Self.unknownOwnerReason, nil)
+    }
+    return (rule.risk, rule.reason, owner)
   }
+
+  public static let unknownOwnerReason =
+    "A cache MacMint can't match to an app, so it can't tell whether something is using it right now. Review it before removing."
 
   private func scanChildren(for rule: CleanupRule, ignoredPaths: Set<String>) -> (
     items: [CleanupTarget], issues: [ScanIssue]
@@ -104,6 +116,7 @@ public actor CleanupScanner {
           let measurement = FileSystem.measure(at: piece, fileManager: fileManager)
           issues.append(contentsOf: accessIssues(measurement, area: rule.name, url: piece))
           guard measurement.bytes > 0 else { continue }
+          let assessed = Self.assess(piece, rule: rule)
           items.append(
             CleanupTarget(
               category: rule.category,
@@ -113,10 +126,10 @@ public actor CleanupScanner {
                 : "\(entry.lastPathComponent)/\(piece.lastPathComponent)",
               detail: rule.name,
               size: measurement.bytes,
-              risk: rule.risk,
-              reason: rule.reason,
-              isSelected: rule.risk == .safe,
-              ownerBundleID: owner(of: piece, rule: rule),
+              risk: assessed.risk,
+              reason: assessed.reason,
+              isSelected: assessed.risk == .safe,
+              ownerBundleID: assessed.owner,
               identity: FileSystem.fileIdentity(at: piece)
             ))
         }

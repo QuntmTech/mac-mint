@@ -286,6 +286,10 @@ final class RunningOwnerTests: XCTestCase {
     XCTAssertEqual(owners["com.tinyspeck.slackmacgap"], "com.tinyspeck.slackmacgap")
     XCTAssertEqual(owners["Spotify"], "com.spotify.client")
     XCTAssertEqual(owners["unowned-cache"], .some(nil))
+    let risks = Dictionary(uniqueKeysWithValues: targets.map { ($0.url.lastPathComponent, $0.risk) })
+    XCTAssertEqual(risks["com.tinyspeck.slackmacgap"], .safe, "A cache with a known owner stays rebuildable")
+    XCTAssertEqual(risks["unowned-cache"], .review, "Nobody can be checked for an unknown cache, so it isn't offered as safe")
+    XCTAssertEqual(targets.first { $0.url.lastPathComponent == "unowned-cache" }?.isSelected, false)
 
     let slack = try XCTUnwrap(targets.first { $0.url.lastPathComponent == "com.tinyspeck.slackmacgap" })
     let executor = OperationExecutor(
@@ -332,5 +336,25 @@ final class MoveProofTests: XCTestCase {
     let outcome = try XCTUnwrap(report.outcomes.first)
     XCTAssertEqual(outcome.status, .uncertain)
     XCTAssertNil(outcome.receipt, "a receipt would claim the reviewed item is restorable from Trash")
+  }
+
+  func testLogsAreReviewOnlyAndCarryTheirOwner() async throws {
+    let fm = FileManager.default
+    let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? fm.removeItem(at: home) }
+    for name in ["com.tinyspeck.slackmacgap", "mystery-tool"] {
+      let dir = home.appendingPathComponent("Library/Logs/\(name)")
+      try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+      try Data(repeating: 1, count: 4096).write(to: dir.appendingPathComponent("run.log"))
+    }
+    let logs = await CleanupScanner(catalog: CleanupCatalog(homeDirectory: home)).scan()
+      .filter { $0.category == .userLogs }
+    XCTAssertEqual(logs.count, 2)
+    XCTAssertTrue(logs.allSatisfy { $0.risk == .review && !$0.isSelected }, "Removed logs don't come back")
+    XCTAssertEqual(logs.first { $0.url.lastPathComponent == "com.tinyspeck.slackmacgap" }?.ownerBundleID, "com.tinyspeck.slackmacgap")
+
+    var inputs = RecommendationEngine.Inputs()
+    inputs.cleanupTargets = logs
+    XCTAssertFalse(RecommendationEngine.recommend(inputs).contains { $0.id == "caches" }, "Logs are never in the rebuildable bundle")
   }
 }

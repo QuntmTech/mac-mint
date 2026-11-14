@@ -138,7 +138,7 @@ final class AppReliabilityTests: XCTestCase {
 
     let gib: Int64 = 1_073_741_824
     model.cleanupTargets = [CleanupTarget(category: .userCaches, url: folder.appendingPathComponent("Library/Caches/fixture"),
-      displayName: "Fixture cache", size: gib, risk: .safe, reason: "Rebuilds")]
+      displayName: "Fixture cache", size: gib, risk: .safe, reason: "Rebuilds", ownerBundleID: "com.example.fixture")]
     model.refreshRecommendations()
     XCTAssertFalse(model.recommendations.isEmpty)
     model.aiReview = try JSONDecoder().decode(AIReview.self, from: Data("""
@@ -170,8 +170,8 @@ final class AppReliabilityTests: XCTestCase {
     XCTAssertTrue(model.aiConsentPending)
     model.refreshRecommendations()
     XCTAssertTrue(model.aiConsentPending, "Unchanged context keeps the consent preview valid")
-    model.cleanupTargets = [CleanupTarget(category: .userLogs, url: folder.appendingPathComponent("Library/Logs/fixture"),
-      displayName: "Fixture logs", size: gib, risk: .safe, reason: "Rebuilds")]
+    model.cleanupTargets = [CleanupTarget(category: .userCaches, url: folder.appendingPathComponent("Library/Caches/other"),
+      displayName: "Other cache", size: gib, risk: .safe, reason: "Rebuilds", ownerBundleID: "com.example.other")]
     model.refreshRecommendations()
     XCTAssertFalse(model.aiConsentPending, "A changed context invalidates pending consent")
     XCTAssertNil(model.pendingAIAction)

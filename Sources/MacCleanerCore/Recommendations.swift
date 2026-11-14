@@ -97,14 +97,18 @@ public enum RecommendationEngine {
           count: count ?? items.count, confidence: confidence, items: items, destination: destination))
     }
 
-    // 1. Caches and logs that rebuild themselves.
-    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .userLogs, .browserCaches]
+    // 1. Caches that rebuild themselves. Only caches with an owner MacMint can check: the
+    // scanner leaves unknown-owner caches and all logs for review, so "skipped while open"
+    // is true for everything here. What was held back is said, not hidden.
+    let rebuildCategories: Set<CleanupCategory> = [.userCaches, .browserCaches]
     let caches = inputs.cleanupTargets.filter { $0.risk == .safe && rebuildCategories.contains($0.category)
-      && $0.ownerBundleID.map { !inputs.runningBundleIDs.contains($0) } != false }
+      && $0.ownerBundleID != nil && !inputs.runningBundleIDs.contains($0.ownerBundleID ?? "") }
+    let unconfirmed = inputs.cleanupTargets.filter { $0.category == .userCaches && $0.ownerBundleID == nil }.count
     let cacheItems = take(caches.map { PlanItem.cleanup($0) })
     add(
-      "caches", symbol: "shippingbox", title: "Caches and logs that rebuild themselves",
-      detail: "From \(cacheItems.count) apps and browsers. They're recreated as needed; data for apps that are open is skipped.",
+      "caches", symbol: "shippingbox", title: "Caches that rebuild themselves",
+      detail: "From \(cacheItems.count) app\(cacheItems.count == 1 ? "" : "s") and browsers MacMint can identify. Apps that are open are skipped."
+        + (unconfirmed > 0 ? " \(unconfirmed) cache\(unconfirmed == 1 ? "" : "s") with no known app \(unconfirmed == 1 ? "is" : "are") left in Cleanup for you to review." : ""),
       confidence: .safe, items: cacheItems, destination: .cleaner)
 
     // 2. Developer build data (idle, rebuildable) + developer cleanup rules.
