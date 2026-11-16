@@ -87,3 +87,43 @@ pub struct ScanReport<T> {
 pub fn path_id(path: &std::path::Path) -> String {
     crate::fs::comparison_key(path)
 }
+
+/// Something a scan found, as the window shows it. `id` is what the window sends back to build
+/// a plan; the engine keeps the matching [`crate::plan::PlanItem`] itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Candidate {
+    pub id: String,
+    pub path: PathBuf,
+    pub name: String,
+    pub group: String,
+    pub detail: String,
+    pub bytes: u64,
+    pub risk: Risk,
+    pub reason: String,
+    pub selected: bool,
+    pub blocked_by: Option<String>,
+    pub owner_name: Option<String>,
+    pub modified: Option<u64>,
+    /// A CleanupCategory name, or "developer", "largeFile", "duplicate", "download", "leftover".
+    pub category: String,
+}
+
+/// A candidate plus the plan item the engine will move if it's picked.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub candidate: Candidate,
+    pub item: crate::plan::PlanItem,
+}
+
+impl CleanupCategory {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::TempFiles => "tempFiles",
+            Self::AppCaches => "appCaches",
+            Self::LogsAndReports => "logsAndReports",
+            Self::DeveloperCaches => "developerCaches",
+            Self::Installers => "installers",
+        }
+    }
+}

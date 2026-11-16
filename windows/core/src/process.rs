@@ -10,6 +10,8 @@ pub struct ActiveProcess {
     /// Lowercase executable name, e.g. "chrome.exe" (or "node" off Windows).
     pub name: String,
     pub working_directory: Option<PathBuf>,
+    /// Where the program file lives (used to tell whether an app is running from a folder).
+    pub exe: Option<PathBuf>,
 }
 
 pub trait ProcessSource: Send + Sync {
@@ -27,7 +29,7 @@ impl ProcessSource for SystemProcesses {
         sys.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
-            ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always),
+            ProcessRefreshKind::nothing().with_cwd(UpdateKind::Always).with_exe(UpdateKind::Always),
         );
         Ok(sys.processes()
             .iter()
@@ -35,6 +37,7 @@ impl ProcessSource for SystemProcesses {
                 pid: pid.as_u32(),
                 name: p.name().to_string_lossy().to_lowercase(),
                 working_directory: p.cwd().map(Path::to_path_buf),
+                exe: p.exe().map(Path::to_path_buf),
             })
             .collect::<Vec<_>>())
     }
@@ -67,6 +70,9 @@ pub fn conflict(path: &Path, owners: &[String], project_folder: Option<&Path>, p
     if let Some(owner) = processes.iter().find(|p| owners.iter().any(|o| o.eq_ignore_ascii_case(&p.name))) {
         return Some(format!("{} is open and uses this. Close it and try again.", owner.name));
     }
+    if let Some(running) = processes.iter().find(|p| p.exe.as_deref().map(|e| crate::fs::is_inside_or_equal(e, path)).unwrap_or(false)) {
+        return Some(format!("{} is running from this folder. Close it and try again.", running.name));
+    }
     if let Some(inside) = processes.iter().find(|p| is_inside(p, path)) {
         return Some(format!("{} is working inside this folder right now. Try again when it's finished.", inside.name));
     }
@@ -83,7 +89,7 @@ mod tests {
     use super::*;
 
     fn proc(name: &str, cwd: &str) -> ActiveProcess {
-        ActiveProcess { pid: 1, name: name.into(), working_directory: Some(PathBuf::from(cwd)) }
+        ActiveProcess { pid: 1, name: name.into(), working_directory: Some(PathBuf::from(cwd)), exe: None }
     }
 
     #[test]

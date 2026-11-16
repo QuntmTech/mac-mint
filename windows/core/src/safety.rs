@@ -20,7 +20,8 @@ pub const PROFILE_DATA_NAMES: &[&str] = &[
 /// Chromium/Electron cache folder names that only ever hold disposable cache data.
 pub const CACHE_FOLDER_NAMES: &[&str] = &[
     "Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache",
-    "ShaderCache", "GrShaderCache", "CachedData", "CachedExtensionVSIXs", "cache2", "startupCache",
+    "ShaderCache", "GrShaderCache", "GraphiteDawnCache", "CachedData", "CachedExtensionVSIXs", "cache2", "startupCache",
+    "D3DSCache", "DXCache", "GLCache", "DxcCache", "VkCache",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +85,7 @@ impl SafetyPolicy {
             ]
             .iter()
             .any(|r| is_strictly_inside(path, r)),
-            CleanupCategory::DeveloperCaches => self.developer_cache_roots().iter().any(|r| is_strictly_inside(path, r)),
+            CleanupCategory::DeveloperCaches => self.developer_cache_roots().iter().any(|r| is_inside_or_equal(path, r)),
             CleanupCategory::Installers => {
                 is_strictly_inside(path, &f.downloads) && is_installer_name(path)
             }

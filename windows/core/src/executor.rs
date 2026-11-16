@@ -277,7 +277,7 @@ mod tests {
         outside.path = dir.path().join("Documents/notes");
         std::fs::create_dir_all(&outside.path).unwrap();
         let plan = crate::plan::plan("t", vec![owned.clone(), replaced.clone(), outside.clone()], &[]);
-        let procs = FixedProcesses(vec![ActiveProcess { pid: 1, name: "app.exe".into(), working_directory: None }]);
+        let procs = FixedProcesses(vec![ActiveProcess { pid: 1, name: "app.exe".into(), working_directory: None, exe: None }]);
         let exec = Executor { policy: &policy, trash: &trash, processes: &procs, journal: None, excluded: vec![] };
         let report = exec.run(&plan, &AtomicBool::new(false), |_| {});
         assert!(report.outcomes.iter().all(|o| o.status == OutcomeStatus::Skipped));
