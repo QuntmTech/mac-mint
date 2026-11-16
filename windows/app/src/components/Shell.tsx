@@ -23,7 +23,6 @@ export function Sidebar() {
     }
     if (p === "apps") return apps.data?.length ? String(apps.data.length) : null;
     if (p === "history") return history.data?.length ? String(history.data.length) : null;
-    if (p === "overview" && smartScan && smartScan.reclaimableBytes > 0) return null;
     return null;
   };
 
@@ -64,6 +63,7 @@ export function Sidebar() {
           <span className="truncate" style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{disk ? `${disk.name} (${disk.mount.replace(/\\$/, "")})` : "Reading disk…"}</span>
           {disk && <span className="caption num">{percent(fraction)} used</span>}
         </div>
+        <span className="disk-mini num" aria-hidden="true">{disk ? percent(fraction) : "—"}</span>
         <div className="bar" style={{ height: 6, display: "flex", width: "100%" }} role="img" aria-label={disk ? `Disk ${percent(fraction)} used` : "Disk space unknown"}>
           {disk && <>
             <span style={{ width: `${(found / disk.total) * 100}%`, background: "linear-gradient(90deg, var(--sky-start), var(--indigo-start))", borderRadius: 0 }} />

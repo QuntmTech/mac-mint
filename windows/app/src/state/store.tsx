@@ -161,7 +161,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let previous = "";
     const stop = on("scan-progress", (p) => {
       setScanProgress(p);
-      if (previous && previous !== p.area) setScanAreasDone((done) => (done.includes(previous) ? done : [...done, previous]));
+      const finished = previous;
+      if (finished && finished !== p.area) setScanAreasDone((done) => (done.includes(finished) ? done : [...done, finished]));
       previous = p.area;
     });
     call("run_smart_scan")
@@ -245,7 +246,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (flow.phase !== "review" || flow.plan.items.length === 0) return;
     const plan = flow.plan;
     setFlow({ phase: "running", plan, progress: { completed: 0, total: plan.items.length, bytesMoved: 0 }, cancelling: false });
-    setStatus(`${plan.title}: moving items to the Recycle Bin…`);
+    setStatus("Moving items to the Recycle Bin. Each one is checked first.");
     const stop = on("operation-progress", (progress) => {
       setFlow((current) => (current.phase === "running" ? { ...current, progress } : current));
     });

@@ -255,7 +255,7 @@ export function Tour() {
 
   if (!step || tourStep == null) return null;
   const hole = rect ? { left: rect.left - 6, top: rect.top - 6, width: rect.width + 12, height: rect.height + 12 } : null;
-  const labelRoom = step.target === "map" ? 200 : 0;
+  const labelRoom = step.target === "map" ? 290 : 0;
   const pos = place(rect, { w: 340, h: cardH }, size, labelRoom);
 
   return createPortal(

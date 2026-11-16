@@ -69,9 +69,9 @@ export function SignInForm({ onDone }: { onDone: (status: AccountStatus) => void
         {busy && <Spinner />}Sign In
       </button>
       <div className="row">
-        <button type="button" className="btn plain" onClick={() => void call("open_url", { url: "https://macmint.app/account/new" })}>Create an account</button>
+        <button type="button" className="btn plain" onClick={() => void call("open_url", { url: "https://macmint.co/signup" })}>Create an account</button>
         <span className="spacer" />
-        <button type="button" className="btn plain" onClick={() => void call("open_url", { url: "https://macmint.app/account/reset" })}>Forgot password?</button>
+        <button type="button" className="btn plain" onClick={() => void call("open_url", { url: "https://macmint.co/account" })}>Forgot password?</button>
       </div>
       <p className="caption">Scans, Storage, History and Restore work without signing in.</p>
     </form>
@@ -94,7 +94,7 @@ export function UnlockPanel({ status, onStatus }: { status: AccountStatus; onSta
       <p className="muted small">Signed in as {status.email}. {status.message ?? "There's no active plan on this account yet. Bought MacMint on the website? Check again to activate this PC."}</p>
       <div className="row wrap">
         <button className="btn commit" onClick={refresh} disabled={busy}>{busy && <Spinner />}Check My Purchase</button>
-        <button className="btn secondary" onClick={() => void call("open_url", { url: "https://macmint.app/buy" })}>Buy MacMint</button>
+        <button className="btn secondary" onClick={() => void call("open_url", { url: "https://macmint.co/#pricing" })}>Buy MacMint</button>
       </div>
     </div>
   );

@@ -167,7 +167,7 @@ export function LoadingState({ title, detail, icon = Search, swatch, progress, s
           </div>
         )}
       </div>
-      <SkeletonRows rows={rows} />
+      {rows > 0 && <SkeletonRows rows={rows} />}
       <span className="trust"><Eye size={13} aria-hidden="true" />Reading only. Nothing is changed while this runs.</span>
     </div>
   );

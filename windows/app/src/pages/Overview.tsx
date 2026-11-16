@@ -148,7 +148,7 @@ function Hero() {
           <>
             <h2><span className="num">{bytes(found)}</span> is worth a look.</h2>
             <p>{stale ? `These are estimates from ${relative(smartScan!.checkedAt)}. Scan again for current numbers.`
-              : `${top ? `${top.title} is the largest part. ` : ""}You check every item before anything moves to the Recycle Bin.`}</p>
+              : `${top ? `Biggest part: ${top.title} (${bytes(top.bytes)}). ` : ""}You check every item before anything moves to the Recycle Bin.`}</p>
           </>
         ) : (
           <>

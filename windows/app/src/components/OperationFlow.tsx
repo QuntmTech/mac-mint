@@ -3,7 +3,7 @@
 // with skipped items and a link to History. Mirrors OperationViews.swift.
 import { useState, type ReactNode } from "react";
 import {
-  AlertTriangle, Undo2, Check, ChevronDown, ChevronRight, Code2, Copy, Download, FileBox, FileText, FolderOpen, Hand,
+  AlertTriangle, Undo2, Check, ChevronDown, ChevronRight, Hammer, Copy, Download, FileBox, FileText, FolderOpen, Hand,
   LayoutGrid, ListChecks, ShieldCheck, Sparkles, Trash2, X, type LucideIcon,
 } from "lucide-react";
 import { call } from "../api/client";
@@ -15,7 +15,7 @@ import { Badge, Chip, Dialog, Eyebrow, SheetHeader, Spinner, TileIcon } from "./
 
 export function sourceLook(source: string): { icon: LucideIcon; swatch: Swatch } {
   switch (source) {
-    case "Developer": return { icon: Code2, swatch: "orange" };
+    case "Developer": return { icon: Hammer, swatch: "orange" };
     case "Large Files": return { icon: FileBox, swatch: "indigo" };
     case "Duplicates": return { icon: Copy, swatch: "indigo" };
     case "Old downloads": return { icon: Download, swatch: "teal" };

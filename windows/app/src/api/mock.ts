@@ -260,6 +260,8 @@ let apps: T.InstalledApp[] = [
   app({ id: "7zip", name: "7-Zip 24.08 (x64)", publisher: "Igor Pavlov", version: "24.08", bytes: 5.6 * MB, installDate: "2024-08-20", location: "C:\\Program Files\\7-Zip", scope: "allUsers" }),
 ];
 
+const removedApps = new Map<string, T.InstalledApp>();
+
 let startup: T.StartupItem[] = [
   { id: "su-discord", name: "Discord", command: LOCAL + "\\Discord\\Update.exe --processStart Discord.exe", location: "currentUserRun", enabled: true, canToggle: true, publisher: "Discord Inc." },
   { id: "su-spotify", name: "Spotify", command: ROAMING + "\\Spotify\\Spotify.exe /minimized /uri=spotify:autostart", location: "currentUserRun", enabled: true, canToggle: true, publisher: "Spotify AB" },
@@ -571,11 +573,12 @@ const handlers: Record<string, Handler> = {
     if (!a) return fail("That app isn't installed any more.");
     if (!a.canUninstall) return fail(`${a.name} is part of Windows and can't be uninstalled here.`);
     apps = apps.filter((x) => x.id !== id);
+    removedApps.set(a.id, a);
     return `${a.name}'s own uninstaller opened. Follow its steps, then come back to check for leftovers.`;
   },
   find_leftovers: async ({ id }) => {
     await sleep(700);
-    const a = apps.find((x) => x.id === id) ?? { name: id, id };
+    const a = apps.find((x) => x.id === id) ?? removedApps.get(id) ?? { name: id, id };
     const folder = a.name.split(" ")[0];
     const list = [
       cand({ id: `lo-${id}-roaming`, name: folder + " settings", path: `${ROAMING}\\${folder}`, bytes: (hash(id) % 40 + 4) * MB, category: "leftover", risk: "review", selected: false, group: "Roaming",
