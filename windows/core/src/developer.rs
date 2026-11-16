@@ -267,3 +267,44 @@ mod tests {
         assert!(!report.value[0].suggested, "changed today, so not suggested");
     }
 }
+
+impl DeveloperItem {
+    /// The window's view of this item plus the plan item the engine moves. Build tools working
+    /// in the project block the move (checked again right before it).
+    pub fn to_found(&self) -> crate::model::Found {
+        let reason = match self.kind {
+            ArtifactKind::GeneratedOutput => "Build output is made again the next time you build. Skipped while a build tool is running in this project.",
+            ArtifactKind::InstalledDependencies => "Installed packages. Reinstalling may not restore local edits or private packages.",
+        };
+        crate::model::Found {
+            candidate: crate::model::Candidate {
+                id: self.id.clone(),
+                path: self.path.clone(),
+                name: self.name.clone(),
+                group: self.project_name.clone(),
+                detail: self.detail.clone(),
+                bytes: self.bytes,
+                risk: self.risk,
+                reason: reason.into(),
+                selected: self.suggested,
+                blocked_by: None,
+                owner_name: Some(self.tool.clone()),
+                modified: self.last_activity,
+                category: "developer".into(),
+            },
+            item: crate::plan::PlanItem {
+                id: self.id.clone(),
+                path: self.path.clone(),
+                name: format!("{} in {}", self.name, self.project_name),
+                kind: crate::plan::ItemKind::DeveloperArtifact,
+                expected_bytes: self.bytes,
+                reason: reason.into(),
+                source: "Developer".into(),
+                needs_attention: self.risk != Risk::Safe,
+                identity: self.identity.clone(),
+                owner_processes: vec![],
+                project_folder: Some(self.project.clone()),
+            },
+        }
+    }
+}
