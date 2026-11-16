@@ -1,0 +1,169 @@
+name: Windows build
+
+on:
+  push:
+    paths:
+      - 'windows/**'
+      - 'VERSION'
+      - '.github/workflows/windows.yml'
+  pull_request:
+    paths:
+      - 'windows/**'
+      - 'VERSION'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and package (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The build number is the commit count of HEAD, as on the Mac.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustc --version
+      - name: Version and build number
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          BUILD=$(git rev-list --count HEAD)
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$BUILD" =~ ^[1-9][0-9]*$ ]]
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MACMINT_BUILD=$BUILD" >> "$GITHUB_ENV"
+          # The app's version comes from VERSION; the build number is compiled in.
+          node -e '
+            const fs = require("fs");
+            const p = "windows/app/src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(p, "utf8"));
+            c.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + "\n");
+          '
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" windows/app/src-tauri/Cargo.toml
+      - name: Engine tests on Windows
+        working-directory: windows/core
+        run: cargo test --locked
+      - name: Install window dependencies
+        working-directory: windows/app
+        run: npm ci
+      - name: Type-check and build the window
+        working-directory: windows/app
+        run: npm run build
+      - name: Build the app and installer
+        working-directory: windows/app
+        run: npx tauri build --ci
+      - name: Collect the installer
+        run: |
+          mkdir -p out
+          SETUP=$(ls windows/app/src-tauri/target/release/bundle/nsis/*-setup.exe | head -n 1)
+          [[ -f "$SETUP" ]]
+          cp "$SETUP" out/MacMint-Setup.exe
+          (cd out && sha256sum MacMint-Setup.exe | awk '{print $1}' > MacMint-Setup.exe.sha256)
+          echo "$MACMINT_BUILD" > out/build-number
+          echo "$VERSION" > out/version
+          ls -l out
+          cat out/MacMint-Setup.exe.sha256
+      - name: Install silently and start once
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath out\MacMint-Setup.exe -ArgumentList '/S' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installer exited with $($p.ExitCode)" }
+          $exe = Get-ChildItem -Path "$env:LOCALAPPDATA" -Filter 'macmint.exe' -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw 'Installed MacMint.exe not found' }
+          Write-Host "Installed at $($exe.FullName)"
+          $app = Start-Process -FilePath $exe.FullName -PassThru
+          Start-Sleep -Seconds 12
+          if ($app.HasExited) { throw "MacMint exited right after starting (code $($app.ExitCode))" }
+          Stop-Process -Id $app.Id -Force
+          Write-Host 'MacMint started and kept running.'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: MacMint-windows-${{ github.sha }}
+          path: out
+          if-no-files-found: error
+          retention-days: 14
+
+  # The only job with a write token runs no repository code: it publishes the tested installer
+  # as a developer pre-release and points windows-dev.json on the dev-feed release at it.
+  publish:
+    name: Publish Windows developer build
+    needs: build
+    if: github.repository == 'QuntmTech/mac-mint' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: windows-developer-publish
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: MacMint-windows-${{ github.sha }}
+          path: out
+      - name: Verify the installer
+        run: |
+          EXPECTED=$(cat out/MacMint-Setup.exe.sha256)
+          ACTUAL=$(sha256sum out/MacMint-Setup.exe | awk '{print $1}')
+          [[ "$EXPECTED" =~ ^[a-f0-9]{64}$ && "$ACTUAL" == "$EXPECTED" ]] || { echo "Digest mismatch"; exit 1; }
+          BUILD=$(cat out/build-number); VERSION=$(cat out/version)
+          [[ "$BUILD" =~ ^[1-9][0-9]*$ && "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "BUILD=$BUILD" >> "$GITHUB_ENV"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "SHA=$ACTUAL" >> "$GITHUB_ENV"
+      - name: Publish windows-dev-build pre-release
+        run: |
+          TAG="windows-dev-build-$BUILD"
+          printf 'Windows developer build %s of MacMint %s from commit %s.\n\nNot code-signed yet: Windows SmartScreen may say "Windows protected your PC". Choose More info, then Run anyway.\n\nSHA-256: %s\n' \
+            "$BUILD" "$VERSION" "$GITHUB_SHA" "$SHA" > notes.md
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" out/MacMint-Setup.exe out/MacMint-Setup.exe.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" out/MacMint-Setup.exe out/MacMint-Setup.exe.sha256 --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "MacMint for Windows developer build $BUILD" --notes-file notes.md
+          fi
+      - name: Point windows-dev.json at it
+        run: |
+          if ! gh release view dev-feed --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create dev-feed --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "MacMint developer feed" --notes "Update feeds for MacMint developer builds. Not a download."
+          fi
+          # A later run may already have published a newer build; never move the feed backwards.
+          PUBLISHED=0
+          if gh release download dev-feed --repo "$GITHUB_REPOSITORY" --pattern windows-dev.json --dir current; then
+            PUBLISHED=$(jq -r '.build // 0' current/windows-dev.json)
+          fi
+          if (( PUBLISHED > BUILD )); then
+            echo "The feed already offers build $PUBLISHED; keeping it."
+            exit 0
+          fi
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/windows-dev-build-$BUILD/MacMint-Setup.exe"
+          jq -n --arg v "$VERSION" --argjson b "$BUILD" --arg u "$URL" --arg s "$SHA" --arg c "$GITHUB_SHA" \
+            --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version: $v, build: $b, url: $u, sha256: $s, commit: $c, publishedAt: $t, notes: ("Developer build " + ($b|tostring) + ".")}' > windows-dev.json
+          cat windows-dev.json
+          gh release upload dev-feed windows-dev.json --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Keep the newest ten Windows developer builds
+        run: |
+          RELEASES=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName' | grep -E '^windows-dev-build-[0-9]+$' || true)
+          KEEP=$(printf '%s\n' "$RELEASES" | grep . | sort -t- -k4,4nr | head -n 10)
+          for TAG in $(printf '%s\n' "$RELEASES" | grep -vxF "$KEEP" || true); do
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          done
