@@ -246,9 +246,9 @@ async fn list_apps(state: St<'_>) -> R<Vec<InstalledApp>> {
 }
 
 #[tauri::command]
-fn uninstall_app(state: St, id: String) -> R<String> {
+async fn uninstall_app(state: St<'_>, id: String) -> R<String> {
     let app = state.apps.lock().unwrap().iter().find(|a| a.id == id).cloned().ok_or("That app isn't in the list anymore. Refresh it.")?;
-    if !state.account.try_lock().map(|a| a.unlocked()).unwrap_or(false) {
+    if !state.account.lock().await.unlocked() {
         return Err("Sign in with an active MacMint plan to uninstall apps.".into());
     }
     apps::uninstall(&app)

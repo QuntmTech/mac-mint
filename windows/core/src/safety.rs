@@ -55,8 +55,9 @@ impl SafetyPolicy {
         if !is_strictly_inside(path, &self.folders.home) {
             return Decision::Refused("Only items inside your user folder can be moved.".into());
         }
-        if is_inside_or_equal(path, &self.folders.app_data) {
-            return Decision::Refused("MacMint's own data is kept.".into());
+        let own = [&self.folders.app_data, &self.folders.local_app_data.join("MacMint"), &self.folders.local_app_data.join("Programs/MacMint")];
+        if own.iter().any(|d| is_inside_or_equal(path, d)) {
+            return Decision::Refused("MacMint's own files and data are kept.".into());
         }
         if is_link(path) {
             return Decision::Refused("Links and junctions are never moved; they can point anywhere.".into());

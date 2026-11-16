@@ -28,7 +28,7 @@ impl KnownFolders {
             roaming_app_data: root.join("AppData/Roaming"),
             temp: local.join("Temp"),
             downloads: root.join("Downloads"),
-            app_data: local.join("MacMint"),
+            app_data: local.join("co.macmint.windows"),
             local_app_data: local,
         }
     }
@@ -45,7 +45,7 @@ impl KnownFolders {
                 roaming_app_data: env("APPDATA").unwrap_or_else(|| home.join(r"AppData\Roaming")),
                 temp: env("TEMP").unwrap_or_else(|| local.join("Temp")),
                 downloads: home.join("Downloads"),
-                app_data: local.join("MacMint"),
+                app_data: local.join("co.macmint.windows"),
                 local_app_data: local,
                 home,
             }

@@ -80,7 +80,7 @@ fn matches_app(folder: &str, apps: &[InstalledApp]) -> bool {
 
 /// Names in AppData that belong to Windows itself or to very common shared runtimes.
 const SYSTEM_APPDATA: &[&str] = &[
-    "microsoft", "packages", "temp", "programs", "macmint", "comms", "connecteddevicesplatform", "crashdumps",
+    "microsoft", "packages", "temp", "programs", "macmint", "co.macmint.windows", "comms", "connecteddevicesplatform", "crashdumps",
     "d3dscache", "microsoft_corporation", "publishers", "virtualstore", "fontcache", "history", "tempstate",
     "squirreltemp", "elevateddiagnostics", "peerdistrepub", "placeholdertilelogofolder", "identities",
     "adobe", "apple", "apple computer", "intel", "nvidia", "nvidia corporation", "amd", "realtek", "npm", "npm-cache",
