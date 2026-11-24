@@ -10,8 +10,6 @@ on:
       items:
         description: Fixture size (files)
         default: "100000"
-  schedule:
-    - cron: "17 6 * * 1" # Mondays 06:17 UTC
   pull_request:
     paths:
       - "Sources/MacMintBench/**"

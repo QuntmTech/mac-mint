@@ -1,14 +1,41 @@
 name: macOS build
 
+# Runs only when Mac app code changes: on pull requests, and once more on main to publish the
+# developer build. Pushes to other branches don't run it (their pull request does), so each change
+# is built once, not twice. Website, backend and Windows changes never start a Mac build.
 on:
   push:
+    branches: [main]
+    paths:
+      - 'Sources/**'
+      - 'Tests/**'
+      - 'Resources/**'
+      - 'scripts/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'VERSION'
+      - '.github/workflows/macos.yml'
   pull_request:
+    paths:
+      - 'Sources/**'
+      - 'Tests/**'
+      - 'Resources/**'
+      - 'scripts/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+      - 'VERSION'
+      - '.github/workflows/macos.yml'
   # Dry run of the developer feed from any branch: builds, signs and verifies appcast-dev.xml
   # and uploads it as an artifact. Publishing happens only for pushes to main.
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# A newer push to the same pull request stops the older, now pointless build.
+concurrency:
+  group: macos-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -316,7 +343,7 @@ jobs:
   install-script:
     # Exercises scripts/install_dev_build.sh end to end on a disposable runner: download the
     # latest green main build, install it twice (the second install backs up the first), roll back.
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-15
     timeout-minutes: 10
     permissions:
